@@ -1,6 +1,6 @@
 # Privacy Contract
 
-SottoKey is local-first by design.
+Vani is local-first by design.
 
 ## V1 promises
 

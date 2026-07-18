@@ -2,7 +2,7 @@
 
 ## Product boundary
 
-SottoKey v1 is an Apple Silicon, English-only, local dictation app. Do not add
+Vani v1 is an Apple Silicon, English-only, local dictation app. Do not add
 cloud transcription, accounts, telemetry, plugins, meeting capture, or a generic
 LLM cleanup layer without an approved design change.
 

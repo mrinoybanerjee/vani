@@ -1,8 +1,8 @@
-# SottoKey
+# Vani
 
 Private, native voice typing for Apple Silicon Macs.
 
-SottoKey is an early-stage open-source macOS app. Hold a shortcut, speak English,
+Vani is an early-stage open-source macOS app. Hold a shortcut, speak English,
 release, and insert locally transcribed text into the focused app. Audio stays on
 the Mac.
 

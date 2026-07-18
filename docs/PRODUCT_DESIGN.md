@@ -2,7 +2,7 @@
 
 ## Product
 
-SottoKey is a native menu-bar dictation app for Apple Silicon Macs. Its v1 user is
+Vani is a native menu-bar dictation app for Apple Silicon Macs. Its v1 user is
 someone who wants private English voice typing without an account or cloud service.
 
 ## Core workflow

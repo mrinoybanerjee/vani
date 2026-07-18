@@ -11,3 +11,6 @@ These items are intentionally outside v1.
 - Team administration
 - Plugin or model marketplace
 - Background auto-updater
+- Screen or surrounding-text context awareness
+- Snippet expansion and command phrases
+- Multiple simultaneous speech engines

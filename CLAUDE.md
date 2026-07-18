@@ -1,4 +1,4 @@
-# SottoKey Agent Guide
+# Vani Agent Guide
 
 Follow [AGENTS.md](AGENTS.md). Read [docs/PLAN.md](docs/PLAN.md), [PRIVACY.md](PRIVACY.md),
 and [SECURITY.md](SECURITY.md) before changing product behavior.
