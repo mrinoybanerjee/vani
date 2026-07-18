@@ -1,0 +1,14 @@
+.DS_Store
+.build/
+.swiftpm/
+DerivedData/
+build/
+dist/
+*.xcarchive
+*.dSYM
+*.dmg
+*.zip
+*.log
+.env
+.env.*
+!.env.example
