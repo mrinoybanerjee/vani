@@ -11,7 +11,7 @@ public enum HoldShortcut: String, Codable, CaseIterable, Sendable, Equatable, Id
     switch self {
     case .rightOption: "Right Option"
     case .rightCommand: "Right Command"
-    case .function: "Fn"
+    case .function: "Left Fn"
     }
   }
 }
@@ -41,7 +41,7 @@ public struct VaniSettings: Codable, Sendable, Equatable {
   public var dictionary: [DictionaryEntry]
 
   public init(
-    shortcut: HoldShortcut = .rightOption,
+    shortcut: HoldShortcut = .function,
     launchAtLogin: Bool = false,
     historyEnabled: Bool = false,
     historyLimit: Int = 100,

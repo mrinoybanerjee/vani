@@ -19,7 +19,7 @@ credentials and notarization.
 
 ## What Works
 
-- Hold Right Option, Right Command, or Fn to dictate
+- Hold Left Fn to dictate by default; Right Option and Right Command are available
 - One-time English Parakeet TDT v2 model download
 - Exact model-revision manifest with per-file SHA-256 verification
 - Local microphone capture and Core ML transcription
@@ -43,7 +43,9 @@ cd vani
 ```
 
 Vani opens in the menu bar. Grant Microphone and Accessibility access, download the
-English model once, then hold Right Option while speaking. Development builds are
+English model once, then hold Left Fn while speaking. Set macOS Keyboard settings'
+"Press Globe key to" action to "Do Nothing" so it does not open the emoji panel.
+Development builds are
 ad-hoc signed; see [Building](docs/BUILDING.md) for the macOS permission caveat.
 
 ## Engineering

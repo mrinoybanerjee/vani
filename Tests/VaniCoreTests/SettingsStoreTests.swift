@@ -4,6 +4,12 @@ import Testing
 @testable import VaniCore
 
 @Test
+func defaultSettingsUseLeftFunctionShortcut() {
+  #expect(VaniSettings.default.shortcut == .function)
+  #expect(HoldShortcut.function.label == "Left Fn")
+}
+
+@Test
 func settingsRoundTrip() async throws {
   let suite = "VaniCoreTests.\(UUID().uuidString)"
   let store = SettingsStore(suiteName: suite)

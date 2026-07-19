@@ -310,7 +310,7 @@ real screenshots, accessibility inspection, and dogfood review.
 
 Design decisions:
 
-- Default shortcut is Right Option, with a small preset list rather than arbitrary
+- Default shortcut is Left Fn, with a small preset list rather than arbitrary
   shortcut composition in the first slice.
 - Overlay appears on the active display, centered 24 points above the safe bottom
   edge, and never activates or intercepts clicks.

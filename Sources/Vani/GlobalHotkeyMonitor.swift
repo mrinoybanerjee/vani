@@ -10,7 +10,7 @@ final class GlobalHotkeyMonitor {
 
   private var eventTap: CFMachPort?
   private var runLoopSource: CFRunLoopSource?
-  private var shortcut: HoldShortcut = .rightOption
+  private var shortcut: HoldShortcut = .function
   private var isPressed = false
 
   func start(shortcut: HoldShortcut) throws {
