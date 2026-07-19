@@ -3,6 +3,7 @@ import Foundation
 public enum RecoveryAction: String, Codable, Sendable, Equatable {
   case openMicrophoneSettings
   case openAccessibilitySettings
+  case openInputMonitoringSettings
   case retryPreparation
   case retryTranscription
   case retryInsertion
@@ -15,6 +16,7 @@ public enum VaniFailure: String, Error, Codable, CaseIterable, Sendable, Equatab
   case unsupportedHardware
   case microphonePermissionDenied
   case accessibilityPermissionDenied
+  case inputMonitoringPermissionDenied
   case audioDeviceUnavailable
   case audioCaptureFailed
   case recordingTooShort
@@ -41,11 +43,12 @@ public enum VaniFailure: String, Error, Codable, CaseIterable, Sendable, Equatab
     case .unsupportedHardware: "Apple Silicon required"
     case .microphonePermissionDenied: "Microphone access needed"
     case .accessibilityPermissionDenied: "Accessibility access needed"
+    case .inputMonitoringPermissionDenied: "Input Monitoring access needed"
     case .audioDeviceUnavailable: "Microphone unavailable"
     case .audioCaptureFailed: "Could not record"
     case .recordingTooShort: "Keep holding a little longer"
     case .recordingTooLong: "Recording limit reached"
-    case .noSpeechDetected: "No speech detected"
+    case .noSpeechDetected: "No speech recorded"
     case .modelUnavailable: "Speech model unavailable"
     case .modelDownloadFailed: "Model download failed"
     case .modelIntegrityFailed: "Speech model failed verification"
@@ -70,6 +73,8 @@ public enum VaniFailure: String, Error, Codable, CaseIterable, Sendable, Equatab
       "Allow Vani to use the microphone in System Settings."
     case .accessibilityPermissionDenied:
       "Your transcript is preserved. Allow Accessibility access or paste it manually."
+    case .inputMonitoringPermissionDenied:
+      "Allow Input Monitoring so Vani can detect the hold-to-talk shortcut."
     case .audioDeviceUnavailable:
       "Connect or select a microphone, then try again."
     case .audioCaptureFailed:
@@ -113,6 +118,7 @@ public enum VaniFailure: String, Error, Codable, CaseIterable, Sendable, Equatab
     switch self {
     case .microphonePermissionDenied: .openMicrophoneSettings
     case .accessibilityPermissionDenied: .openAccessibilitySettings
+    case .inputMonitoringPermissionDenied: .openInputMonitoringSettings
     case .modelUnavailable, .modelDownloadFailed, .modelIntegrityFailed, .modelLoadFailed:
       .retryPreparation
     case .transcriptionFailed: .retryTranscription
@@ -123,6 +129,10 @@ public enum VaniFailure: String, Error, Codable, CaseIterable, Sendable, Equatab
       .startAgain
     case .unsupportedHardware, .historyCorrupt, .operationCancelled: .none
     }
+  }
+
+  public var dismissesAutomatically: Bool {
+    self == .recordingTooShort || self == .noSpeechDetected
   }
 }
 

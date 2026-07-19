@@ -34,11 +34,10 @@ public final class SystemTextInserter: TextInserting {
           text as CFTypeRef
         )
         if result == .success {
-          guard verifyInsertion(text, before: before, element: element) else {
-            try copyForManualPaste(text)
-            return .manualPasteRequired
+          try await Task.sleep(for: .milliseconds(80))
+          if verifyInsertion(text, before: before, element: element) {
+            return .verified
           }
-          return .verified
         }
       }
 
@@ -76,7 +75,7 @@ public final class SystemTextInserter: TextInserting {
     }
     let transcriptChangeCount = pasteboard.changeCount
 
-    guard postPasteShortcut() else {
+    guard postPasteShortcut(to: target?.processIdentifier) else {
       return .manualPasteRequired
     }
 
@@ -174,8 +173,14 @@ public final class SystemTextInserter: TextInserting {
     return after.contains(text)
   }
 
-  private func postPasteShortcut() -> Bool {
-    guard let source = CGEventSource(stateID: .hidSystemState),
+  private func postPasteShortcut(to processIdentifier: Int32?) -> Bool {
+    guard CGPreflightPostEventAccess() else { return false }
+    guard let source = CGEventSource(stateID: .privateState),
+      let commandDown = CGEvent(
+        keyboardEventSource: source,
+        virtualKey: 55,
+        keyDown: true
+      ),
       let keyDown = CGEvent(
         keyboardEventSource: source,
         virtualKey: 9,
@@ -185,15 +190,29 @@ public final class SystemTextInserter: TextInserting {
         keyboardEventSource: source,
         virtualKey: 9,
         keyDown: false
+      ),
+      let commandUp = CGEvent(
+        keyboardEventSource: source,
+        virtualKey: 55,
+        keyDown: false
       )
     else {
       return false
     }
 
+    commandDown.flags = .maskCommand
     keyDown.flags = .maskCommand
     keyUp.flags = .maskCommand
-    keyDown.post(tap: .cghidEventTap)
-    keyUp.post(tap: .cghidEventTap)
+    let events = [commandDown, keyDown, keyUp, commandUp]
+    if let processIdentifier {
+      for event in events {
+        event.postToPid(processIdentifier)
+      }
+    } else {
+      for event in events {
+        event.post(tap: .cghidEventTap)
+      }
+    }
     return true
   }
 }

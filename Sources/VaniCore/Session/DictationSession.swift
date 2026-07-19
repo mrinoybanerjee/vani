@@ -12,6 +12,7 @@ public actor DictationSession {
   private let diagnostics: DiagnosticStore
   private let audioPolicy: AudioPolicy
   private let textPipeline: TextPipeline
+  private let transientFailureDuration: Duration
 
   private var machine = SessionStateMachine()
   private var settings: VaniSettings
@@ -35,7 +36,8 @@ public actor DictationSession {
     diagnostics: DiagnosticStore = .shared,
     audioPolicy: AudioPolicy = .default,
     textPipeline: TextPipeline = TextPipeline(),
-    settings: VaniSettings = .default
+    settings: VaniSettings = .default,
+    transientFailureDuration: Duration = .milliseconds(1_000)
   ) {
     self.audioCapture = audioCapture
     self.speechRecognizer = speechRecognizer
@@ -47,6 +49,7 @@ public actor DictationSession {
     self.audioPolicy = audioPolicy
     self.textPipeline = textPipeline
     self.settings = settings
+    self.transientFailureDuration = transientFailureDuration
   }
 
   public func setObserver(_ observer: Observer?) async {
@@ -187,8 +190,8 @@ public actor DictationSession {
         await fail(map(error, fallback: .insertionFailed))
       }
 
-    case .openMicrophoneSettings, .openAccessibilitySettings, .copyTranscript,
-      .startAgain, .none:
+    case .openMicrophoneSettings, .openAccessibilitySettings, .openInputMonitoringSettings,
+      .copyTranscript, .startAgain, .none:
       await recordIgnored("retry_unsupported", phase: machine.phase)
     }
   }
@@ -247,6 +250,7 @@ public actor DictationSession {
   public func permissionsWereRestored() async {
     guard machine.phase == .recoverableError,
       failure == .microphonePermissionDenied || failure == .accessibilityPermissionDenied
+        || failure == .inputMonitoringPermissionDenied
     else {
       return
     }
@@ -450,6 +454,20 @@ public actor DictationSession {
       }
     }
     await publishSnapshot()
+
+    guard failure.dismissesAutomatically else { return }
+    try? await Task.sleep(for: transientFailureDuration)
+    guard machine.phase == .recoverableError, self.failure == failure else { return }
+
+    await recovery.clear()
+    currentTarget = nil
+    self.failure = nil
+    do {
+      try await transition(modelReady ? .dismissToReady : .dismissToSetup)
+    } catch {
+      self.failure = .internalInvariant
+      await publishSnapshot()
+    }
   }
 
   private func transition(_ event: SessionEvent) async throws {
@@ -501,7 +519,9 @@ public actor DictationSession {
 
   private func diagnosticCategory(for failure: VaniFailure) -> DiagnosticCategory {
     switch failure {
-    case .microphonePermissionDenied, .accessibilityPermissionDenied: .permission
+    case .microphonePermissionDenied, .accessibilityPermissionDenied,
+      .inputMonitoringPermissionDenied:
+      .permission
     case .audioDeviceUnavailable, .audioCaptureFailed, .recordingTooShort,
       .recordingTooLong, .noSpeechDetected:
       .capture

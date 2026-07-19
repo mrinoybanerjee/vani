@@ -113,6 +113,11 @@ private struct SetupView: View {
         state: coordinator.accessibilityPermission,
         action: coordinator.requestAccessibilityPermission
       )
+      PermissionRow(
+        title: "Input Monitoring",
+        state: coordinator.inputMonitoringPermission,
+        action: coordinator.requestInputMonitoringPermission
+      )
       HStack(spacing: 10) {
         Image(
           systemName: coordinator.modelInstalled

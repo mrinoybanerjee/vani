@@ -10,6 +10,7 @@ final class AppCoordinator: ObservableObject {
   @Published private(set) var snapshot: SessionSnapshot = .initial
   @Published private(set) var microphonePermission: PermissionState = .unknown
   @Published private(set) var accessibilityPermission: PermissionState = .denied
+  @Published private(set) var inputMonitoringPermission: PermissionState = .denied
   @Published private(set) var modelInstalled = false
   @Published private(set) var diagnostics: [DiagnosticEvent] = []
   @Published private(set) var history: [TranscriptHistoryEntry] = []
@@ -63,11 +64,13 @@ final class AppCoordinator: ObservableObject {
     snapshot.phase == .ready
       && microphonePermission.isGranted
       && accessibilityPermission.isGranted
+      && inputMonitoringPermission.isGranted
   }
 
   var setupIncomplete: Bool {
     !microphonePermission.isGranted
       || !accessibilityPermission.isGranted
+      || !inputMonitoringPermission.isGranted
       || !modelInstalled
   }
 
@@ -138,6 +141,21 @@ final class AppCoordinator: ObservableObject {
     }
   }
 
+  func requestInputMonitoringPermission() {
+    _ = CGRequestListenEventAccess()
+    openPrivacyPane("Privacy_ListenEvent")
+    Task {
+      for _ in 0..<30 where !Task.isCancelled {
+        try? await Task.sleep(for: .seconds(1))
+        await refreshPermissions()
+        if inputMonitoringPermission.isGranted {
+          configureHotkey()
+          return
+        }
+      }
+    }
+  }
+
   func downloadModel() {
     Task {
       _ = await session.prepareModels(allowDownload: true)
@@ -156,6 +174,8 @@ final class AppCoordinator: ObservableObject {
       requestMicrophonePermission()
     case .openAccessibilitySettings:
       requestAccessibilityPermission()
+    case .openInputMonitoringSettings:
+      requestInputMonitoringPermission()
     case .retryPreparation, .retryTranscription, .retryInsertion:
       retry()
     case .copyTranscript:
@@ -171,6 +191,7 @@ final class AppCoordinator: ObservableObject {
     switch snapshot.failure?.recoveryAction {
     case .openMicrophoneSettings: "Allow Microphone"
     case .openAccessibilitySettings: "Allow Accessibility"
+    case .openInputMonitoringSettings: "Allow Input Monitoring"
     case .retryPreparation, .retryTranscription, .retryInsertion: "Retry"
     case .copyTranscript: "Copy Transcript"
     case .startAgain: "Start Again"
@@ -180,7 +201,8 @@ final class AppCoordinator: ObservableObject {
 
   var primaryRecoveryIcon: String {
     switch snapshot.failure?.recoveryAction {
-    case .openMicrophoneSettings, .openAccessibilitySettings: "gearshape"
+    case .openMicrophoneSettings, .openAccessibilitySettings, .openInputMonitoringSettings:
+      "gearshape"
     case .copyTranscript: "doc.on.doc"
     case .startAgain: "arrow.counterclockwise"
     default: "arrow.clockwise"
@@ -301,25 +323,32 @@ final class AppCoordinator: ObservableObject {
   private func refreshPermissions() async {
     let previousMicrophone = microphonePermission
     let previousAccessibility = accessibilityPermission
+    let previousInputMonitoring = inputMonitoringPermission
     let currentMicrophone = PermissionState.microphone
     let currentAccessibility = PermissionState.accessibility
+    let currentInputMonitoring = PermissionState.inputMonitoring
 
     microphonePermission = currentMicrophone
     accessibilityPermission = currentAccessibility
+    inputMonitoringPermission = currentInputMonitoring
 
     if previousMicrophone.isGranted, !currentMicrophone.isGranted {
       await session.permissionWasRevoked(.microphonePermissionDenied)
     } else if previousAccessibility.isGranted, !currentAccessibility.isGranted {
       await session.permissionWasRevoked(.accessibilityPermissionDenied)
+    } else if previousInputMonitoring.isGranted, !currentInputMonitoring.isGranted {
+      await session.permissionWasRevoked(.inputMonitoringPermissionDenied)
     }
 
     if currentMicrophone.isGranted, currentAccessibility.isGranted,
+      currentInputMonitoring.isGranted,
       !previousMicrophone.isGranted || !previousAccessibility.isGranted
+        || !previousInputMonitoring.isGranted
     {
       await session.permissionsWereRestored()
     }
 
-    if !accessibilityPermission.isGranted {
+    if !accessibilityPermission.isGranted || !inputMonitoringPermission.isGranted {
       hotkeyMonitor.stop()
     }
   }
@@ -337,7 +366,7 @@ final class AppCoordinator: ObservableObject {
   }
 
   private func configureHotkey() {
-    guard accessibilityPermission.isGranted else {
+    guard accessibilityPermission.isGranted, inputMonitoringPermission.isGranted else {
       hotkeyMonitor.stop()
       return
     }
@@ -345,7 +374,7 @@ final class AppCoordinator: ObservableObject {
       try hotkeyMonitor.start(shortcut: settings.shortcut)
       settingsError = nil
     } catch {
-      settingsError = "The global shortcut could not start. Recheck Accessibility permission."
+      settingsError = "The global shortcut could not start. Recheck Input Monitoring."
     }
   }
 

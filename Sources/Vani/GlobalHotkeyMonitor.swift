@@ -1,3 +1,4 @@
+import AppKit
 import ApplicationServices
 import CoreGraphics
 import Foundation
@@ -10,6 +11,8 @@ final class GlobalHotkeyMonitor {
 
   private var eventTap: CFMachPort?
   private var runLoopSource: CFRunLoopSource?
+  private var globalMonitor: Any?
+  private var localMonitor: Any?
   private var shortcut: HoldShortcut = .function
   private var isPressed = false
 
@@ -17,6 +20,9 @@ final class GlobalHotkeyMonitor {
     stop()
     guard AXIsProcessTrusted() else {
       throw VaniFailure.accessibilityPermissionDenied
+    }
+    guard CGPreflightListenEventAccess() else {
+      throw VaniFailure.inputMonitoringPermissionDenied
     }
 
     self.shortcut = shortcut
@@ -31,7 +37,7 @@ final class GlobalHotkeyMonitor {
         userInfo: Unmanaged.passUnretained(self).toOpaque()
       )
     else {
-      throw VaniFailure.accessibilityPermissionDenied
+      throw VaniFailure.inputMonitoringPermissionDenied
     }
 
     let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
@@ -39,6 +45,7 @@ final class GlobalHotkeyMonitor {
     CGEvent.tapEnable(tap: tap, enable: true)
     eventTap = tap
     runLoopSource = source
+    installAppKitMonitors()
   }
 
   func stop() {
@@ -48,9 +55,59 @@ final class GlobalHotkeyMonitor {
     if let eventTap {
       CFMachPortInvalidate(eventTap)
     }
+    if let globalMonitor {
+      NSEvent.removeMonitor(globalMonitor)
+    }
+    if let localMonitor {
+      NSEvent.removeMonitor(localMonitor)
+    }
     runLoopSource = nil
     eventTap = nil
+    globalMonitor = nil
+    localMonitor = nil
     isPressed = false
+  }
+
+  private func installAppKitMonitors() {
+    globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: .flagsChanged) {
+      [weak self] event in
+      let keyCode = Int64(event.keyCode)
+      let functionModifierIsSet = event.modifierFlags.contains(.function)
+      Task { @MainActor [weak self] in
+        self?.handleModifierEvent(
+          keyCode: keyCode,
+          functionModifierIsSet: functionModifierIsSet
+        )
+      }
+    }
+    localMonitor = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) {
+      [weak self] event in
+      let keyCode = Int64(event.keyCode)
+      let functionModifierIsSet = event.modifierFlags.contains(.function)
+      Task { @MainActor [weak self] in
+        self?.handleModifierEvent(
+          keyCode: keyCode,
+          functionModifierIsSet: functionModifierIsSet
+        )
+      }
+      return event
+    }
+  }
+
+  private func handleModifierEvent(
+    keyCode: Int64,
+    functionModifierIsSet: Bool
+  ) {
+    let keyStateIsPressed = CGEventSource.keyState(
+      .combinedSessionState,
+      key: CGKeyCode(keyCode)
+    )
+    handle(
+      typeRawValue: CGEventType.flagsChanged.rawValue,
+      keyCode: keyCode,
+      keyStateIsPressed: keyStateIsPressed,
+      functionModifierIsSet: functionModifierIsSet
+    )
   }
 
   private func handle(
@@ -66,7 +123,9 @@ final class GlobalHotkeyMonitor {
       }
       return
     }
-    guard type == .flagsChanged, keyCode == shortcut.keyCode else { return }
+    guard type == .flagsChanged, shortcut.matchesModifierEvent(keyCode: keyCode) else {
+      return
+    }
     let keyIsPressed = shortcut.resolvedPressedState(
       keyStateIsPressed: keyStateIsPressed,
       functionModifierIsSet: functionModifierIsSet
@@ -74,6 +133,10 @@ final class GlobalHotkeyMonitor {
 
     guard keyIsPressed != isPressed else { return }
     isPressed = keyIsPressed
+    VaniLog.event(
+      category: .capture,
+      code: keyIsPressed ? "shortcut_pressed" : "shortcut_released"
+    )
     if keyIsPressed {
       onPress?()
     } else {
@@ -88,14 +151,16 @@ final class GlobalHotkeyMonitor {
       .fromOpaque(userInfo)
       .takeUnretainedValue()
     let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
-    let keyStateIsPressed = CGEventSource.keyState(
-      .combinedSessionState,
-      key: CGKeyCode(keyCode)
-    )
-    let functionModifierIsSet = event.flags.contains(.maskSecondaryFn)
     let typeRawValue = type.rawValue
 
     Task { @MainActor in
+      let keyStateIsPressed = CGEventSource.keyState(
+        .combinedSessionState,
+        key: CGKeyCode(keyCode)
+      )
+      let functionModifierIsSet = CGEventSource.flagsState(
+        .combinedSessionState
+      ).contains(.maskSecondaryFn)
       monitor.handle(
         typeRawValue: typeRawValue,
         keyCode: keyCode,
@@ -104,15 +169,5 @@ final class GlobalHotkeyMonitor {
       )
     }
     return Unmanaged.passUnretained(event)
-  }
-}
-
-extension HoldShortcut {
-  fileprivate var keyCode: Int64 {
-    switch self {
-    case .rightOption: 61
-    case .rightCommand: 54
-    case .function: 63
-    }
   }
 }

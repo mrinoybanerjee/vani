@@ -20,4 +20,8 @@ enum PermissionState: String, Equatable {
   static var accessibility: PermissionState {
     AXIsProcessTrusted() ? .granted : .denied
   }
+
+  static var inputMonitoring: PermissionState {
+    CGPreflightListenEventAccess() ? .granted : .denied
+  }
 }

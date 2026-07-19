@@ -131,6 +131,33 @@ func dictationSessionCompletesTheVerifiedHappyPath() async throws {
 }
 
 @Test @MainActor
+func silentCaptureShowsNoticeThenReturnsToReady() async throws {
+  let diagnostics = DiagnosticStore()
+  let speech = MockSpeechRecognizer(results: [])
+  let session = DictationSession(
+    audioCapture: MockAudioCapture(
+      audio: CapturedAudio(samples: Array(repeating: 0, count: 8_000))
+    ),
+    speechRecognizer: speech,
+    textInserter: MockTextInserter(results: []),
+    focusProvider: MockFocusProvider(),
+    diagnostics: diagnostics,
+    transientFailureDuration: .milliseconds(1)
+  )
+
+  #expect(await session.prepareModels(allowDownload: false))
+  await session.beginDictation()
+  await session.endDictation()
+
+  let snapshot = await session.snapshot()
+  #expect(snapshot.phase == .ready)
+  #expect(snapshot.failure == nil)
+  #expect(!snapshot.hasRecoverableTranscript)
+  #expect(await speech.transcribeCount == 0)
+  #expect(await diagnostics.snapshot().contains { $0.code == "noSpeechDetected" })
+}
+
+@Test @MainActor
 func duplicateStartAndStopEventsDoNotTouchAdaptersTwice() async throws {
   let audio = MockAudioCapture()
   let speech = MockSpeechRecognizer(results: [.success(speechResult("hello"))])

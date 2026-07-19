@@ -29,6 +29,10 @@ func functionShortcutUsesEventModifierState() {
       functionModifierIsSet: false
     )
   )
+  #expect(HoldShortcut.function.matchesModifierEvent(keyCode: 63))
+  #expect(HoldShortcut.function.matchesModifierEvent(keyCode: 0))
+  #expect(HoldShortcut.rightOption.matchesModifierEvent(keyCode: 61))
+  #expect(!HoldShortcut.rightOption.matchesModifierEvent(keyCode: 58))
 }
 
 @Test

@@ -35,7 +35,9 @@ public enum VaniLog {
 
   private static func category(for failure: VaniFailure) -> DiagnosticCategory {
     switch failure {
-    case .microphonePermissionDenied, .accessibilityPermissionDenied: .permission
+    case .microphonePermissionDenied, .accessibilityPermissionDenied,
+      .inputMonitoringPermissionDenied:
+      .permission
     case .audioDeviceUnavailable, .audioCaptureFailed, .recordingTooShort,
       .recordingTooLong, .noSpeechDetected:
       .capture

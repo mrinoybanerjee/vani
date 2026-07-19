@@ -21,6 +21,14 @@ public enum HoldShortcut: String, Codable, CaseIterable, Sendable, Equatable, Id
   ) -> Bool {
     self == .function ? functionModifierIsSet : keyStateIsPressed
   }
+
+  public func matchesModifierEvent(keyCode: Int64) -> Bool {
+    switch self {
+    case .rightOption: keyCode == 61
+    case .rightCommand: keyCode == 54
+    case .function: true
+    }
+  }
 }
 
 public struct DictionaryEntry: Identifiable, Codable, Sendable, Equatable {

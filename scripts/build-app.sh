@@ -7,7 +7,15 @@ CONFIGURATION="${CONFIGURATION:-release}"
 APP_PATH="$ROOT/dist/Vani.app"
 STAGING_ROOT="$(mktemp -d "$ROOT/.build/vani-app.XXXXXX")"
 STAGING_APP="$STAGING_ROOT/Vani.app"
-IDENTITY="${CODESIGN_IDENTITY:--}"
+LOCAL_SIGNING_IDENTITY="Vani Local Development"
+if [[ -n "${CODESIGN_IDENTITY+x}" ]]; then
+    IDENTITY="$CODESIGN_IDENTITY"
+elif security find-identity -v -p codesigning 2>/dev/null \
+    | grep -Fq "\"$LOCAL_SIGNING_IDENTITY\""; then
+    IDENTITY="$LOCAL_SIGNING_IDENTITY"
+else
+    IDENTITY="-"
+fi
 DEFAULT_VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$ROOT/Resources/Info.plist")"
 DEFAULT_BUILD_NUMBER="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$ROOT/Resources/Info.plist")"
 VERSION="${VERSION:-$DEFAULT_VERSION}"
@@ -53,13 +61,16 @@ if [[ "$IDENTITY" == "-" ]]; then
         --entitlements "$ROOT/Resources/Vani.entitlements" \
         "$STAGING_APP"
 else
-    codesign \
+    SIGNING_ARGUMENTS=(
         --force \
         --sign "$IDENTITY" \
         --options runtime \
-        --timestamp \
         --entitlements "$ROOT/Resources/Vani.entitlements" \
-        "$STAGING_APP"
+    )
+    if [[ "$IDENTITY" == Developer\ ID\ Application:* ]]; then
+        SIGNING_ARGUMENTS+=(--timestamp)
+    fi
+    codesign "${SIGNING_ARGUMENTS[@]}" "$STAGING_APP"
 fi
 
 codesign --verify --deep --strict --verbose=2 "$STAGING_APP"

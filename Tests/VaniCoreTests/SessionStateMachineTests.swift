@@ -134,6 +134,14 @@ func recoveryRoutesAreExplicit() throws {
   #expect(VaniFailure.insertionUnverified.recoveryAction == .copyTranscript)
   #expect(VaniFailure.focusChanged.recoveryAction == .copyTranscript)
   #expect(VaniFailure.clipboardChanged.recoveryAction == .copyTranscript)
+  #expect(
+    VaniFailure.inputMonitoringPermissionDenied.recoveryAction
+      == .openInputMonitoringSettings
+  )
+  #expect(VaniFailure.noSpeechDetected.title == "No speech recorded")
+  #expect(VaniFailure.noSpeechDetected.dismissesAutomatically)
+  #expect(VaniFailure.recordingTooShort.dismissesAutomatically)
+  #expect(!VaniFailure.insertionUnverified.dismissesAutomatically)
 }
 
 @Test
