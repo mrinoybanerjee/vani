@@ -100,10 +100,24 @@ final class AppCoordinator: ObservableObject {
   }
 
   func requestMicrophonePermission() {
-    Task {
-      _ = await AVCaptureDevice.requestAccess(for: .audio)
-      await refreshPermissions()
-      await prepareWhenPossible()
+    switch AVCaptureDevice.authorizationStatus(for: .audio) {
+    case .authorized:
+      Task {
+        await refreshPermissions()
+        await prepareWhenPossible()
+      }
+    case .notDetermined:
+      Task {
+        _ = await AVCaptureDevice.requestAccess(for: .audio)
+        await refreshPermissions()
+        await prepareWhenPossible()
+      }
+    case .denied:
+      openPrivacyPane("Privacy_Microphone")
+    case .restricted:
+      settingsError = "Microphone access is restricted by macOS."
+    @unknown default:
+      settingsError = "Microphone permission could not be determined."
     }
   }
 
