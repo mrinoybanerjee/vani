@@ -53,6 +53,7 @@ final class OverlayController {
   }
 
   private func hide() {
+    model.state = .hidden
     panel.orderOut(nil)
   }
 
@@ -70,6 +71,7 @@ final class OverlayController {
 }
 
 private enum OverlayState: Equatable {
+  case hidden
   case listening
   case processing
   case success
@@ -78,7 +80,7 @@ private enum OverlayState: Equatable {
 
 @MainActor
 private final class OverlayModel: ObservableObject {
-  @Published var state: OverlayState = .listening
+  @Published var state: OverlayState = .hidden
 }
 
 private struct OverlayView: View {
@@ -115,6 +117,8 @@ private struct OverlayView: View {
   @ViewBuilder
   private var icon: some View {
     switch model.state {
+    case .hidden:
+      EmptyView()
     case .listening:
       Image(systemName: "waveform.circle.fill").foregroundStyle(.teal)
     case .processing:
@@ -128,6 +132,7 @@ private struct OverlayView: View {
 
   private var label: String {
     switch model.state {
+    case .hidden: ""
     case .listening: "Listening"
     case .processing: "Writing"
     case .success: "Inserted"

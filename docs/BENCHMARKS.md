@@ -33,7 +33,9 @@ Local verification on 2026-07-19 used an Apple M4 running macOS 26.5.2. With the
 model already downloaded, the release-mode integration test loaded the model and
 transcribed a 5.855-second English fixture in 1.391 seconds of test wall time. This
 validates faster-than-real-time engine execution for one fixture; it is not an
-interactive latency percentile.
+interactive latency percentile. Fifteen seconds after launching the installed app
+with its model warm, CPU time remained unchanged over a 10-second observation and
+`ps` reported 0.0% CPU with 531,296 KiB RSS.
 
 | Metric | Target | Current published result |
 | --- | ---: | --- |
@@ -42,7 +44,7 @@ interactive latency percentile.
 | Release to insertion p50 | < 200 ms | Pending instrumented dogfood run |
 | Release to insertion p95 | < 500 ms | Pending instrumented dogfood run |
 | Sequential reliability | 500 cycles | Passing in automated test |
-| Idle CPU | Near zero | Pending release-build sample |
-| Warm-model memory | Reported separately | Pending release-build sample |
+| Idle CPU | Near zero | 0.0% over a 10 s release-build observation |
+| Warm-model memory | Reported separately | 531,296 KiB RSS (about 519 MiB) |
 
 Unmeasured rows are release evidence gaps, not implied passes.
