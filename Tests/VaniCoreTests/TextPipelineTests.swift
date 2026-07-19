@@ -1,8 +1,18 @@
+import Foundation
 import Testing
 
 @testable import VaniCore
 
 private let textPipeline = TextPipeline()
+
+@Test @MainActor
+func readsPlainAndAttributedAccessibilityText() {
+  #expect(SystemTextInserter.readableString(from: "plain") == "plain")
+  #expect(
+    SystemTextInserter.readableString(from: NSAttributedString(string: "rich")) == "rich"
+  )
+  #expect(SystemTextInserter.readableString(from: 42) == nil)
+}
 
 @Test
 func performsConservativeWhitespaceCleanup() {

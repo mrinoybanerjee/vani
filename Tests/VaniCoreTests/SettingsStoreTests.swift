@@ -10,6 +10,28 @@ func defaultSettingsUseLeftFunctionShortcut() {
 }
 
 @Test
+func functionShortcutUsesEventModifierState() {
+  #expect(
+    HoldShortcut.function.resolvedPressedState(
+      keyStateIsPressed: false,
+      functionModifierIsSet: true
+    )
+  )
+  #expect(
+    !HoldShortcut.function.resolvedPressedState(
+      keyStateIsPressed: true,
+      functionModifierIsSet: false
+    )
+  )
+  #expect(
+    HoldShortcut.rightOption.resolvedPressedState(
+      keyStateIsPressed: true,
+      functionModifierIsSet: false
+    )
+  )
+}
+
+@Test
 func settingsRoundTrip() async throws {
   let suite = "VaniCoreTests.\(UUID().uuidString)"
   let store = SettingsStore(suiteName: suite)

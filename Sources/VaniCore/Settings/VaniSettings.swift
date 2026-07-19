@@ -14,6 +14,13 @@ public enum HoldShortcut: String, Codable, CaseIterable, Sendable, Equatable, Id
     case .function: "Left Fn"
     }
   }
+
+  public func resolvedPressedState(
+    keyStateIsPressed: Bool,
+    functionModifierIsSet: Bool
+  ) -> Bool {
+    self == .function ? functionModifierIsSet : keyStateIsPressed
+  }
 }
 
 public struct DictionaryEntry: Identifiable, Codable, Sendable, Equatable {

@@ -53,7 +53,12 @@ final class GlobalHotkeyMonitor {
     isPressed = false
   }
 
-  private func handle(typeRawValue: UInt32, keyCode: Int64, keyIsPressed: Bool) {
+  private func handle(
+    typeRawValue: UInt32,
+    keyCode: Int64,
+    keyStateIsPressed: Bool,
+    functionModifierIsSet: Bool
+  ) {
     guard let type = CGEventType(rawValue: typeRawValue) else { return }
     if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
       if let eventTap {
@@ -62,6 +67,10 @@ final class GlobalHotkeyMonitor {
       return
     }
     guard type == .flagsChanged, keyCode == shortcut.keyCode else { return }
+    let keyIsPressed = shortcut.resolvedPressedState(
+      keyStateIsPressed: keyStateIsPressed,
+      functionModifierIsSet: functionModifierIsSet
+    )
 
     guard keyIsPressed != isPressed else { return }
     isPressed = keyIsPressed
@@ -79,17 +88,19 @@ final class GlobalHotkeyMonitor {
       .fromOpaque(userInfo)
       .takeUnretainedValue()
     let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
-    let keyIsPressed = CGEventSource.keyState(
+    let keyStateIsPressed = CGEventSource.keyState(
       .combinedSessionState,
       key: CGKeyCode(keyCode)
     )
+    let functionModifierIsSet = event.flags.contains(.maskSecondaryFn)
     let typeRawValue = type.rawValue
 
     Task { @MainActor in
       monitor.handle(
         typeRawValue: typeRawValue,
         keyCode: keyCode,
-        keyIsPressed: keyIsPressed
+        keyStateIsPressed: keyStateIsPressed,
+        functionModifierIsSet: functionModifierIsSet
       )
     }
     return Unmanaged.passUnretained(event)

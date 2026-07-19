@@ -145,7 +145,17 @@ public final class SystemTextInserter: TextInserting {
     else {
       return nil
     }
-    return value as? String
+    return Self.readableString(from: value)
+  }
+
+  static func readableString(from value: Any?) -> String? {
+    if let string = value as? String {
+      return string
+    }
+    if let attributedString = value as? NSAttributedString {
+      return attributedString.string
+    }
+    return nil
   }
 
   private func isAttributeSettable(_ attribute: CFString, on element: AXUIElement) -> Bool {
