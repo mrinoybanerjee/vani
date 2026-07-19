@@ -12,3 +12,4 @@ All notable changes follow semantic versioning.
 - Verified Accessibility insertion and guarded clipboard fallback
 - Transcript recovery, optional history, dictionary, diagnostics, and settings
 - Deterministic fixture, 500-cycle reliability harness, CI, and release automation
+- Public-repository Swift CodeQL scanning and Dependabot security updates

@@ -29,6 +29,8 @@ and diagnostics.
 - Diagnostics are content-free and bounded.
 - Unexpected, missing, changed, hidden, or symlinked model artifacts are rejected.
 - CI uses exact action commit SHAs and exact Swift package versions.
+- CodeQL analyzes Swift pull requests, main, and a weekly schedule when the
+  repository is public.
 
 ## Known limitations
 

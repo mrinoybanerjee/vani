@@ -28,6 +28,7 @@ credentials and notarization.
 - Optional bounded history, disabled by default
 - Personal phrase dictionary and launch-at-login setting
 - Metadata-only diagnostics with no transcript or audio content
+- Public-repository Swift CodeQL analysis and weekly dependency updates
 
 ## Run Locally
 
