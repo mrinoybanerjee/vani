@@ -3,15 +3,22 @@ import Foundation
 public struct TextTarget: Sendable, Equatable {
   public let processIdentifier: Int32
   public let bundleIdentifier: String?
+  public let focusedElementIdentifier: UInt?
 
-  public init(processIdentifier: Int32, bundleIdentifier: String? = nil) {
+  public init(
+    processIdentifier: Int32,
+    bundleIdentifier: String? = nil,
+    focusedElementIdentifier: UInt? = nil
+  ) {
     self.processIdentifier = processIdentifier
     self.bundleIdentifier = bundleIdentifier
+    self.focusedElementIdentifier = focusedElementIdentifier
   }
 }
 
 public enum TextInsertionResult: Sendable, Equatable {
   case verified
+  case verifiedClipboardPreserved
   case manualPasteRequired
 }
 

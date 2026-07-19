@@ -38,7 +38,7 @@ func computesAudioMetrics() {
 func loadsAndResamplesAnAudioFixture() throws {
   let fixture = try #require(
     Bundle.module.url(
-      forResource: "quick-brown-fox",
+      forResource: "librispeech-1272-128104-0000",
       withExtension: "wav",
       subdirectory: "Fixtures"
     )
@@ -47,6 +47,6 @@ func loadsAndResamplesAnAudioFixture() throws {
   let audio = try AudioFileLoader.load(fixture)
 
   #expect(audio.sampleRate == CapturedAudio.targetSampleRate)
-  #expect(audio.duration > 1)
+  #expect(audio.duration > 5)
   #expect(audio.rootMeanSquare > 0.0015)
 }

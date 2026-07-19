@@ -21,6 +21,17 @@ func historyIsNewestFirstAndBounded() async throws {
   #expect(entries.count == 10)
   #expect(entries.first?.text == "entry-11")
   #expect(entries.last?.text == "entry-2")
+
+  let directoryMode =
+    try FileManager.default.attributesOfItem(atPath: directory.path)[
+      .posixPermissions
+    ] as? NSNumber
+  let fileMode =
+    try FileManager.default.attributesOfItem(
+      atPath: directory.appendingPathComponent("history.json").path
+    )[.posixPermissions] as? NSNumber
+  #expect(directoryMode?.intValue == 0o700)
+  #expect(fileMode?.intValue == 0o600)
 }
 
 @Test

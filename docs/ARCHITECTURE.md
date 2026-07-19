@@ -33,9 +33,10 @@ network. Captured audio is converted to mono 16 kHz float samples after recordin
 ## Speech and text
 
 `FluidAudioSpeechRecognizer` loads the English Parakeet TDT v2 Core ML pipeline and
-uses CPU plus Neural Engine compute units. `TextPipeline` performs only conservative
-whitespace cleanup and user-defined exact phrase replacement. V1 does not infer
-punctuation, style, intent, or surrounding context.
+uses CPU plus Neural Engine compute units. Before loading, Vani verifies the exact
+file set, sizes, and SHA-256 digests against a pinned model revision. `TextPipeline`
+performs only conservative whitespace cleanup and user-defined exact phrase
+replacement. V1 does not infer punctuation, style, intent, or surrounding context.
 
 ## Insertion contract
 
@@ -55,5 +56,6 @@ only.
 ## Dependency boundary
 
 FluidAudio is the only external package. Its exact source revision and transitive
-graph are locked by SwiftPM. Apple frameworks provide audio, UI, Accessibility,
-global keyboard events, login items, logging, and code signing integration.
+graph are locked by SwiftPM. Model artifacts are pinned independently by revision
+and SHA-256 manifest. Apple frameworks provide audio, UI, Accessibility, global
+keyboard events, login items, logging, and code signing integration.

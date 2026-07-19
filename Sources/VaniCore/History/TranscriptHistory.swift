@@ -64,8 +64,10 @@ public actor TranscriptHistoryStore {
   private func write(_ entries: [TranscriptHistoryEntry]) throws {
     let directory = fileURL.deletingLastPathComponent()
     try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+    try fileManager.setAttributes([.posixPermissions: 0o700], ofItemAtPath: directory.path)
     let data = try encoder.encode(entries)
-    try data.write(to: fileURL, options: [.atomic, .completeFileProtection])
+    try data.write(to: fileURL, options: .atomic)
+    try fileManager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: fileURL.path)
   }
 
   private func quarantineCorruptFile() throws {

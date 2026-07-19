@@ -158,7 +158,7 @@ final class AppCoordinator: ObservableObject {
     case .openMicrophoneSettings: "Allow Microphone"
     case .openAccessibilitySettings: "Allow Accessibility"
     case .retryPreparation, .retryTranscription, .retryInsertion: "Retry"
-    case .copyTranscript: "Copy"
+    case .copyTranscript: "Copy Transcript"
     case .startAgain: "Start Again"
     case .some(.none), nil: nil
     }
@@ -299,6 +299,12 @@ final class AppCoordinator: ObservableObject {
       await session.permissionWasRevoked(.accessibilityPermissionDenied)
     }
 
+    if currentMicrophone.isGranted, currentAccessibility.isGranted,
+      !previousMicrophone.isGranted || !previousAccessibility.isGranted
+    {
+      await session.permissionsWereRestored()
+    }
+
     if !accessibilityPermission.isGranted {
       hotkeyMonitor.stop()
     }
@@ -307,7 +313,11 @@ final class AppCoordinator: ObservableObject {
   private func prepareWhenPossible() async {
     modelInstalled = await session.modelsAreInstalled()
     guard microphonePermission.isGranted, modelInstalled else { return }
-    if snapshot.phase == .setup || snapshot.phase == .recoverableError {
+    let current = await session.snapshot()
+    if current.phase == .setup
+      || (current.phase == .recoverableError
+        && current.failure?.recoveryAction == .retryPreparation)
+    {
       _ = await session.prepareModels(allowDownload: false)
     }
   }
@@ -367,6 +377,19 @@ final class AppCoordinator: ObservableObject {
           await self?.session.audioRouteDidChange()
           try? await Task.sleep(for: .milliseconds(300))
           await self?.session.resumeAfterSystemChange()
+        }
+      }
+    )
+    notificationTokens.append(
+      NotificationCenter.default.addObserver(
+        forName: NSApplication.didBecomeActiveNotification,
+        object: nil,
+        queue: .main
+      ) { [weak self] _ in
+        Task { @MainActor in
+          await self?.refreshPermissions()
+          self?.configureHotkey()
+          await self?.prepareWhenPossible()
         }
       }
     )

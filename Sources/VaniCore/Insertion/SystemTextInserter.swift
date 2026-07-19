@@ -23,6 +23,7 @@ public final class SystemTextInserter: TextInserting {
     try verifyFocus(target)
 
     if AXIsProcessTrusted(), let element = focusedElement() {
+      try verifyElement(element, matches: target)
       let before = readableValue(of: element)
       if before != nil,
         isAttributeSettable(kAXSelectedTextAttribute as CFString, on: element)
@@ -90,15 +91,27 @@ public final class SystemTextInserter: TextInserting {
     }
 
     guard pasteboard.changeCount == transcriptChangeCount else {
-      throw VaniFailure.clipboardChanged
+      return .verifiedClipboardPreserved
     }
-    original.restore(to: pasteboard)
-    return .verified
+    return original.restore(to: pasteboard)
+      ? .verified
+      : .verifiedClipboardPreserved
   }
 
   private func verifyFocus(_ target: TextTarget?) throws {
     guard let target else { return }
-    guard focusProvider.currentTarget()?.processIdentifier == target.processIdentifier else {
+    guard let current = focusProvider.currentTarget(),
+      current.processIdentifier == target.processIdentifier,
+      target.focusedElementIdentifier == nil
+        || current.focusedElementIdentifier == target.focusedElementIdentifier
+    else {
+      throw VaniFailure.focusChanged
+    }
+  }
+
+  private func verifyElement(_ element: AXUIElement, matches target: TextTarget?) throws {
+    guard let expected = target?.focusedElementIdentifier else { return }
+    guard CFHash(element) == expected else {
       throw VaniFailure.focusChanged
     }
   }
@@ -195,9 +208,9 @@ private struct PasteboardSnapshot {
     return PasteboardSnapshot(items: items)
   }
 
-  func restore(to pasteboard: NSPasteboard) {
+  func restore(to pasteboard: NSPasteboard) -> Bool {
     pasteboard.clearContents()
-    guard !items.isEmpty else { return }
+    guard !items.isEmpty else { return true }
 
     let restoredItems = items.map { snapshot -> NSPasteboardItem in
       let item = NSPasteboardItem()
@@ -206,6 +219,6 @@ private struct PasteboardSnapshot {
       }
       return item
     }
-    pasteboard.writeObjects(restoredItems)
+    return pasteboard.writeObjects(restoredItems)
   }
 }

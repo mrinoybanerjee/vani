@@ -5,15 +5,23 @@ import Testing
 
 private actor MockAudioCapture: AudioCapturing {
   let audio: CapturedAudio
+  let startDelay: Duration?
   private(set) var startCount = 0
   private(set) var stopCount = 0
 
-  init(audio: CapturedAudio = CapturedAudio(samples: Array(repeating: 0.05, count: 8_000))) {
+  init(
+    audio: CapturedAudio = CapturedAudio(samples: Array(repeating: 0.05, count: 8_000)),
+    startDelay: Duration? = nil
+  ) {
     self.audio = audio
+    self.startDelay = startDelay
   }
 
   func start() async throws {
     startCount += 1
+    if let startDelay {
+      try await Task.sleep(for: startDelay)
+    }
   }
 
   func stop() async throws -> CapturedAudio {
@@ -26,17 +34,33 @@ private actor MockAudioCapture: AudioCapturing {
 
 private actor MockSpeechRecognizer: SpeechRecognizing {
   private var results: [Result<SpeechResult, VaniFailure>]
+  private let modelCheckDelay: Duration?
+  private let prepareDelay: Duration?
   private(set) var prepareCount = 0
   private(set) var transcribeCount = 0
 
-  init(results: [Result<SpeechResult, VaniFailure>]) {
+  init(
+    results: [Result<SpeechResult, VaniFailure>],
+    modelCheckDelay: Duration? = nil,
+    prepareDelay: Duration? = nil
+  ) {
     self.results = results
+    self.modelCheckDelay = modelCheckDelay
+    self.prepareDelay = prepareDelay
   }
 
-  func modelsAreInstalled() async -> Bool { true }
+  func modelsAreInstalled() async -> Bool {
+    if let modelCheckDelay {
+      try? await Task.sleep(for: modelCheckDelay)
+    }
+    return true
+  }
 
   func prepare(progress: @escaping @Sendable (Double) -> Void) async throws {
     prepareCount += 1
+    if let prepareDelay {
+      try await Task.sleep(for: prepareDelay)
+    }
     progress(1)
   }
 
@@ -158,10 +182,9 @@ func failedTranscriptionRetainsAudioAndRetries() async throws {
 }
 
 @Test @MainActor
-func unverifiedInsertionRetainsTranscriptForCopyAndRetry() async throws {
+func unverifiedInsertionRetainsTranscriptWithoutUnsafeAutomaticRetry() async throws {
   let insertion = MockTextInserter(results: [
-    .success(.manualPasteRequired),
-    .success(.verified),
+    .success(.manualPasteRequired)
   ])
   let session = DictationSession(
     audioCapture: MockAudioCapture(),
@@ -185,9 +208,123 @@ func unverifiedInsertionRetainsTranscriptForCopyAndRetry() async throws {
 
   await session.retry()
   snapshot = await session.snapshot()
+  #expect(snapshot.phase == .recoverableError)
+  #expect(snapshot.recoverableTranscript == "keep me")
+  #expect(insertion.insertedTexts == ["keep me"])
+
+  await session.discardRecovery()
+  snapshot = await session.snapshot()
   #expect(snapshot.phase == .ready)
   #expect(snapshot.recoverableTranscript == nil)
-  #expect(insertion.insertedTexts == ["keep me", "keep me"])
+}
+
+@Test @MainActor
+func verifiedInsertionWithNewerClipboardContentDoesNotBecomeRetryable() async throws {
+  let insertion = MockTextInserter(results: [.success(.verifiedClipboardPreserved)])
+  let session = DictationSession(
+    audioCapture: MockAudioCapture(),
+    speechRecognizer: MockSpeechRecognizer(results: [.success(speechResult("insert once"))]),
+    textInserter: insertion,
+    focusProvider: MockFocusProvider(),
+    diagnostics: DiagnosticStore()
+  )
+
+  #expect(await session.prepareModels(allowDownload: false))
+  await session.beginDictation()
+  await session.endDictation()
+
+  let snapshot = await session.snapshot()
+  #expect(snapshot.phase == .ready)
+  #expect(snapshot.failure == nil)
+  #expect(!snapshot.hasRecoverableTranscript)
+  #expect(insertion.insertedTexts == ["insert once"])
+}
+
+@Test @MainActor
+func concurrentStartRequestsOnlyStartOneCapture() async throws {
+  let audio = MockAudioCapture(startDelay: .milliseconds(25))
+  let session = DictationSession(
+    audioCapture: audio,
+    speechRecognizer: MockSpeechRecognizer(results: [.success(speechResult("hello"))]),
+    textInserter: MockTextInserter(results: [.success(.verified)]),
+    focusProvider: MockFocusProvider(),
+    diagnostics: DiagnosticStore()
+  )
+
+  #expect(await session.prepareModels(allowDownload: false))
+  async let first: Void = session.beginDictation()
+  async let second: Void = session.beginDictation()
+  _ = await (first, second)
+
+  #expect(await session.snapshot().phase == .listening)
+  #expect(await audio.startCount == 1)
+}
+
+@Test @MainActor
+func concurrentPreparationRequestsOnlyLoadOneModel() async throws {
+  let speech = MockSpeechRecognizer(results: [], modelCheckDelay: .milliseconds(25))
+  let session = DictationSession(
+    audioCapture: MockAudioCapture(),
+    speechRecognizer: speech,
+    textInserter: MockTextInserter(results: []),
+    focusProvider: MockFocusProvider(),
+    diagnostics: DiagnosticStore()
+  )
+
+  async let first = session.prepareModels(allowDownload: false)
+  async let second = session.prepareModels(allowDownload: false)
+  let results = await (first, second)
+
+  #expect(results.0 != results.1)
+  #expect(await session.snapshot().phase == .ready)
+  #expect(await speech.prepareCount == 1)
+}
+
+@Test @MainActor
+func permissionRevocationDuringPreparationReturnsToSetupWithoutInternalFailure() async throws {
+  let speech = MockSpeechRecognizer(results: [], prepareDelay: .milliseconds(25))
+  let session = DictationSession(
+    audioCapture: MockAudioCapture(),
+    speechRecognizer: speech,
+    textInserter: MockTextInserter(results: []),
+    focusProvider: MockFocusProvider(),
+    diagnostics: DiagnosticStore()
+  )
+
+  async let preparation = session.prepareModels(allowDownload: false)
+  try await Task.sleep(for: .milliseconds(5))
+  await session.permissionWasRevoked(.microphonePermissionDenied)
+  _ = await preparation
+
+  var snapshot = await session.snapshot()
+  #expect(snapshot.phase == .setup)
+  #expect(snapshot.failure == .microphonePermissionDenied)
+
+  await session.permissionsWereRestored()
+  snapshot = await session.snapshot()
+  #expect(snapshot.phase == .setup)
+  #expect(snapshot.failure == .microphonePermissionDenied)
+}
+
+@Test @MainActor
+func restoredPermissionReturnsInterruptedCaptureToReady() async throws {
+  let session = DictationSession(
+    audioCapture: MockAudioCapture(),
+    speechRecognizer: MockSpeechRecognizer(results: []),
+    textInserter: MockTextInserter(results: []),
+    focusProvider: MockFocusProvider(),
+    diagnostics: DiagnosticStore()
+  )
+
+  #expect(await session.prepareModels(allowDownload: false))
+  await session.beginDictation()
+  await session.permissionWasRevoked(.microphonePermissionDenied)
+  #expect(await session.snapshot().phase == .recoverableError)
+
+  await session.permissionsWereRestored()
+
+  #expect(await session.snapshot().phase == .ready)
+  #expect(await session.snapshot().failure == nil)
 }
 
 @Test @MainActor

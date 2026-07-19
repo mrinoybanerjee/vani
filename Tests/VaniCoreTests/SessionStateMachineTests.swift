@@ -129,6 +129,11 @@ func recoveryRoutesAreExplicit() throws {
 
   var ready = SessionStateMachine(phase: .recoverableError)
   #expect(try ready.transition(.dismissToReady) == .ready)
+
+  #expect(VaniFailure.insertionFailed.recoveryAction == .retryInsertion)
+  #expect(VaniFailure.insertionUnverified.recoveryAction == .copyTranscript)
+  #expect(VaniFailure.focusChanged.recoveryAction == .copyTranscript)
+  #expect(VaniFailure.clipboardChanged.recoveryAction == .copyTranscript)
 }
 
 @Test

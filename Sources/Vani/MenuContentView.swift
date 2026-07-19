@@ -259,7 +259,9 @@ private struct RecoveryView: View {
           .buttonStyle(.borderedProminent)
         }
 
-        if coordinator.snapshot.hasRecoverableTranscript {
+        if coordinator.snapshot.hasRecoverableTranscript,
+          coordinator.snapshot.failure?.recoveryAction != .copyTranscript
+        {
           Button("Copy", systemImage: "doc.on.doc") {
             coordinator.copyRecoveredTranscript()
           }

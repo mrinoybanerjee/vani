@@ -12,7 +12,7 @@ import Testing
 func bundledEnglishFixtureTranscribesLocally() async throws {
   let fixture = try #require(
     Bundle.module.url(
-      forResource: "quick-brown-fox",
+      forResource: "librispeech-1272-128104-0000",
       withExtension: "wav",
       subdirectory: "Fixtures"
     )
@@ -23,5 +23,5 @@ func bundledEnglishFixtureTranscribesLocally() async throws {
   let result = try await recognizer.transcribe(AudioFileLoader.load(fixture))
   let normalized = result.text.lowercased()
 
-  #expect(normalized.contains("quick brown fox"))
+  #expect(normalized.contains("mister quilter"))
 }

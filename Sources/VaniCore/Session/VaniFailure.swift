@@ -22,6 +22,7 @@ public enum VaniFailure: String, Error, Codable, CaseIterable, Sendable, Equatab
   case noSpeechDetected
   case modelUnavailable
   case modelDownloadFailed
+  case modelIntegrityFailed
   case modelLoadFailed
   case transcriptionFailed
   case emptyTranscript
@@ -47,6 +48,7 @@ public enum VaniFailure: String, Error, Codable, CaseIterable, Sendable, Equatab
     case .noSpeechDetected: "No speech detected"
     case .modelUnavailable: "Speech model unavailable"
     case .modelDownloadFailed: "Model download failed"
+    case .modelIntegrityFailed: "Speech model failed verification"
     case .modelLoadFailed: "Speech model could not load"
     case .transcriptionFailed: "Transcription failed"
     case .emptyTranscript: "No words recognized"
@@ -82,6 +84,8 @@ public enum VaniFailure: String, Error, Codable, CaseIterable, Sendable, Equatab
       "Download the local English speech model before dictating."
     case .modelDownloadFailed:
       "Check your connection and retry the one-time model download."
+    case .modelIntegrityFailed:
+      "Vani rejected an unexpected model file. Download a verified copy and retry."
     case .modelLoadFailed:
       "The local model may be incomplete. Retry preparation to repair it."
     case .transcriptionFailed:
@@ -109,9 +113,11 @@ public enum VaniFailure: String, Error, Codable, CaseIterable, Sendable, Equatab
     switch self {
     case .microphonePermissionDenied: .openMicrophoneSettings
     case .accessibilityPermissionDenied: .openAccessibilitySettings
-    case .modelUnavailable, .modelDownloadFailed, .modelLoadFailed: .retryPreparation
+    case .modelUnavailable, .modelDownloadFailed, .modelIntegrityFailed, .modelLoadFailed:
+      .retryPreparation
     case .transcriptionFailed: .retryTranscription
-    case .focusChanged, .insertionFailed, .insertionUnverified, .clipboardChanged: .retryInsertion
+    case .insertionFailed: .retryInsertion
+    case .focusChanged, .insertionUnverified, .clipboardChanged: .copyTranscript
     case .audioDeviceUnavailable, .audioCaptureFailed, .recordingTooShort,
       .recordingTooLong, .noSpeechDetected, .emptyTranscript, .internalInvariant:
       .startAgain

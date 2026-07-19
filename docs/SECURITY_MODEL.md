@@ -10,6 +10,8 @@ and diagnostics.
 
 - FluidAudio and its exact-pinned Swift dependencies execute in the Vani process.
 - The English Core ML model is downloaded only after a user action.
+- Every required model artifact is checked against a byte count and SHA-256 digest
+  pinned to an audited repository revision before Core ML loads it.
 - Apple Accessibility and Core Graphics APIs can target other applications only
   after explicit macOS approval.
 - Vani is not sandboxed because global key monitoring and cross-application text
@@ -25,6 +27,7 @@ and diagnostics.
 - Recovery preserves content when success cannot be proven.
 - History is opt-in, bounded, atomic, and clearable.
 - Diagnostics are content-free and bounded.
+- Unexpected, missing, changed, hidden, or symlinked model artifacts are rejected.
 - CI uses exact action commit SHAs and exact Swift package versions.
 
 ## Known limitations

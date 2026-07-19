@@ -7,12 +7,25 @@ public actor FluidAudioSpeechRecognizer: SpeechRecognizing {
 
   private var manager: AsrManager?
   private var decoderLayerCount = 2
+  private var integrityVerified = false
 
   public init() {}
 
   public func modelsAreInstalled() async -> Bool {
     let directory = AsrModels.defaultCacheDirectory(for: Self.modelVersion)
-    return AsrModels.modelsExist(at: directory, version: Self.modelVersion)
+    guard AsrModels.modelsExist(at: directory, version: Self.modelVersion) else {
+      integrityVerified = false
+      return false
+    }
+    if integrityVerified { return true }
+    do {
+      try ModelIntegrityVerifier.parakeetV2.verify(directory: directory)
+      integrityVerified = true
+      return true
+    } catch {
+      integrityVerified = false
+      return false
+    }
   }
 
   public func prepare(progress: @escaping @Sendable (Double) -> Void) async throws {
@@ -27,11 +40,38 @@ public actor FluidAudioSpeechRecognizer: SpeechRecognizing {
     do {
       let configuration = MLModelConfiguration()
       configuration.computeUnits = .cpuAndNeuralEngine
-      let models = try await AsrModels.downloadAndLoad(
+      let directory = AsrModels.defaultCacheDirectory(for: Self.modelVersion)
+      let parentDirectory = directory.deletingLastPathComponent()
+
+      if AsrModels.modelsExist(at: directory, version: Self.modelVersion), !integrityVerified {
+        do {
+          try ModelIntegrityVerifier.parakeetV2.verify(directory: directory)
+          integrityVerified = true
+        } catch {
+          try? FileManager.default.removeItem(at: directory)
+        }
+      }
+
+      if !AsrModels.modelsExist(at: directory, version: Self.modelVersion) {
+        try await ModelHub.download(
+          .parakeetV2,
+          to: parentDirectory,
+          progressHandler: { download in
+            progress(min(max(download.fractionCompleted * 1.2, 0), 0.6))
+          }
+        )
+      }
+
+      progress(0.65)
+      try ModelIntegrityVerifier.parakeetV2.verify(directory: directory)
+      integrityVerified = true
+
+      let models = try await AsrModels.load(
+        from: directory,
         configuration: configuration,
         version: Self.modelVersion,
         progressHandler: { download in
-          progress(min(max(download.fractionCompleted, 0), 1))
+          progress(0.65 + min(max(download.fractionCompleted, 0), 1) * 0.35)
         }
       )
       let manager = AsrManager(config: .default, models: models)

@@ -19,6 +19,9 @@ public actor DictationSession {
   private var modelProgress: Double?
   private var modelReady = false
   private var isPreparingModel = false
+  private var isPreparingRequest = false
+  private var preparationGeneration: UInt64 = 0
+  private var isStartingCapture = false
   private var currentTarget: TextTarget?
   private var observer: Observer?
 
@@ -72,6 +75,12 @@ public actor DictationSession {
       await recordIgnored("prepare", phase: machine.phase)
       return false
     }
+    guard !isPreparingRequest else {
+      await recordIgnored("preparation_request_in_progress", phase: machine.phase)
+      return false
+    }
+    isPreparingRequest = true
+    defer { isPreparingRequest = false }
 
     let installed = await speechRecognizer.modelsAreInstalled()
     guard installed || allowDownload else {
@@ -94,17 +103,28 @@ public actor DictationSession {
   }
 
   public func beginDictation() async {
-    guard machine.phase == .ready else {
+    guard machine.phase == .ready, !isStartingCapture else {
       await recordIgnored("capture_start", phase: machine.phase)
       return
     }
+    isStartingCapture = true
+    defer { isStartingCapture = false }
 
     currentTarget = await focusProvider.currentTarget()
+    guard machine.phase == .ready else {
+      await recordIgnored("capture_start_cancelled", phase: machine.phase)
+      return
+    }
     await recovery.clear()
     failure = nil
 
     do {
       try await audioCapture.start()
+      guard machine.phase == .ready else {
+        await audioCapture.cancel()
+        await recordIgnored("capture_start_cancelled", phase: machine.phase)
+        return
+      }
       try await transition(.captureStarted)
     } catch {
       await fail(map(error, fallback: .audioCaptureFailed))
@@ -199,10 +219,41 @@ public actor DictationSession {
   }
 
   public func permissionWasRevoked(_ permissionFailure: VaniFailure) async {
-    await audioCapture.cancel()
-    failure = permissionFailure
+    switch machine.phase {
+    case .setup, .preparing, .ready, .listening:
+      await audioCapture.cancel()
+      failure = permissionFailure
+      do {
+        try await transition(.permissionsLost)
+      } catch {
+        await fail(.internalInvariant)
+      }
+
+    case .transcribing, .inserting, .recoverableError:
+      await diagnostics.record(
+        DiagnosticEvent(
+          category: .permission,
+          code: permissionFailure.code,
+          phase: machine.phase
+        )
+      )
+      await publishSnapshot()
+
+    case .disabled:
+      await recordIgnored("permission_revoked", phase: machine.phase)
+    }
+  }
+
+  public func permissionsWereRestored() async {
+    guard machine.phase == .recoverableError,
+      failure == .microphonePermissionDenied || failure == .accessibilityPermissionDenied
+    else {
+      return
+    }
+
+    failure = nil
     do {
-      try await transition(.permissionsLost)
+      try await transition(modelReady ? .dismissToReady : .dismissToSetup)
     } catch {
       await fail(.internalInvariant)
     }
@@ -268,34 +319,54 @@ public actor DictationSession {
 
     modelProgress = 0
     failure = nil
+    let signpost = VaniSignpost.beginModelPreparation()
+    defer { VaniSignpost.endModelPreparation(signpost) }
+    preparationGeneration &+= 1
+    let generation = preparationGeneration
     await publishSnapshot()
 
     do {
       try await speechRecognizer.prepare { [weak self] progress in
         Task {
-          await self?.updateModelProgress(progress)
+          await self?.updateModelProgress(progress, generation: generation)
         }
       }
       modelProgress = nil
       modelReady = true
+      guard machine.phase == .preparing else {
+        await publishSnapshot()
+        return false
+      }
       try await transition(.preparationSucceeded)
       return true
     } catch {
       modelProgress = nil
+      guard machine.phase == .preparing else {
+        await publishSnapshot()
+        return false
+      }
       modelReady = false
       await fail(map(error, fallback: .modelLoadFailed))
       return false
     }
   }
 
-  private func updateModelProgress(_ progress: Double) async {
+  private func updateModelProgress(_ progress: Double, generation: UInt64) async {
+    guard generation == preparationGeneration, machine.phase == .preparing else {
+      return
+    }
     modelProgress = min(max(progress, 0), 1)
     await publishSnapshot()
   }
 
   private func transcribeAndInsert(_ audio: CapturedAudio) async throws {
     let startedAt = Date()
-    let result = try await speechRecognizer.transcribe(audio)
+    let result: SpeechResult
+    do {
+      let signpost = VaniSignpost.beginTranscription()
+      defer { VaniSignpost.endTranscription(signpost) }
+      result = try await speechRecognizer.transcribe(audio)
+    }
     let text = textPipeline.process(result.text, dictionary: settings.dictionary)
     guard !text.isEmpty else { throw VaniFailure.emptyTranscript }
 
@@ -321,13 +392,19 @@ public actor DictationSession {
     }
 
     let startedAt = Date()
+    let signpost = VaniSignpost.beginInsertion()
+    defer { VaniSignpost.endInsertion(signpost) }
     let result = try await textInserter.insert(transcript, into: payload.target)
     switch result {
-    case .verified:
+    case .verified, .verifiedClipboardPreserved:
+      let diagnosticCode =
+        result == .verified
+        ? "verified"
+        : "verified_clipboard_preserved"
       await diagnostics.record(
         DiagnosticEvent(
           category: .insertion,
-          code: "verified",
+          code: diagnosticCode,
           phase: machine.phase,
           durationMilliseconds: milliseconds(since: startedAt)
         )
@@ -428,7 +505,7 @@ public actor DictationSession {
     case .audioDeviceUnavailable, .audioCaptureFailed, .recordingTooShort,
       .recordingTooLong, .noSpeechDetected:
       .capture
-    case .modelUnavailable, .modelDownloadFailed, .modelLoadFailed: .model
+    case .modelUnavailable, .modelDownloadFailed, .modelIntegrityFailed, .modelLoadFailed: .model
     case .transcriptionFailed, .emptyTranscript: .transcription
     case .focusChanged, .insertionFailed, .insertionUnverified, .clipboardChanged:
       .insertion

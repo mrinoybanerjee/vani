@@ -21,6 +21,7 @@ credentials and notarization.
 
 - Hold Right Option, Right Command, or Fn to dictate
 - One-time English Parakeet TDT v2 model download
+- Exact model-revision manifest with per-file SHA-256 verification
 - Local microphone capture and Core ML transcription
 - Direct Accessibility insertion with a verified paste fallback
 - Transcript recovery when focus, insertion, or the clipboard changes
@@ -51,6 +52,7 @@ preallocated bounded buffer; model work, text cleanup, insertion, storage, and U
 remain outside that callback. Dependencies are exact-pinned in `Package.resolved`.
 
 - [Architecture](docs/ARCHITECTURE.md)
+- [Project provenance](docs/PROVENANCE.md)
 - [Privacy contract](PRIVACY.md)
 - [Security model](docs/SECURITY_MODEL.md)
 - [Benchmarks](docs/BENCHMARKS.md)

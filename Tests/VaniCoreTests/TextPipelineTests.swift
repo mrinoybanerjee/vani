@@ -31,3 +31,12 @@ func invalidDictionaryEntriesAreIgnored() {
 func doesNotInventCapitalizationOrPunctuation() {
   #expect(textPipeline.process("hello world", dictionary: []) == "hello world")
 }
+
+@Test
+func dictionaryReplacementTreatsDollarAndBackslashAsLiteralText() {
+  let dictionary = [
+    DictionaryEntry(spoken: "price", replacement: "$5\\item")
+  ]
+
+  #expect(textPipeline.process("the price", dictionary: dictionary) == "the $5\\item")
+}

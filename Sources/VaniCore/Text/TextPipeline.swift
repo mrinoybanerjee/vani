@@ -26,7 +26,7 @@ public struct TextPipeline: Sendable {
       )
       text = text.replacingOccurrences(
         of: #"(?i)(?<![\p{L}\p{N}])"# + escaped + #"(?![\p{L}\p{N}])"#,
-        with: entry.replacement,
+        with: NSRegularExpression.escapedTemplate(for: entry.replacement),
         options: .regularExpression
       )
     }
