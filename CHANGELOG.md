@@ -29,3 +29,4 @@ All notable changes follow semantic versioning.
 - Create the build staging directory during a direct clean-clone installation
 - Report local and release signing identities correctly under shell pipe-failure checks
 - Cancel superseded CodeQL runs to avoid wasting macOS CI capacity
+- Use the fastest sufficient single-architecture debug build for Swift CodeQL

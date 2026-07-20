@@ -32,7 +32,7 @@ jobs:
           build-mode: manual
 
       - name: Build analyzed source
-        run: swift build -c release --arch arm64
+        run: swift build --arch arm64
 
       - name: Analyze
         uses: github/codeql-action/analyze@7188fc363630916deb702c7fdcf4e481b751f97a # v4
