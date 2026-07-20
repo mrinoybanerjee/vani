@@ -2,17 +2,29 @@ import AppKit
 import ApplicationServices
 import Foundation
 
+struct TextInsertionObservation: Equatable {
+  let value: String?
+  let selectedRange: NSRange?
+  let characterCount: Int?
+}
+
 @MainActor
 public final class SystemTextInserter: TextInserting {
   private let focusProvider: any FocusProviding
   private let pasteDelay: Duration
+  private let verificationTimeout: Duration
+  private let verificationPollInterval: Duration
 
   public init(
     focusProvider: any FocusProviding = SystemFocusProvider(),
-    pasteDelay: Duration = .milliseconds(140)
+    pasteDelay: Duration = .milliseconds(140),
+    verificationTimeout: Duration = .milliseconds(600),
+    verificationPollInterval: Duration = .milliseconds(50)
   ) {
     self.focusProvider = focusProvider
     self.pasteDelay = pasteDelay
+    self.verificationTimeout = verificationTimeout
+    self.verificationPollInterval = verificationPollInterval
   }
 
   public func insert(
@@ -24,8 +36,8 @@ public final class SystemTextInserter: TextInserting {
 
     if AXIsProcessTrusted(), let element = focusedElement() {
       try verifyElement(element, matches: target)
-      let before = readableValue(of: element)
-      if before != nil,
+      let before = observation(of: element)
+      if before.value != nil,
         isAttributeSettable(kAXSelectedTextAttribute as CFString, on: element)
       {
         let result = AXUIElementSetAttributeValue(
@@ -34,8 +46,12 @@ public final class SystemTextInserter: TextInserting {
           text as CFTypeRef
         )
         if result == .success {
-          try await Task.sleep(for: .milliseconds(80))
-          if verifyInsertion(text, before: before, element: element) {
+          if try await waitForInsertion(
+            text,
+            before: before,
+            element: element,
+            initialDelay: .milliseconds(80)
+          ) {
             return .verified
           }
         }
@@ -65,7 +81,7 @@ public final class SystemTextInserter: TextInserting {
     _ text: String,
     target: TextTarget?,
     element: AXUIElement,
-    before: String?
+    before: TextInsertionObservation
   ) async throws -> TextInsertionResult {
     let pasteboard = NSPasteboard.general
     let original = PasteboardSnapshot.capture(from: pasteboard)
@@ -82,7 +98,14 @@ public final class SystemTextInserter: TextInserting {
     try await Task.sleep(for: pasteDelay)
     try verifyFocus(target)
 
-    guard verifyInsertion(text, before: before, element: element) else {
+    guard
+      try await waitForInsertion(
+        text,
+        before: before,
+        element: element,
+        initialDelay: .zero
+      )
+    else {
       if pasteboard.changeCount != transcriptChangeCount {
         throw VaniFailure.clipboardChanged
       }
@@ -157,20 +180,152 @@ public final class SystemTextInserter: TextInserting {
     return nil
   }
 
+  static func verifyInsertion(
+    _ text: String,
+    before: TextInsertionObservation,
+    after: TextInsertionObservation,
+    insertedText: String?
+  ) -> Bool {
+    if let beforeValue = before.value,
+      let afterValue = after.value
+    {
+      if let selectedRange = before.selectedRange,
+        NSMaxRange(selectedRange) <= (beforeValue as NSString).length
+      {
+        let expectedValue = (beforeValue as NSString).replacingCharacters(
+          in: selectedRange,
+          with: text
+        )
+        if afterValue == expectedValue {
+          return true
+        }
+      } else if beforeValue != afterValue, afterValue.contains(text) {
+        return true
+      }
+    }
+
+    let insertedLength = text.utf16.count
+    if insertedText == text,
+      let beforeRange = before.selectedRange,
+      let beforeCount = before.characterCount,
+      let afterCount = after.characterCount,
+      afterCount == beforeCount - beforeRange.length + insertedLength
+    {
+      return true
+    }
+
+    guard let beforeRange = before.selectedRange,
+      let afterRange = after.selectedRange,
+      afterRange.location == beforeRange.location + insertedLength,
+      afterRange.length == 0
+    else {
+      return false
+    }
+
+    guard let beforeCount = before.characterCount,
+      let afterCount = after.characterCount
+    else {
+      return true
+    }
+    return afterCount == beforeCount - beforeRange.length + insertedLength
+  }
+
+  private func observation(of element: AXUIElement) -> TextInsertionObservation {
+    TextInsertionObservation(
+      value: readableValue(of: element),
+      selectedRange: selectedTextRange(of: element),
+      characterCount: integerAttribute(kAXNumberOfCharactersAttribute as CFString, on: element)
+    )
+  }
+
+  private func selectedTextRange(of element: AXUIElement) -> NSRange? {
+    var value: CFTypeRef?
+    guard
+      AXUIElementCopyAttributeValue(
+        element,
+        kAXSelectedTextRangeAttribute as CFString,
+        &value
+      ) == .success,
+      let value,
+      CFGetTypeID(value) == AXValueGetTypeID()
+    else {
+      return nil
+    }
+
+    var range = CFRange()
+    let axValue = unsafeDowncast(value, to: AXValue.self)
+    guard AXValueGetType(axValue) == .cfRange,
+      AXValueGetValue(axValue, .cfRange, &range)
+    else {
+      return nil
+    }
+    return NSRange(location: range.location, length: range.length)
+  }
+
+  private func integerAttribute(_ attribute: CFString, on element: AXUIElement) -> Int? {
+    var value: CFTypeRef?
+    guard AXUIElementCopyAttributeValue(element, attribute, &value) == .success else {
+      return nil
+    }
+    return (value as? NSNumber)?.intValue
+  }
+
+  private func stringForInsertedRange(
+    _ text: String,
+    before: TextInsertionObservation,
+    element: AXUIElement
+  ) -> String? {
+    guard let selectedRange = before.selectedRange else { return nil }
+    var range = CFRange(
+      location: selectedRange.location,
+      length: text.utf16.count
+    )
+    guard let rangeValue = AXValueCreate(.cfRange, &range) else { return nil }
+
+    var value: CFTypeRef?
+    guard
+      AXUIElementCopyParameterizedAttributeValue(
+        element,
+        kAXStringForRangeParameterizedAttribute as CFString,
+        rangeValue,
+        &value
+      ) == .success
+    else {
+      return nil
+    }
+    return Self.readableString(from: value)
+  }
+
   private func isAttributeSettable(_ attribute: CFString, on element: AXUIElement) -> Bool {
     var settable = DarwinBoolean(false)
     return AXUIElementIsAttributeSettable(element, attribute, &settable) == .success
       && settable.boolValue
   }
 
-  private func verifyInsertion(
+  private func waitForInsertion(
     _ text: String,
-    before: String?,
-    element: AXUIElement
-  ) -> Bool {
-    guard let before, let after = readableValue(of: element) else { return false }
-    guard before != after else { return false }
-    return after.contains(text)
+    before: TextInsertionObservation,
+    element: AXUIElement,
+    initialDelay: Duration
+  ) async throws -> Bool {
+    if initialDelay > .zero {
+      try await Task.sleep(for: initialDelay)
+    }
+
+    let clock = ContinuousClock()
+    let deadline = clock.now.advanced(by: verificationTimeout)
+    while true {
+      if Self.verifyInsertion(
+        text,
+        before: before,
+        after: observation(of: element),
+        insertedText: stringForInsertedRange(text, before: before, element: element)
+      ) {
+        return true
+      }
+      guard clock.now < deadline else { return false }
+      try await Task.sleep(for: verificationPollInterval)
+    }
   }
 
   private func postPasteShortcut(to processIdentifier: Int32?) -> Bool {
