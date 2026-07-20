@@ -5,7 +5,9 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CONFIGURATION="${CONFIGURATION:-release}"
 APP_PATH="$ROOT/dist/Vani.app"
-STAGING_ROOT="$(mktemp -d "$ROOT/.build/vani-app.XXXXXX")"
+BUILD_ROOT="$ROOT/.build"
+mkdir -p "$BUILD_ROOT"
+STAGING_ROOT="$(mktemp -d "$BUILD_ROOT/vani-app.XXXXXX")"
 STAGING_APP="$STAGING_ROOT/Vani.app"
 LOCAL_SIGNING_IDENTITY="Vani Local Development"
 if [[ -n "${CODESIGN_IDENTITY+x}" ]]; then

@@ -34,17 +34,14 @@ jobs:
           bash -n scripts/*.sh
           ./scripts/uninstall-local.sh --dry-run --remove-model
 
-      - name: Resolve pinned dependencies
-        run: swift package resolve
+      - name: Build development app from a clean checkout
+        run: CONFIGURATION=release BUILD_NUMBER="${GITHUB_RUN_NUMBER}" ./scripts/build-app.sh
 
       - name: Check formatting
         run: ./scripts/lint.sh
 
       - name: Run tests
         run: ./scripts/test.sh
-
-      - name: Build development app
-        run: CONFIGURATION=release BUILD_NUMBER="${GITHUB_RUN_NUMBER}" ./scripts/build-app.sh
 
       - name: Archive development app
         run: ditto -c -k --keepParent dist/Vani.app Vani-development.zip

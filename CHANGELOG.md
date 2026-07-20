@@ -26,3 +26,4 @@ All notable changes follow semantic versioning.
 - Preserve the previous installed bundle until a verified replacement is ready
 - Separate the fast user install path from the contributor test workflow
 - Use private installer staging paths and remove ephemeral CI signing material
+- Create the build staging directory during a direct clean-clone installation
