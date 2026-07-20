@@ -1,0 +1,45 @@
+name: Bug report
+description: Report a reproducible Vani problem without private content
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Do not include transcript text, recordings, clipboard content, or sensitive app data.
+  - type: input
+    id: version
+    attributes:
+      label: Vani version or commit
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Mac model and macOS version
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior and content-free diagnostic codes
+    validations:
+      required: true
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy check
+      options:
+        - label: I removed transcript, audio, clipboard, and sensitive app content.
+          required: true

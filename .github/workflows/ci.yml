@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test-and-build:
+    name: Test and build
+    runs-on: macos-15
+    timeout-minutes: 30
+    env:
+      SWIFT_DETERMINISTIC_HASHING: "1"
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Report toolchain
+        run: swift --version
+
+      - name: Resolve pinned dependencies
+        run: swift package resolve
+
+      - name: Check formatting
+        run: ./scripts/lint.sh
+
+      - name: Run tests
+        run: ./scripts/test.sh
+
+      - name: Build development app
+        run: CONFIGURATION=release BUILD_NUMBER="${GITHUB_RUN_NUMBER}" ./scripts/build-app.sh
+
+      - name: Archive development app
+        run: ditto -c -k --keepParent dist/Vani.app Vani-development.zip
+
+      - name: Upload development app
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: Vani-development-${{ github.sha }}
+          path: Vani-development.zip
+          if-no-files-found: error
+          retention-days: 14
+
+  dependency-review:
+    name: Dependency review
+    if: github.event_name == 'pull_request' && github.event.repository.visibility == 'public'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Review dependency changes
+        uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        with:
+          fail-on-severity: high

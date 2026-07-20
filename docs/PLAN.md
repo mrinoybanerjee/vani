@@ -1,7 +1,7 @@
 <!-- /autoplan restore point: /Users/mrinoy/.gstack/projects/vani/main-autoplan-restore-20260717-205034.md -->
 # Vani V1 Implementation Plan
 
-Status: Reviewed and approved for implementation
+Status: Implemented; public release credentials and dogfood percentiles remain open
 Owner: mrinoybanerjee
 Target: Apple Silicon macOS, English
 
@@ -106,7 +106,7 @@ without unbounded memory growth.
 ## Milestone 4: Product finish
 
 - Permission checklist, menu-bar popover, overlay, settings, and history UI
-- Personal dictionary with exact correction and supported model biasing
+- Personal dictionary with deterministic exact correction
 - VoiceOver, keyboard navigation, contrast, Reduce Motion, and multi-display QA
 - Resource, latency, and accuracy benchmark publication
 
@@ -310,7 +310,7 @@ real screenshots, accessibility inspection, and dogfood review.
 
 Design decisions:
 
-- Default shortcut is Right Option, with a small preset list rather than arbitrary
+- Default shortcut is Left Fn, with a small preset list rather than arbitrary
   shortcut composition in the first slice.
 - Overlay appears on the active display, centered 24 points above the safe bottom
   edge, and never activates or intercepts clicks.
@@ -449,14 +449,14 @@ Targets:
 
 ### Reviewed implementation tasks
 
-- [ ] **P1: Establish Swift package and exhaustive session state tests.**
-- [ ] **P1: Implement bounded audio capture and the local English ASR adapter.**
-- [ ] **P1: Implement transcript recovery and the honest insertion contract.**
-- [ ] **P1: Add benchmark schema, signposts, fixed fixtures, and baseline reports.**
-- [ ] **P2: Implement permission setup, menu bar, overlay, and compact settings.**
-- [ ] **P2: Add clean-clone CI, development app assembly, and contributor docs.**
-- [ ] **P2: Add security checks, model verification, and release workflow skeleton.**
-- [ ] **P3: Add optional local history and dictionary after the vertical slice is stable.**
+- [x] **P1: Establish Swift package and exhaustive session state tests.**
+- [x] **P1: Implement bounded audio capture and the local English ASR adapter.**
+- [x] **P1: Implement transcript recovery and the honest insertion contract.**
+- [x] **P1: Add benchmark schema, signposts, fixed fixtures, and baseline reports.**
+- [x] **P2: Implement permission setup, menu bar, overlay, and compact settings.**
+- [x] **P2: Add clean-clone CI, development app assembly, and contributor docs.**
+- [x] **P2: Add security checks, model verification, and release workflow skeleton.**
+- [x] **P3: Add optional local history and dictionary after the vertical slice is stable.**
 
 ### Autoplan decision audit trail
 

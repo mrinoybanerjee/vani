@@ -15,5 +15,10 @@ is configured, use GitHub private vulnerability reporting for the repository.
 - GitHub artifact attestation
 - No high or critical unresolved security findings
 
-Pre-alpha builds are development artifacts and are not yet supported for sensitive
-work.
+Ad-hoc development builds are suitable for local testing but are not public release
+artifacts. A supported public build must pass the release workflow, including
+Developer ID signing, Apple notarization, stapling, Gatekeeper assessment, checksum
+generation, and provenance attestation when the repository is public.
+
+See [docs/SECURITY_MODEL.md](docs/SECURITY_MODEL.md) for trust boundaries and known
+limitations.
