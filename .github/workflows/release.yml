@@ -51,7 +51,7 @@ jobs:
           security import "$RUNNER_TEMP/vani.p12" -k "$RUNNER_TEMP/vani.keychain-db" -P "$CERTIFICATE_PASSWORD" -T /usr/bin/codesign
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$RUNNER_TEMP/vani.keychain-db"
           security list-keychains -d user -s "$RUNNER_TEMP/vani.keychain-db"
-          SIGNING_IDENTITY="$(security find-identity -v -p codesigning "$RUNNER_TEMP/vani.keychain-db" | awk '/Developer ID Application/{print $2; exit}')"
+          SIGNING_IDENTITY="$(security find-identity -v -p codesigning "$RUNNER_TEMP/vani.keychain-db" | awk '/Developer ID Application/ && !found {print $2; found=1}')"
           test -n "$SIGNING_IDENTITY"
           echo "CODESIGN_IDENTITY=$SIGNING_IDENTITY" >> "$GITHUB_ENV"
 

@@ -88,7 +88,7 @@ else
 fi
 
 if security find-identity -v -p codesigning 2>/dev/null \
-    | grep -Fq "\"$LOCAL_SIGNING_IDENTITY\""; then
+    | grep -F "\"$LOCAL_SIGNING_IDENTITY\"" >/dev/null; then
     ok "Stable local signing identity found"
 else
     warn "No '$LOCAL_SIGNING_IDENTITY' identity was found. Installation will work, but rebuilt ad-hoc apps can require fresh permissions. See docs/BUILDING.md."

@@ -82,7 +82,7 @@ printf '%s\n' \
     '5. Hold Left Fn, speak, then release to insert text.'
 
 if ! codesign -dv --verbose=4 "$DESTINATION_APP" 2>&1 \
-    | grep -Fq 'Authority=Vani Local Development'; then
+    | grep -F 'Authority=Vani Local Development' >/dev/null; then
     printf '\nNote: this app is ad-hoc signed. It works locally, but rebuilding can require fresh macOS permission grants.\n'
     printf 'See docs/BUILDING.md#stable-local-signing for the optional stable identity.\n'
 fi

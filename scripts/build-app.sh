@@ -13,7 +13,7 @@ LOCAL_SIGNING_IDENTITY="Vani Local Development"
 if [[ -n "${CODESIGN_IDENTITY+x}" ]]; then
     IDENTITY="$CODESIGN_IDENTITY"
 elif security find-identity -v -p codesigning 2>/dev/null \
-    | grep -Fq "\"$LOCAL_SIGNING_IDENTITY\""; then
+    | grep -F "\"$LOCAL_SIGNING_IDENTITY\"" >/dev/null; then
     IDENTITY="$LOCAL_SIGNING_IDENTITY"
 else
     IDENTITY="-"
