@@ -5,17 +5,39 @@ struct SettingsView: View {
   @EnvironmentObject private var coordinator: AppCoordinator
 
   var body: some View {
-    TabView {
-      GeneralSettingsView()
-        .tabItem { Label("General", systemImage: "slider.horizontal.3") }
-      DictionarySettingsView()
-        .tabItem { Label("Dictionary", systemImage: "character.book.closed") }
-      HistorySettingsView()
-        .tabItem { Label("History", systemImage: "clock") }
-      DiagnosticsSettingsView()
-        .tabItem { Label("Diagnostics", systemImage: "stethoscope") }
+    VStack(spacing: 0) {
+      if let error = coordinator.settingsError {
+        HStack(spacing: 8) {
+          Image(systemName: "exclamationmark.triangle.fill")
+            .foregroundStyle(.red)
+          Text(error)
+            .font(.caption)
+          Spacer()
+          Button {
+            coordinator.dismissSettingsError()
+          } label: {
+            Image(systemName: "xmark.circle.fill")
+          }
+          .buttonStyle(.plain)
+          .help("Dismiss")
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        Divider()
+      }
+
+      TabView {
+        GeneralSettingsView()
+          .tabItem { Label("General", systemImage: "slider.horizontal.3") }
+        DictionarySettingsView()
+          .tabItem { Label("Dictionary", systemImage: "character.book.closed") }
+        HistorySettingsView()
+          .tabItem { Label("History", systemImage: "clock") }
+        DiagnosticsSettingsView()
+          .tabItem { Label("Diagnostics", systemImage: "stethoscope") }
+      }
     }
-    .frame(width: 560, height: 390)
+    .frame(width: 560, height: 410)
   }
 }
 
@@ -57,11 +79,6 @@ private struct GeneralSettingsView: View {
           ))
       }
 
-      if let error = coordinator.settingsError {
-        Text(error)
-          .font(.caption)
-          .foregroundStyle(.red)
-      }
     }
     .formStyle(.grouped)
     .padding()

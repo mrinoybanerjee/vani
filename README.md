@@ -42,11 +42,13 @@ cd vani
 ./scripts/install-local.sh
 ```
 
-Vani opens in the menu bar. Grant Microphone and Accessibility access, download the
+Vani opens in the menu bar. Grant Microphone, Accessibility, and Input Monitoring
+access, download the
 English model once, then hold Left Fn while speaking. Set macOS Keyboard settings'
 "Press Globe key to" action to "Do Nothing" so it does not open the emoji panel.
-Development builds are
-ad-hoc signed; see [Building](docs/BUILDING.md) for the macOS permission caveat.
+The install script uses a stable `Vani Local Development` signing identity when one
+exists; otherwise it uses an ad-hoc signature. See [Building](docs/BUILDING.md) for
+the macOS permission behavior.
 
 ## Engineering
 

@@ -5,11 +5,18 @@ import Foundation
 public actor FluidAudioSpeechRecognizer: SpeechRecognizing {
   public static let modelVersion: AsrModelVersion = .v2
 
+  private let modelDownloader: PinnedModelDownloader
   private var manager: AsrManager?
   private var decoderLayerCount = 2
   private var integrityVerified = false
 
-  public init() {}
+  public init() {
+    modelDownloader = PinnedModelDownloader(
+      repository: "FluidInference/parakeet-tdt-0.6b-v2-coreml",
+      revision: ModelIntegrityVerifier.parakeetV2Revision,
+      verifier: .parakeetV2
+    )
+  }
 
   public func modelsAreInstalled() async -> Bool {
     let directory = AsrModels.defaultCacheDirectory(for: Self.modelVersion)
@@ -41,25 +48,20 @@ public actor FluidAudioSpeechRecognizer: SpeechRecognizing {
       let configuration = MLModelConfiguration()
       configuration.computeUnits = .cpuAndNeuralEngine
       let directory = AsrModels.defaultCacheDirectory(for: Self.modelVersion)
-      let parentDirectory = directory.deletingLastPathComponent()
-
+      var needsDownload = !AsrModels.modelsExist(at: directory, version: Self.modelVersion)
       if AsrModels.modelsExist(at: directory, version: Self.modelVersion), !integrityVerified {
         do {
           try ModelIntegrityVerifier.parakeetV2.verify(directory: directory)
           integrityVerified = true
         } catch {
-          try? FileManager.default.removeItem(at: directory)
+          needsDownload = true
         }
       }
 
-      if !AsrModels.modelsExist(at: directory, version: Self.modelVersion) {
-        try await ModelHub.download(
-          .parakeetV2,
-          to: parentDirectory,
-          progressHandler: { download in
-            progress(min(max(download.fractionCompleted * 1.2, 0), 0.6))
-          }
-        )
+      if needsDownload {
+        try await modelDownloader.install(at: directory) { downloadProgress in
+          progress(min(max(downloadProgress * 0.6, 0), 0.6))
+        }
       }
 
       progress(0.65)

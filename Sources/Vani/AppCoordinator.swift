@@ -247,6 +247,7 @@ final class AppCoordinator: ObservableObject {
       persistSettings()
     } catch {
       settingsError = "Launch at login requires the bundled Vani app."
+      recordDiagnostic(category: .storage, code: "launch_at_login_failed")
     }
   }
 
@@ -277,9 +278,19 @@ final class AppCoordinator: ObservableObject {
 
   func clearHistory() {
     Task {
-      try? await historyStore.clear()
-      history = []
+      do {
+        try await historyStore.clear()
+        history = []
+        settingsError = nil
+      } catch {
+        settingsError = "Transcript history could not be cleared."
+        recordDiagnostic(category: .storage, code: "history_clear_failed")
+      }
     }
+  }
+
+  func dismissSettingsError() {
+    settingsError = nil
   }
 
   private func beginDictation() {
@@ -316,6 +327,7 @@ final class AppCoordinator: ObservableObject {
         if revision == settingsRevision {
           settingsError = "Settings could not be saved."
         }
+        recordDiagnostic(category: .storage, code: "settings_save_failed")
       }
     }
   }
@@ -375,6 +387,7 @@ final class AppCoordinator: ObservableObject {
       settingsError = nil
     } catch {
       settingsError = "The global shortcut could not start. Recheck Input Monitoring."
+      recordDiagnostic(category: .permission, code: "hotkey_monitor_start_failed")
     }
   }
 
@@ -383,7 +396,20 @@ final class AppCoordinator: ObservableObject {
       history = []
       return
     }
-    history = (try? await historyStore.load()) ?? []
+    do {
+      history = try await historyStore.load()
+    } catch {
+      history = []
+      settingsError = "Unreadable transcript history was quarantined."
+      recordDiagnostic(category: .storage, code: "history_load_failed")
+    }
+  }
+
+  private func recordDiagnostic(category: DiagnosticCategory, code: String) {
+    VaniLog.event(category: category, code: code)
+    Task {
+      await diagnosticStore.record(DiagnosticEvent(category: category, code: code))
+    }
   }
 
   private func installSystemObservers() {

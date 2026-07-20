@@ -7,7 +7,7 @@ someone who wants private English voice typing without an account or cloud servi
 
 ## Core workflow
 
-1. Complete microphone and Accessibility permission setup.
+1. Complete Microphone, Accessibility, and Input Monitoring permission setup.
 2. Hold a global shortcut.
 3. Speak while a non-activating overlay shows capture state.
 4. Release the shortcut.

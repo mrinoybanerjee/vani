@@ -13,7 +13,12 @@ All notable changes follow semantic versioning.
 - Transcript recovery, optional history, dictionary, diagnostics, and settings
 - Deterministic fixture, 500-cycle reliability harness, CI, and release automation
 - Public-repository Swift CodeQL scanning and Dependabot security updates
+- Stable local signing support so macOS privacy grants survive normal rebuilds
+- Exact-revision, exact-path model downloader with verified atomic installation
 
 ### Fixed
 
 - Stop the hidden overlay animation so the warm menu-bar app returns to 0% idle CPU
+- Capture Left Fn on key-down and release, including separate Input Monitoring setup
+- Recover automatically from silence and verify delayed rich-text insertion
+- Surface content-free diagnostics for settings, history, and hotkey startup failures

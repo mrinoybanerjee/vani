@@ -8,13 +8,13 @@ Vani is local-first by design.
 - Audio is not persisted by default.
 - Transcript history is disabled by default.
 - No account, analytics, advertising, or crash-reporting SDK is included.
-- Runtime network access is limited to an explicit model download or a
-  user-initiated update action.
+- Runtime network access is limited to the explicit model download.
 - Support diagnostics exclude audio and transcript text by default.
 
-The one-time model download is provided through FluidAudio from the
-`FluidInference/parakeet-tdt-0.6b-v2-coreml` Hugging Face repository. After setup,
-dictation does not need a network connection.
+The one-time model download comes from an exact revision of the
+`FluidInference/parakeet-tdt-0.6b-v2-coreml` Hugging Face repository. Vani downloads
+only its allowlisted model files and verifies each file before installation. After
+setup, dictation does not need a network connection.
 
 ## Local storage
 

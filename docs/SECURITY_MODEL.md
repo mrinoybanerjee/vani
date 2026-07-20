@@ -9,7 +9,8 @@ and diagnostics.
 ## Trust boundaries
 
 - FluidAudio and its exact-pinned Swift dependencies execute in the Vani process.
-- The English Core ML model is downloaded only after a user action.
+- The English Core ML model is downloaded only after a user action from an exact
+  repository revision and an allowlist of exact relative paths.
 - Every required model artifact is checked against a byte count and SHA-256 digest
   pinned to an audited repository revision before Core ML loads it.
 - Apple Accessibility and Core Graphics APIs can target other applications only
@@ -28,6 +29,8 @@ and diagnostics.
 - History is opt-in, bounded, atomic, and clearable.
 - Diagnostics are content-free and bounded.
 - Unexpected, missing, changed, hidden, or symlinked model artifacts are rejected.
+- Model files are downloaded to a private staging directory, verified in full, and
+  installed with same-volume renames; dynamic remote paths never reach the filesystem.
 - CI uses exact action commit SHAs and exact Swift package versions.
 - CodeQL analyzes Swift pull requests, main, and a weekly schedule when the
   repository is public.

@@ -67,7 +67,9 @@ else
         --options runtime \
         --entitlements "$ROOT/Resources/Vani.entitlements" \
     )
-    if [[ "$IDENTITY" == Developer\ ID\ Application:* ]]; then
+    if [[ "${CODESIGN_TIMESTAMP:-auto}" == "1" \
+        || ( "${CODESIGN_TIMESTAMP:-auto}" == "auto" \
+            && "$IDENTITY" == Developer\ ID\ Application* ) ]]; then
         SIGNING_ARGUMENTS+=(--timestamp)
     fi
     codesign "${SIGNING_ARGUMENTS[@]}" "$STAGING_APP"

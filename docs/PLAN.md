@@ -106,7 +106,7 @@ without unbounded memory growth.
 ## Milestone 4: Product finish
 
 - Permission checklist, menu-bar popover, overlay, settings, and history UI
-- Personal dictionary with exact correction and supported model biasing
+- Personal dictionary with deterministic exact correction
 - VoiceOver, keyboard navigation, contrast, Reduce Motion, and multi-display QA
 - Resource, latency, and accuracy benchmark publication
 

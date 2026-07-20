@@ -33,8 +33,9 @@ network. Captured audio is converted to mono 16 kHz float samples after recordin
 ## Speech and text
 
 `FluidAudioSpeechRecognizer` loads the English Parakeet TDT v2 Core ML pipeline and
-uses CPU plus Neural Engine compute units. Before loading, Vani verifies the exact
-file set, sizes, and SHA-256 digests against a pinned model revision. `TextPipeline`
+uses CPU plus Neural Engine compute units. Vani downloads only an allowlist of exact
+paths from a pinned model revision into private staging. Before atomic installation
+and loading, it verifies the exact file set, sizes, and SHA-256 digests. `TextPipeline`
 performs only conservative whitespace cleanup and user-defined exact phrase
 replacement. V1 does not infer punctuation, style, intent, or surrounding context.
 

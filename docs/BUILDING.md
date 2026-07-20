@@ -27,13 +27,17 @@ Set `INSTALL_ROOT` to install somewhere other than `/Applications`.
 
 ## Permissions and signatures
 
-macOS grants Microphone and Accessibility access to a signed app identity. An ad-hoc
+macOS grants Microphone, Accessibility, and Input Monitoring access to a signed app
+identity. An ad-hoc
 signature is based on the current executable, so its identity changes after a rebuild
-and macOS can ask for both permissions again.
+and macOS can ask for those permissions again.
 
 When the login keychain contains a valid code-signing identity named
 `Vani Local Development`, local builds select it automatically. This keeps Vani's
 identity stable across rebuilds, so permissions normally need to be granted only once.
+Normal launches do not require permissions to be reset. macOS may ask again if the
+bundle identifier or signing identity changes, the app is replaced by a differently
+signed build, or the system privacy database is reset.
 Set `CODESIGN_IDENTITY=-` to force an ad-hoc build, or set it to another identity to
 override the automatic selection.
 
