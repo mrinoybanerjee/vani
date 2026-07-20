@@ -28,3 +28,4 @@ All notable changes follow semantic versioning.
 - Use private installer staging paths and remove ephemeral CI signing material
 - Create the build staging directory during a direct clean-clone installation
 - Report local and release signing identities correctly under shell pipe-failure checks
+- Cancel superseded CodeQL runs to avoid wasting macOS CI capacity
