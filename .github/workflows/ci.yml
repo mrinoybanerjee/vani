@@ -26,6 +26,14 @@ jobs:
       - name: Report toolchain
         run: swift --version
 
+      - name: Check local setup prerequisites
+        run: ./scripts/doctor.sh
+
+      - name: Check shell scripts
+        run: |
+          bash -n scripts/*.sh
+          ./scripts/uninstall-local.sh --dry-run --remove-model
+
       - name: Resolve pinned dependencies
         run: swift package resolve
 
