@@ -43,14 +43,15 @@ jobs:
           CERTIFICATE_PASSWORD: ${{ secrets.DEVELOPER_ID_APPLICATION_PASSWORD }}
           KEYCHAIN_PASSWORD: ${{ secrets.CI_KEYCHAIN_PASSWORD }}
         run: |
-          echo "$CERTIFICATE_P12" | base64 --decode > "$RUNNER_TEMP/vani.p12"
+          umask 077
+          printf '%s' "$CERTIFICATE_P12" | base64 --decode > "$RUNNER_TEMP/vani.p12"
           security create-keychain -p "$KEYCHAIN_PASSWORD" "$RUNNER_TEMP/vani.keychain-db"
           security set-keychain-settings -lut 21600 "$RUNNER_TEMP/vani.keychain-db"
           security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$RUNNER_TEMP/vani.keychain-db"
           security import "$RUNNER_TEMP/vani.p12" -k "$RUNNER_TEMP/vani.keychain-db" -P "$CERTIFICATE_PASSWORD" -T /usr/bin/codesign
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$RUNNER_TEMP/vani.keychain-db"
           security list-keychains -d user -s "$RUNNER_TEMP/vani.keychain-db"
-          SIGNING_IDENTITY="$(security find-identity -v -p codesigning "$RUNNER_TEMP/vani.keychain-db" | awk '/Developer ID Application/{print $2; exit}')"
+          SIGNING_IDENTITY="$(security find-identity -v -p codesigning "$RUNNER_TEMP/vani.keychain-db" | awk '/Developer ID Application/ && !found {print $2; found=1}')"
           test -n "$SIGNING_IDENTITY"
           echo "CODESIGN_IDENTITY=$SIGNING_IDENTITY" >> "$GITHUB_ENV"
 
@@ -93,3 +94,9 @@ jobs:
           else
             gh release create "$GITHUB_REF_NAME" Vani-macOS-arm64.zip Vani-macOS-arm64.zip.sha256 --verify-tag --generate-notes
           fi
+
+      - name: Remove signing material
+        if: always()
+        run: |
+          security delete-keychain "$RUNNER_TEMP/vani.keychain-db" >/dev/null 2>&1 || true
+          rm -f "$RUNNER_TEMP/vani.p12"

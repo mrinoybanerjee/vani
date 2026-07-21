@@ -6,11 +6,12 @@ telemetry, plugins, generative rewriting, another platform, or another speech en
 
 ## Development
 
-1. Read `docs/ARCHITECTURE.md`, `PRIVACY.md`, and `SECURITY.md`.
-2. Create a focused branch from `main`.
-3. Add tests for changed behavior.
-4. Run `./scripts/lint.sh`, `./scripts/test.sh`, and `./scripts/build-app.sh`.
-5. Explain user-visible behavior, privacy impact, and manual QA in the pull request.
+1. Run `./scripts/doctor.sh` and resolve any errors.
+2. Read `docs/ARCHITECTURE.md`, `PRIVACY.md`, and `SECURITY.md`.
+3. Create a focused branch from `main`.
+4. Add tests for changed behavior.
+5. Run `./scripts/lint.sh`, `./scripts/test.sh`, and `./scripts/build-app.sh`.
+6. Explain user-visible behavior, privacy impact, and manual QA in the pull request.
 
 Keep the real-time audio callback bounded. Do not log transcript, audio, clipboard,
 or focused-field content. Preserve recovery behavior whenever insertion cannot be

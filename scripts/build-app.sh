@@ -5,13 +5,15 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CONFIGURATION="${CONFIGURATION:-release}"
 APP_PATH="$ROOT/dist/Vani.app"
-STAGING_ROOT="$(mktemp -d "$ROOT/.build/vani-app.XXXXXX")"
+BUILD_ROOT="$ROOT/.build"
+mkdir -p "$BUILD_ROOT"
+STAGING_ROOT="$(mktemp -d "$BUILD_ROOT/vani-app.XXXXXX")"
 STAGING_APP="$STAGING_ROOT/Vani.app"
 LOCAL_SIGNING_IDENTITY="Vani Local Development"
 if [[ -n "${CODESIGN_IDENTITY+x}" ]]; then
     IDENTITY="$CODESIGN_IDENTITY"
 elif security find-identity -v -p codesigning 2>/dev/null \
-    | grep -Fq "\"$LOCAL_SIGNING_IDENTITY\""; then
+    | grep -F "\"$LOCAL_SIGNING_IDENTITY\"" >/dev/null; then
     IDENTITY="$LOCAL_SIGNING_IDENTITY"
 else
     IDENTITY="-"
