@@ -24,6 +24,7 @@ public actor DictationSession {
   private var preparationGeneration: UInt64 = 0
   private var isStartingCapture = false
   private var currentTarget: TextTarget?
+  private var insertionFeedback: InsertionFeedback?
   private var observer: Observer?
 
   public init(
@@ -120,6 +121,7 @@ public actor DictationSession {
     }
     await recovery.clear()
     failure = nil
+    insertionFeedback = nil
 
     do {
       try await audioCapture.start()
@@ -404,10 +406,13 @@ public actor DictationSession {
     switch result {
     case .verified:
       diagnosticCode = "verified"
+      insertionFeedback = .verified
     case .verifiedClipboardPreserved:
       diagnosticCode = "verified_clipboard_preserved"
+      insertionFeedback = .verified
     case .unverifiedClipboardPreserved:
       diagnosticCode = "unverified_clipboard_preserved"
+      insertionFeedback = .unconfirmed
     case .manualPasteRequired:
       throw VaniFailure.insertionUnverified
     }
@@ -509,7 +514,8 @@ public actor DictationSession {
       modelProgress: modelProgress,
       isModelReady: modelReady,
       hasRecoverableTranscript: payload?.transcript != nil,
-      recoverableTranscript: payload?.transcript
+      recoverableTranscript: payload?.transcript,
+      insertionFeedback: insertionFeedback
     )
   }
 

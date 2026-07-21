@@ -125,6 +125,7 @@ func dictationSessionCompletesTheVerifiedHappyPath() async throws {
   #expect(snapshot.phase == .ready)
   #expect(snapshot.failure == nil)
   #expect(!snapshot.hasRecoverableTranscript)
+  #expect(snapshot.insertionFeedback == .verified)
   #expect(insertion.insertedTexts == ["hello world"])
   #expect(await audio.startCount == 1)
   #expect(await audio.stopCount == 1)
@@ -293,6 +294,7 @@ func unverifiedAttemptWithPreservedClipboardDoesNotBlockTheNextDictation() async
   #expect(snapshot.phase == .ready)
   #expect(snapshot.failure == nil)
   #expect(!snapshot.hasRecoverableTranscript)
+  #expect(snapshot.insertionFeedback == .unconfirmed)
   #expect(
     await diagnostics.snapshot().contains {
       $0.code == "unverified_clipboard_preserved"
@@ -305,6 +307,7 @@ func unverifiedAttemptWithPreservedClipboardDoesNotBlockTheNextDictation() async
   snapshot = await session.snapshot()
   #expect(snapshot.phase == .ready)
   #expect(snapshot.failure == nil)
+  #expect(snapshot.insertionFeedback == .verified)
   #expect(insertion.insertedTexts == ["first attempt", "second attempt"])
 }
 

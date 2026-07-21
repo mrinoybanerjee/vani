@@ -41,11 +41,12 @@ replacement. V1 does not infer punctuation, style, intent, or surrounding contex
 
 ## Insertion contract
 
-Vani records the focused process before capture. It refuses insertion if the target
-process changes. It first attempts a settable Accessibility selected-text operation
-and verifies an observable value change. Otherwise it snapshots the pasteboard,
-pastes, verifies the target value, and restores the snapshot only if the pasteboard
-was not changed by another process. Unverifiable results remain recoverable.
+Vani records the focused process and text element before capture. It refuses insertion
+if that target changes. It snapshots the pasteboard, sends one paste command to the
+captured process, and verifies an observable value, selection, range, or character-count
+change. It restores the snapshot only after verification and only if another process
+did not change the pasteboard. An unverified paste leaves the transcript on the
+clipboard and is never reported as successful.
 
 ## Persistence
 

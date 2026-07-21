@@ -45,7 +45,7 @@ DictationSession state machine
     |----> AudioCapture actor ----> AVAudioEngine
     |----> SpeechEngine actor ----> FluidAudio/Core ML
     |----> TextPipeline ----------> deterministic rules + dictionary
-    |----> TextInsertion ---------> Accessibility, then paste fallback
+    |----> TextInsertion ---------> target-bound paste + Accessibility verification
     `----> TranscriptRecovery ----> memory, optional local history
 ```
 
@@ -94,7 +94,7 @@ network access after model setup.
 
 ## Milestone 3: Reliability and insertion
 
-- Direct Accessibility insertion where supported
+- Target-bound paste insertion with observable verification
 - Verified fallback behavior and clipboard restoration
 - Silence, short-tap, clipping, and hallucination guards based on fixtures
 - Sleep/wake, audio route change, permission revocation, and model failure recovery
@@ -147,7 +147,7 @@ permitted only when measurements identify inference finalization as the bottlene
 | Permission denied or revoked | State and manual UI tests |
 | Model missing, loading, corrupt, or failed | Adapter and recovery tests |
 | Focus changes during dictation | Integration tests |
-| Accessibility insert supported or rejected | Strategy tests |
+| Accessibility observation available or unavailable | Strategy tests |
 | Paste succeeds, times out, or target changes | Integration and recovery tests |
 | Sleep/wake and microphone route change | Integration tests |
 | History disabled, enabled, full, or corrupt | Storage tests |
@@ -179,10 +179,9 @@ generative rewrite, plugin system, meeting workflow, or non-Mac platform.
 - Pin FluidAudio to an exact reviewed version.
 - Keep real-time audio work allocation-bounded and lock-minimal.
 - Never log audio or transcript contents.
-- Direct Accessibility insertion may restore the clipboard only after the target
-  value change is observed. Synthetic paste may restore it only when the target
-  exposes an observable value change. Otherwise leave the transcript on the
-  clipboard and tell the user that manual paste is available.
+- Paste may restore the clipboard only after an observable target change is verified.
+  Otherwise leave the transcript on the clipboard and report that insertion was not
+  confirmed.
 - Store settings with typed Codable structures and atomic writes where UserDefaults
   is not sufficient.
 - Add no abstraction without a second implementation, a test seam, or a measured
@@ -285,7 +284,7 @@ Unverified claims         -> public benchmarks     -> community benchmark corpus
 | Empty capture | Sample count and energy | Return ready, retry | Never invent text |
 | Model failure | Typed engine error | Repair or redownload | Preserve current transcript state |
 | Focus changed | Target identity mismatch | Abort insertion | Never type into the wrong app |
-| AX insertion rejected | AX result or value mismatch | Safe paste route | Preserve transcript |
+| Event posting rejected | Core Graphics preflight failure | Manual paste recovery | Preserve transcript |
 | Paste unobservable | Target has no readable value | Leave transcript on clipboard | Never report false success |
 | Clipboard race | Change count mismatch | Keep newer user clipboard | Never overwrite user content |
 | Sleep or route change | Workspace/audio notification | Rebuild before next session | Clear ready state until healthy |
@@ -333,9 +332,7 @@ Vani executable
           -> AudioCapturing protocol -> AVAudioEngineAudioCapture
           -> SpeechRecognizing protocol -> FluidAudioSpeechEngine
           -> TextProcessing value pipeline
-          -> TextInserting protocol
-              -> AccessibilityTextInsertion
-              -> SafePasteInsertion
+          -> TextInserting protocol -> SafePasteInsertion
           -> TranscriptRecovery actor
       -> OverlayController (non-activating NSPanel)
       -> SettingsStore
@@ -360,8 +357,7 @@ State transition table --------> exhaustive unit tests
 Text cleanup + dictionary -----> table-driven unit tests
 WAVE fixture capture ----------> silence/noise/speech fixture tests
 FluidAudio adapter ------------> fixed local model integration tests
-AX insertion ------------------> fake adapter tests + live app matrix
-Safe paste --------------------> pasteboard race tests + live app matrix
+Safe paste --------------------> fake adapter tests + pasteboard races + live app matrix
 Sleep/route/permission events --> deterministic state tests + manual OS checks
 500-session run ---------------> release performance/leak suite
 ```

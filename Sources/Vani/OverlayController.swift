@@ -35,9 +35,20 @@ final class OverlayController {
     case .recoverableError:
       show(.failure(snapshot.failure?.title ?? "Action needed"))
     case .ready where previousPhase == .inserting:
-      show(.success)
+      let displayDuration: Duration
+      switch snapshot.insertionFeedback {
+      case .verified:
+        show(.success)
+        displayDuration = .milliseconds(700)
+      case .unconfirmed:
+        show(.unconfirmed)
+        displayDuration = .milliseconds(1_200)
+      case nil:
+        hide()
+        return
+      }
       hideTask = Task { [weak self] in
-        try? await Task.sleep(for: .milliseconds(700))
+        try? await Task.sleep(for: displayDuration)
         guard !Task.isCancelled else { return }
         self?.hide()
       }
@@ -75,6 +86,7 @@ private enum OverlayState: Equatable {
   case listening
   case processing
   case success
+  case unconfirmed
   case failure(String)
 }
 
@@ -125,6 +137,8 @@ private struct OverlayView: View {
       Image(systemName: "text.bubble.fill").foregroundStyle(.blue)
     case .success:
       Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+    case .unconfirmed:
+      Image(systemName: "clipboard.fill").foregroundStyle(.orange)
     case .failure:
       Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
     }
@@ -136,6 +150,7 @@ private struct OverlayView: View {
     case .listening: "Listening"
     case .processing: "Writing"
     case .success: "Inserted"
+    case .unconfirmed: "Paste not confirmed"
     case .failure(let message): message
     }
   }

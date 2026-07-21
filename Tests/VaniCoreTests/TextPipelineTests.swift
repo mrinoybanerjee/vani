@@ -61,6 +61,52 @@ func verifiesRichTextInsertionFromParameterizedRangeText() {
 }
 
 @Test @MainActor
+func verifiesInsertionWhenRichTextAddsATrailingParagraphMarker() {
+  let before = TextInsertionObservation(
+    value: "prefix ",
+    selectedRange: NSRange(location: 7, length: 0),
+    characterCount: 7
+  )
+  let after = TextInsertionObservation(
+    value: "prefix hello world\n",
+    selectedRange: NSRange(location: 19, length: 0),
+    characterCount: 19
+  )
+
+  #expect(
+    SystemTextInserter.verifyInsertion(
+      "hello world",
+      before: before,
+      after: after,
+      insertedText: "hello world"
+    )
+  )
+}
+
+@Test @MainActor
+func verifiesParameterizedRangeWithAFormattingCharacterCountDelta() {
+  let before = TextInsertionObservation(
+    value: nil,
+    selectedRange: NSRange(location: 0, length: 0),
+    characterCount: 0
+  )
+  let after = TextInsertionObservation(
+    value: nil,
+    selectedRange: nil,
+    characterCount: 12
+  )
+
+  #expect(
+    SystemTextInserter.verifyInsertion(
+      "hello world",
+      before: before,
+      after: after,
+      insertedText: "hello world"
+    )
+  )
+}
+
+@Test @MainActor
 func rejectsPreexistingParameterizedRangeTextWithoutStateChange() {
   let unchanged = TextInsertionObservation(
     value: nil,
