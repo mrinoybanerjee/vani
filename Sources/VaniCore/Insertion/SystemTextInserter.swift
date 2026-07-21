@@ -36,38 +36,11 @@ public final class SystemTextInserter: TextInserting {
 
     if AXIsProcessTrusted(), let element = focusedElement() {
       try verifyElement(element, matches: target)
-      let before = observation(of: element)
-      if before.value != nil,
-        isAttributeSettable(kAXSelectedTextAttribute as CFString, on: element)
-      {
-        let result = AXUIElementSetAttributeValue(
-          element,
-          kAXSelectedTextAttribute as CFString,
-          text as CFTypeRef
-        )
-        if result == .success {
-          if try await waitForInsertion(
-            text,
-            before: before,
-            element: element,
-            initialDelay: .milliseconds(80)
-          ) {
-            return .verified
-          }
-
-          // A successful AX write may not expose readable state afterward. Do not
-          // risk duplicating the text with a second insertion mechanism.
-          try copyForManualPaste(text)
-          VaniLog.event(category: .insertion, code: "ax_write_unverified")
-          return .unverifiedClipboardPreserved
-        }
-      }
-
       return try await pasteAndVerify(
         text,
         target: target,
         element: element,
-        before: before
+        before: observation(of: element)
       )
     }
 
@@ -301,12 +274,6 @@ public final class SystemTextInserter: TextInserting {
       return nil
     }
     return Self.readableString(from: value)
-  }
-
-  private func isAttributeSettable(_ attribute: CFString, on element: AXUIElement) -> Bool {
-    var settable = DarwinBoolean(false)
-    return AXUIElementIsAttributeSettable(element, attribute, &settable) == .success
-      && settable.boolValue
   }
 
   private func waitForInsertion(
