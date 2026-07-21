@@ -8,6 +8,15 @@ struct TextInsertionObservation: Equatable {
   let characterCount: Int?
 }
 
+private enum TextInsertionEvidence: String {
+  case exactValue = "exact_value"
+  case valueAtRange = "value_at_range"
+  case changedValue = "changed_value"
+  case parameterizedRange = "parameterized_range"
+  case cursorAndCount = "cursor_and_count"
+  case cursorMovement = "cursor_movement"
+}
+
 @MainActor
 public final class SystemTextInserter: TextInserting {
   private let focusProvider: any FocusProviding
@@ -78,10 +87,11 @@ public final class SystemTextInserter: TextInserting {
     try verifyFocus(target)
 
     guard
-      try await waitForInsertion(
+      let evidence = try await waitForInsertion(
         text,
         before: before,
-        element: element,
+        initialElement: element,
+        target: target,
         initialDelay: .zero
       )
     else {
@@ -91,6 +101,7 @@ public final class SystemTextInserter: TextInserting {
       VaniLog.event(category: .insertion, code: "paste_unverified")
       return .unverifiedClipboardPreserved
     }
+    VaniLog.event(category: .insertion, code: "paste_verified_\(evidence.rawValue)")
 
     guard pasteboard.changeCount == transcriptChangeCount else {
       return .verifiedClipboardPreserved
@@ -166,6 +177,21 @@ public final class SystemTextInserter: TextInserting {
     after: TextInsertionObservation,
     insertedText: String?
   ) -> Bool {
+    insertionEvidence(
+      text,
+      before: before,
+      after: after,
+      insertedText: insertedText
+    ) != nil
+  }
+
+  private static func insertionEvidence(
+    _ text: String,
+    before: TextInsertionObservation,
+    after: TextInsertionObservation,
+    insertedText: String?
+  ) -> TextInsertionEvidence? {
+    let insertedLength = text.utf16.count
     if let beforeValue = before.value,
       let afterValue = after.value
     {
@@ -177,21 +203,27 @@ public final class SystemTextInserter: TextInserting {
           with: text
         )
         if afterValue == expectedValue {
-          return true
+          return .exactValue
+        }
+        if beforeValue != afterValue,
+          valueShowsInsertion(
+            text,
+            selectedRange: selectedRange,
+            beforeValue: beforeValue,
+            afterValue: afterValue
+          )
+        {
+          return .valueAtRange
         }
       } else if beforeValue != afterValue, afterValue.contains(text) {
-        return true
+        return .changedValue
       }
     }
 
-    let insertedLength = text.utf16.count
-    if insertedText == text,
-      let beforeRange = before.selectedRange,
-      let beforeCount = before.characterCount,
-      let afterCount = after.characterCount,
-      afterCount == beforeCount - beforeRange.length + insertedLength
-    {
-      return true
+    let contentStateChanged =
+      before.value != after.value || before.characterCount != after.characterCount
+    if insertedText == text, contentStateChanged {
+      return .parameterizedRange
     }
 
     guard let beforeRange = before.selectedRange,
@@ -199,15 +231,38 @@ public final class SystemTextInserter: TextInserting {
       afterRange.location == beforeRange.location + insertedLength,
       afterRange.length == 0
     else {
-      return false
+      return nil
     }
 
     guard let beforeCount = before.characterCount,
       let afterCount = after.characterCount
     else {
-      return true
+      return .cursorMovement
     }
     return afterCount == beforeCount - beforeRange.length + insertedLength
+      ? .cursorAndCount
+      : nil
+  }
+
+  private static func valueShowsInsertion(
+    _ text: String,
+    selectedRange: NSRange,
+    beforeValue: String,
+    afterValue: String
+  ) -> Bool {
+    let before = beforeValue as NSString
+    let after = afterValue as NSString
+    let insertedRange = NSRange(location: selectedRange.location, length: text.utf16.count)
+    guard NSMaxRange(selectedRange) <= before.length,
+      NSMaxRange(insertedRange) <= after.length,
+      after.substring(with: insertedRange) == text
+    else {
+      return false
+    }
+
+    let prefix = before.substring(to: selectedRange.location)
+    let suffix = before.substring(from: NSMaxRange(selectedRange))
+    return afterValue.hasPrefix(prefix) && afterValue.hasSuffix(suffix)
   }
 
   private func observation(of element: AXUIElement) -> TextInsertionObservation {
@@ -279,9 +334,10 @@ public final class SystemTextInserter: TextInserting {
   private func waitForInsertion(
     _ text: String,
     before: TextInsertionObservation,
-    element: AXUIElement,
+    initialElement: AXUIElement,
+    target: TextTarget?,
     initialDelay: Duration
-  ) async throws -> Bool {
+  ) async throws -> TextInsertionEvidence? {
     if initialDelay > .zero {
       try await Task.sleep(for: initialDelay)
     }
@@ -289,15 +345,18 @@ public final class SystemTextInserter: TextInserting {
     let clock = ContinuousClock()
     let deadline = clock.now.advanced(by: verificationTimeout)
     while true {
-      if Self.verifyInsertion(
+      try verifyFocus(target)
+      let element = focusedElement() ?? initialElement
+      try verifyElement(element, matches: target)
+      if let evidence = Self.insertionEvidence(
         text,
         before: before,
         after: observation(of: element),
         insertedText: stringForInsertedRange(text, before: before, element: element)
       ) {
-        return true
+        return evidence
       }
-      guard clock.now < deadline else { return false }
+      guard clock.now < deadline else { return nil }
       try await Task.sleep(for: verificationPollInterval)
     }
   }
