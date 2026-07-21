@@ -54,6 +54,12 @@ public final class SystemTextInserter: TextInserting {
           ) {
             return .verified
           }
+
+          // A successful AX write may not expose readable state afterward. Do not
+          // risk duplicating the text with a second insertion mechanism.
+          try copyForManualPaste(text)
+          VaniLog.event(category: .insertion, code: "ax_write_unverified")
+          return .unverifiedClipboardPreserved
         }
       }
 
@@ -109,7 +115,8 @@ public final class SystemTextInserter: TextInserting {
       if pasteboard.changeCount != transcriptChangeCount {
         throw VaniFailure.clipboardChanged
       }
-      return .manualPasteRequired
+      VaniLog.event(category: .insertion, code: "paste_unverified")
+      return .unverifiedClipboardPreserved
     }
 
     guard pasteboard.changeCount == transcriptChangeCount else {

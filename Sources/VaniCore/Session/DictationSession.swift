@@ -399,40 +399,44 @@ public actor DictationSession {
     let signpost = VaniSignpost.beginInsertion()
     defer { VaniSignpost.endInsertion(signpost) }
     let result = try await textInserter.insert(transcript, into: payload.target)
-    switch result {
-    case .verified, .verifiedClipboardPreserved:
-      let diagnosticCode =
-        result == .verified
-        ? "verified"
-        : "verified_clipboard_preserved"
-      await diagnostics.record(
-        DiagnosticEvent(
-          category: .insertion,
-          code: diagnosticCode,
-          phase: machine.phase,
-          durationMilliseconds: milliseconds(since: startedAt)
-        )
-      )
-      if settings.historyEnabled {
-        do {
-          try await history.append(
-            TranscriptHistoryEntry(text: transcript),
-            limit: settings.historyLimit
-          )
-        } catch {
-          await diagnostics.record(
-            DiagnosticEvent(category: .storage, code: "history_write_failed")
-          )
-        }
-      }
-      await recovery.clear()
-      currentTarget = nil
-      failure = nil
-      try await transition(.insertionSucceeded)
 
+    let diagnosticCode: String
+    switch result {
+    case .verified:
+      diagnosticCode = "verified"
+    case .verifiedClipboardPreserved:
+      diagnosticCode = "verified_clipboard_preserved"
+    case .unverifiedClipboardPreserved:
+      diagnosticCode = "unverified_clipboard_preserved"
     case .manualPasteRequired:
       throw VaniFailure.insertionUnverified
     }
+
+    VaniLog.event(category: .insertion, code: diagnosticCode)
+    await diagnostics.record(
+      DiagnosticEvent(
+        category: .insertion,
+        code: diagnosticCode,
+        phase: machine.phase,
+        durationMilliseconds: milliseconds(since: startedAt)
+      )
+    )
+    if settings.historyEnabled {
+      do {
+        try await history.append(
+          TranscriptHistoryEntry(text: transcript),
+          limit: settings.historyLimit
+        )
+      } catch {
+        await diagnostics.record(
+          DiagnosticEvent(category: .storage, code: "history_write_failed")
+        )
+      }
+    }
+    await recovery.clear()
+    currentTarget = nil
+    failure = nil
+    try await transition(.insertionSucceeded)
   }
 
   private func fail(_ failure: VaniFailure) async {
