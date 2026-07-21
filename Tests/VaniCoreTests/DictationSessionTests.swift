@@ -268,6 +268,47 @@ func verifiedInsertionWithNewerClipboardContentDoesNotBecomeRetryable() async th
 }
 
 @Test @MainActor
+func unverifiedAttemptWithPreservedClipboardDoesNotBlockTheNextDictation() async throws {
+  let diagnostics = DiagnosticStore()
+  let insertion = MockTextInserter(results: [
+    .success(.unverifiedClipboardPreserved),
+    .success(.verified),
+  ])
+  let session = DictationSession(
+    audioCapture: MockAudioCapture(),
+    speechRecognizer: MockSpeechRecognizer(results: [
+      .success(speechResult("first attempt")),
+      .success(speechResult("second attempt")),
+    ]),
+    textInserter: insertion,
+    focusProvider: MockFocusProvider(),
+    diagnostics: diagnostics
+  )
+
+  #expect(await session.prepareModels(allowDownload: false))
+  await session.beginDictation()
+  await session.endDictation()
+
+  var snapshot = await session.snapshot()
+  #expect(snapshot.phase == .ready)
+  #expect(snapshot.failure == nil)
+  #expect(!snapshot.hasRecoverableTranscript)
+  #expect(
+    await diagnostics.snapshot().contains {
+      $0.code == "unverified_clipboard_preserved"
+    }
+  )
+
+  await session.beginDictation()
+  await session.endDictation()
+
+  snapshot = await session.snapshot()
+  #expect(snapshot.phase == .ready)
+  #expect(snapshot.failure == nil)
+  #expect(insertion.insertedTexts == ["first attempt", "second attempt"])
+}
+
+@Test @MainActor
 func concurrentStartRequestsOnlyStartOneCapture() async throws {
   let audio = MockAudioCapture(startDelay: .milliseconds(25))
   let session = DictationSession(

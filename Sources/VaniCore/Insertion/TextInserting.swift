@@ -19,6 +19,7 @@ public struct TextTarget: Sendable, Equatable {
 public enum TextInsertionResult: Sendable, Equatable {
   case verified
   case verifiedClipboardPreserved
+  case unverifiedClipboardPreserved
   case manualPasteRequired
 }
 
