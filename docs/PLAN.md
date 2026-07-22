@@ -285,7 +285,7 @@ Unverified claims         -> public benchmarks     -> community benchmark corpus
 | Model failure | Typed engine error | Repair or redownload | Preserve current transcript state |
 | Focus changed | Target identity mismatch | Abort insertion | Never type into the wrong app |
 | Event posting rejected | Core Graphics preflight failure | Manual paste recovery | Preserve transcript |
-| Paste unobservable | Target has no readable value | Leave transcript on clipboard | Never report false success |
+| Paste unobservable | Target has no readable value | Deliver once and leave transcript on clipboard | Never report false success |
 | Clipboard race | Change count mismatch | Keep newer user clipboard | Never overwrite user content |
 | Sleep or route change | Workspace/audio notification | Rebuild before next session | Clear ready state until healthy |
 

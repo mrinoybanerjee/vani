@@ -1,5 +1,4 @@
 import AppKit
-import ApplicationServices
 import Foundation
 
 struct TextInsertionObservation: Equatable {
@@ -20,20 +19,52 @@ private enum TextInsertionEvidence: String {
 @MainActor
 public final class SystemTextInserter: TextInserting {
   private let focusProvider: any FocusProviding
+  private let environment: any TextInsertionEnvironment
+  private let pasteboard: NSPasteboard
   private let pasteDelay: Duration
   private let verificationTimeout: Duration
   private let verificationPollInterval: Duration
+  private let eventInterval: Duration
+  private let clipboardRestoreDelay: Duration
 
-  public init(
+  public convenience init(
     focusProvider: any FocusProviding = SystemFocusProvider(),
     pasteDelay: Duration = .milliseconds(140),
-    verificationTimeout: Duration = .milliseconds(600),
-    verificationPollInterval: Duration = .milliseconds(50)
+    verificationTimeout: Duration = .seconds(2),
+    verificationPollInterval: Duration = .milliseconds(50),
+    eventInterval: Duration = .milliseconds(8),
+    clipboardRestoreDelay: Duration = .milliseconds(80)
+  ) {
+    self.init(
+      focusProvider: focusProvider,
+      environment: SystemTextInsertionEnvironment(),
+      pasteboard: .general,
+      pasteDelay: pasteDelay,
+      verificationTimeout: verificationTimeout,
+      verificationPollInterval: verificationPollInterval,
+      eventInterval: eventInterval,
+      clipboardRestoreDelay: clipboardRestoreDelay
+    )
+  }
+
+  init(
+    focusProvider: any FocusProviding,
+    environment: any TextInsertionEnvironment,
+    pasteboard: NSPasteboard,
+    pasteDelay: Duration = .milliseconds(140),
+    verificationTimeout: Duration = .seconds(2),
+    verificationPollInterval: Duration = .milliseconds(50),
+    eventInterval: Duration = .milliseconds(8),
+    clipboardRestoreDelay: Duration = .milliseconds(80)
   ) {
     self.focusProvider = focusProvider
+    self.environment = environment
+    self.pasteboard = pasteboard
     self.pasteDelay = pasteDelay
     self.verificationTimeout = verificationTimeout
     self.verificationPollInterval = verificationPollInterval
+    self.eventInterval = eventInterval
+    self.clipboardRestoreDelay = clipboardRestoreDelay
   }
 
   public func insert(
@@ -41,24 +72,27 @@ public final class SystemTextInserter: TextInserting {
     into target: TextTarget?
   ) async throws -> TextInsertionResult {
     guard !text.isEmpty else { throw VaniFailure.emptyTranscript }
+    guard let target else {
+      try copyForManualPaste(text)
+      return .manualPasteRequired
+    }
     try verifyFocus(target)
 
-    if AXIsProcessTrusted(), let element = focusedElement() {
-      try verifyElement(element, matches: target)
-      return try await pasteAndVerify(
-        text,
-        target: target,
-        element: element,
-        before: observation(of: element)
-      )
+    guard environment.canPostPaste else {
+      VaniLog.event(category: .insertion, code: "paste_event_access_denied")
+      try copyForManualPaste(text)
+      throw VaniFailure.accessibilityPermissionDenied
     }
 
-    try copyForManualPaste(text)
-    return .manualPasteRequired
+    let before = environment.read(target: target, insertedRange: nil)?.observation
+    VaniLog.event(
+      category: .insertion,
+      code: before == nil ? "paste_preflight_unobservable" : "paste_preflight_observable"
+    )
+    return try await pasteAndVerify(text, target: target, before: before)
   }
 
   public func copyForManualPaste(_ text: String) throws {
-    let pasteboard = NSPasteboard.general
     pasteboard.clearContents()
     guard pasteboard.setString(text, forType: .string) else {
       throw VaniFailure.insertionFailed
@@ -67,11 +101,9 @@ public final class SystemTextInserter: TextInserting {
 
   private func pasteAndVerify(
     _ text: String,
-    target: TextTarget?,
-    element: AXUIElement,
-    before: TextInsertionObservation
+    target: TextTarget,
+    before: TextInsertionObservation?
   ) async throws -> TextInsertionResult {
-    let pasteboard = NSPasteboard.general
     let original = PasteboardSnapshot.capture(from: pasteboard)
     pasteboard.clearContents()
     guard pasteboard.setString(text, forType: .string) else {
@@ -79,86 +111,66 @@ public final class SystemTextInserter: TextInserting {
     }
     let transcriptChangeCount = pasteboard.changeCount
 
-    guard postPasteShortcut(to: target?.processIdentifier) else {
+    do {
+      try verifyFocus(target)
+    } catch {
+      if pasteboard.changeCount == transcriptChangeCount {
+        _ = original.restore(to: pasteboard)
+      }
+      throw error
+    }
+
+    guard
+      await environment.postPasteShortcut(
+        to: target.processIdentifier,
+        interval: eventInterval
+      )
+    else {
+      VaniLog.event(category: .insertion, code: "paste_event_post_failed")
       return .manualPasteRequired
     }
+    VaniLog.event(category: .insertion, code: "paste_event_posted")
 
     try await Task.sleep(for: pasteDelay)
     try verifyFocus(target)
 
-    guard
-      let evidence = try await waitForInsertion(
-        text,
-        before: before,
-        initialElement: element,
-        target: target,
-        initialDelay: .zero
-      )
-    else {
-      if pasteboard.changeCount != transcriptChangeCount {
-        throw VaniFailure.clipboardChanged
-      }
-      VaniLog.event(category: .insertion, code: "paste_unverified")
-      return .unverifiedClipboardPreserved
+    let evidence: TextInsertionEvidence?
+    if let before {
+      evidence = try await waitForInsertion(text, before: before, target: target)
+    } else {
+      evidence = nil
     }
-    VaniLog.event(category: .insertion, code: "paste_verified_\(evidence.rawValue)")
 
-    guard pasteboard.changeCount == transcriptChangeCount else {
-      return .verifiedClipboardPreserved
+    if let evidence {
+      VaniLog.event(category: .insertion, code: "paste_verified_\(evidence.rawValue)")
+      if clipboardRestoreDelay > .zero {
+        try await Task.sleep(for: clipboardRestoreDelay)
+      }
+      guard pasteboard.changeCount == transcriptChangeCount else {
+        return .verifiedClipboardPreserved
+      }
+      return original.restore(to: pasteboard)
+        ? .verified
+        : .verifiedClipboardPreserved
     }
-    return original.restore(to: pasteboard)
-      ? .verified
-      : .verifiedClipboardPreserved
+
+    if pasteboard.changeCount != transcriptChangeCount {
+      throw VaniFailure.clipboardChanged
+    }
+    VaniLog.event(
+      category: .insertion,
+      code: before == nil ? "paste_unobservable" : "paste_unverified_timeout"
+    )
+    return .unverifiedClipboardPreserved
   }
 
-  private func verifyFocus(_ target: TextTarget?) throws {
-    guard let target else { return }
+  private func verifyFocus(_ target: TextTarget) throws {
     guard let current = focusProvider.currentTarget(),
       current.processIdentifier == target.processIdentifier,
-      target.focusedElementIdentifier == nil
-        || current.focusedElementIdentifier == target.focusedElementIdentifier
+      target.bundleIdentifier == nil || current.bundleIdentifier == target.bundleIdentifier
     else {
       throw VaniFailure.focusChanged
     }
-  }
-
-  private func verifyElement(_ element: AXUIElement, matches target: TextTarget?) throws {
-    guard let expected = target?.focusedElementIdentifier else { return }
-    guard CFHash(element) == expected else {
-      throw VaniFailure.focusChanged
-    }
-  }
-
-  private func focusedElement() -> AXUIElement? {
-    let systemWide = AXUIElementCreateSystemWide()
-    var value: CFTypeRef?
-    guard
-      AXUIElementCopyAttributeValue(
-        systemWide,
-        kAXFocusedUIElementAttribute as CFString,
-        &value
-      ) == .success
-    else {
-      return nil
-    }
-    guard let value, CFGetTypeID(value) == AXUIElementGetTypeID() else {
-      return nil
-    }
-    return unsafeDowncast(value, to: AXUIElement.self)
-  }
-
-  private func readableValue(of element: AXUIElement) -> String? {
-    var value: CFTypeRef?
-    guard
-      AXUIElementCopyAttributeValue(
-        element,
-        kAXValueAttribute as CFString,
-        &value
-      ) == .success
-    else {
-      return nil
-    }
-    return Self.readableString(from: value)
   }
 
   static func readableString(from value: Any?) -> String? {
@@ -265,143 +277,32 @@ public final class SystemTextInserter: TextInserting {
     return afterValue.hasPrefix(prefix) && afterValue.hasSuffix(suffix)
   }
 
-  private func observation(of element: AXUIElement) -> TextInsertionObservation {
-    TextInsertionObservation(
-      value: readableValue(of: element),
-      selectedRange: selectedTextRange(of: element),
-      characterCount: integerAttribute(kAXNumberOfCharactersAttribute as CFString, on: element)
-    )
-  }
-
-  private func selectedTextRange(of element: AXUIElement) -> NSRange? {
-    var value: CFTypeRef?
-    guard
-      AXUIElementCopyAttributeValue(
-        element,
-        kAXSelectedTextRangeAttribute as CFString,
-        &value
-      ) == .success,
-      let value,
-      CFGetTypeID(value) == AXValueGetTypeID()
-    else {
-      return nil
-    }
-
-    var range = CFRange()
-    let axValue = unsafeDowncast(value, to: AXValue.self)
-    guard AXValueGetType(axValue) == .cfRange,
-      AXValueGetValue(axValue, .cfRange, &range)
-    else {
-      return nil
-    }
-    return NSRange(location: range.location, length: range.length)
-  }
-
-  private func integerAttribute(_ attribute: CFString, on element: AXUIElement) -> Int? {
-    var value: CFTypeRef?
-    guard AXUIElementCopyAttributeValue(element, attribute, &value) == .success else {
-      return nil
-    }
-    return (value as? NSNumber)?.intValue
-  }
-
-  private func stringForInsertedRange(
-    _ text: String,
-    before: TextInsertionObservation,
-    element: AXUIElement
-  ) -> String? {
-    guard let selectedRange = before.selectedRange else { return nil }
-    var range = CFRange(
-      location: selectedRange.location,
-      length: text.utf16.count
-    )
-    guard let rangeValue = AXValueCreate(.cfRange, &range) else { return nil }
-
-    var value: CFTypeRef?
-    guard
-      AXUIElementCopyParameterizedAttributeValue(
-        element,
-        kAXStringForRangeParameterizedAttribute as CFString,
-        rangeValue,
-        &value
-      ) == .success
-    else {
-      return nil
-    }
-    return Self.readableString(from: value)
-  }
-
   private func waitForInsertion(
     _ text: String,
     before: TextInsertionObservation,
-    initialElement: AXUIElement,
-    target: TextTarget?,
-    initialDelay: Duration
+    target: TextTarget
   ) async throws -> TextInsertionEvidence? {
-    if initialDelay > .zero {
-      try await Task.sleep(for: initialDelay)
-    }
-
     let clock = ContinuousClock()
     let deadline = clock.now.advanced(by: verificationTimeout)
+    let insertedRange = before.selectedRange.map {
+      NSRange(location: $0.location, length: text.utf16.count)
+    }
     while true {
       try verifyFocus(target)
-      let element = focusedElement() ?? initialElement
-      try verifyElement(element, matches: target)
-      if let evidence = Self.insertionEvidence(
-        text,
-        before: before,
-        after: observation(of: element),
-        insertedText: stringForInsertedRange(text, before: before, element: element)
-      ) {
-        return evidence
+      if let read = environment.read(target: target, insertedRange: insertedRange) {
+        try verifyFocus(target)
+        if let evidence = Self.insertionEvidence(
+          text,
+          before: before,
+          after: read.observation,
+          insertedText: read.insertedText
+        ) {
+          return evidence
+        }
       }
       guard clock.now < deadline else { return nil }
       try await Task.sleep(for: verificationPollInterval)
     }
-  }
-
-  private func postPasteShortcut(to processIdentifier: Int32?) -> Bool {
-    guard CGPreflightPostEventAccess() else { return false }
-    guard let source = CGEventSource(stateID: .privateState),
-      let commandDown = CGEvent(
-        keyboardEventSource: source,
-        virtualKey: 55,
-        keyDown: true
-      ),
-      let keyDown = CGEvent(
-        keyboardEventSource: source,
-        virtualKey: 9,
-        keyDown: true
-      ),
-      let keyUp = CGEvent(
-        keyboardEventSource: source,
-        virtualKey: 9,
-        keyDown: false
-      ),
-      let commandUp = CGEvent(
-        keyboardEventSource: source,
-        virtualKey: 55,
-        keyDown: false
-      )
-    else {
-      return false
-    }
-
-    commandDown.flags = .maskCommand
-    keyDown.flags = .maskCommand
-    keyUp.flags = .maskCommand
-    let events = [commandDown, keyDown, keyUp, commandUp]
-    if let processIdentifier {
-      for event in events {
-        event.postToPid(processIdentifier)
-      }
-    } else {
-      for event in events {
-        event.post(tap: .cghidEventTap)
-      }
-    }
-    return true
   }
 }
 

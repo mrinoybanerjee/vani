@@ -27,8 +27,8 @@ credentials and notarization.
 - One-time English Parakeet TDT v2 model download
 - Exact model-revision manifest with per-file SHA-256 verification
 - Local microphone capture and Core ML transcription
-- Target-bound paste insertion with Accessibility-based verification
-- Transcript recovery when focus, insertion, or the clipboard changes
+- Process-bound paste delivery with app-scoped Accessibility verification
+- Clipboard-preserving recovery when focus, insertion, or the clipboard changes
 - Optional bounded history, disabled by default
 - Personal phrase dictionary and launch-at-login setting
 - Metadata-only diagnostics with no transcript or audio content

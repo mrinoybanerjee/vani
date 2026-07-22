@@ -22,7 +22,8 @@ and diagnostics.
 
 - Hold-to-record means no background microphone capture while idle.
 - Capture storage is preallocated and limited to two minutes.
-- Focus is checked before insertion and after paste delay.
+- Process focus is checked before insertion, after paste delivery, and during bounded
+  verification polling.
 - Clipboard restoration is conditional on both insertion verification and an
   unchanged pasteboard change count.
 - Recovery preserves content when success cannot be proven.
@@ -39,8 +40,9 @@ and diagnostics.
 
 - Accessibility APIs are powerful by design. Install only builds from this repository
   or signed releases whose checksum you verify.
-- Some controls do not expose readable Accessibility values. Vani leaves the
-  transcript available for manual paste instead of claiming success.
+- Some controls do not expose readable Accessibility values. Vani still delivers one
+  process-bound paste, leaves the transcript available for manual paste, and does not
+  claim verified success.
 - Ad-hoc local builds do not provide the identity or Gatekeeper assurance of a
   Developer ID signed, notarized release.
 - The app has no automatic updater in v1.
