@@ -219,6 +219,27 @@ func snippetsExpandWholePhrasesOnceAndIgnoreCase() {
 }
 
 @Test
+func snippetsAbsorbRecognizerPunctuationWhenExpansionAlreadyEndsWithPunctuation() {
+  let snippet = SnippetEntry(
+    trigger: "test snippet",
+    expansion: "Vani snippet live test passed."
+  )
+
+  for smartFormattingEnabled in [false, true] {
+    for artifact in [".", "!", "?", ",", ";", ":", "...", "…"] {
+      #expect(
+        textPipeline.process(
+          "test snippet\(artifact)",
+          dictionary: [],
+          snippets: [snippet],
+          smartFormattingEnabled: smartFormattingEnabled
+        ) == "Vani snippet live test passed."
+      )
+    }
+  }
+}
+
+@Test
 func snippetsRespectWordBoundariesAndPreferTheLongestTrigger() {
   let snippets = [
     SnippetEntry(trigger: "off", expansion: "wrong"),
@@ -309,6 +330,13 @@ func snippetExpansionTreatsDollarAndBackslashAsLiteralText() {
       dictionary: [],
       snippets: [SnippetEntry(trigger: "price block", expansion: "$5\\item")]
     ) == "$5\\item"
+  )
+  #expect(
+    textPipeline.process(
+      "price block.",
+      dictionary: [],
+      snippets: [SnippetEntry(trigger: "price block", expansion: "$5\\item.")]
+    ) == "$5\\item."
   )
 }
 

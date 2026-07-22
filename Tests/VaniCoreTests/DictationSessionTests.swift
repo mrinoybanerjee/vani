@@ -64,6 +64,14 @@ private actor MockSpeechRecognizer: SpeechRecognizing {
     progress(1)
   }
 
+  func waitUntilPreparationStarts() async -> Bool {
+    for _ in 0..<5_000 {
+      if prepareCount > 0 { return true }
+      try? await Task.sleep(for: .milliseconds(1))
+    }
+    return false
+  }
+
   func transcribe(_ audio: CapturedAudio) async throws -> SpeechResult {
     transcribeCount += 1
     guard !results.isEmpty else { throw VaniFailure.transcriptionFailed }
@@ -488,7 +496,8 @@ func permissionRevocationDuringPreparationReturnsToSetupWithoutInternalFailure()
   )
 
   async let preparation = session.prepareModels(allowDownload: false)
-  try await Task.sleep(for: .milliseconds(5))
+  #expect(await speech.waitUntilPreparationStarts())
+  #expect(await session.snapshot().phase == .preparing)
   await session.permissionWasRevoked(.microphonePermissionDenied)
   _ = await preparation
 

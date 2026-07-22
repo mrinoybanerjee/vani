@@ -20,9 +20,24 @@ public struct TextPipeline: Sendable {
     }
 
     for replacement in protected.replacements {
-      text = text.replacingOccurrences(of: replacement.token, with: replacement.expansion)
+      text = restoreSnippet(replacement, in: text)
     }
     return text.trimmingCharacters(in: .whitespacesAndNewlines)
+  }
+
+  private func restoreSnippet(_ replacement: ProtectedSnippet, in text: String) -> String {
+    var result = text
+    if replacement.expansion.last.map(Self.snippetBoundaryPunctuation.contains) == true {
+      let pattern =
+        NSRegularExpression.escapedPattern(for: replacement.token)
+        + #"[ \t]*[,.;:!?…]+"#
+      result = result.replacingOccurrences(
+        of: pattern,
+        with: NSRegularExpression.escapedTemplate(for: replacement.expansion),
+        options: .regularExpression
+      )
+    }
+    return result.replacingOccurrences(of: replacement.token, with: replacement.expansion)
   }
 
   private func normalizeInlineWhitespace(_ text: String) -> String {
@@ -361,6 +376,9 @@ public struct TextPipeline: Sendable {
   }
 
   private static let lexicalCharacterPattern = #"\p{L}\p{M}\p{N}\p{Pc}\p{Pd}'’"#
+  private static let snippetBoundaryPunctuation: Set<Character> = [
+    ",", ".", ";", ":", "!", "?", "…",
+  ]
   private static let sentenceTerminators: Set<Character> = [".", "!", "?"]
   private static let openingSentenceDelimiters: Set<Character> = [
     "\"", "'", "“", "‘", "(", "[", "{",
