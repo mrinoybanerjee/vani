@@ -41,12 +41,18 @@ replacement. V1 does not infer punctuation, style, intent, or surrounding contex
 
 ## Insertion contract
 
-Vani records the focused process and text element before capture. It refuses insertion
-if that target changes. It snapshots the pasteboard, sends one paste command to the
-captured process, and verifies an observable value, selection, range, or character-count
-change. It restores the snapshot only after verification and only if another process
-did not change the pasteboard. An unverified paste leaves the transcript on the
-clipboard and is never reported as successful.
+Vani records the focused process before capture and refuses insertion if the foreground
+application changes. At insertion time it re-resolves that process's focused
+Accessibility element, because dynamic web and rich-text controls can replace their AX
+objects without changing the user's target. A readable element is verification evidence,
+not a prerequisite for delivery.
+
+Vani snapshots the pasteboard, writes the transcript, and sends one paced paste command
+to the captured process. It polls app-scoped Accessibility state for up to two seconds
+for an observable value, selection, range, or character-count change. It restores the
+snapshot only after verification and only if another process did not change the
+pasteboard. An unobservable paste leaves the transcript on the clipboard and presents a
+neutral manual-paste hint; it is never reported as verified.
 
 ## Persistence
 

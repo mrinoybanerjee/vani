@@ -3,6 +3,7 @@ import Foundation
 public struct TextTarget: Sendable, Equatable {
   public let processIdentifier: Int32
   public let bundleIdentifier: String?
+  /// Retained for source compatibility; insertion safety is scoped to the target process.
   public let focusedElementIdentifier: UInt?
 
   public init(

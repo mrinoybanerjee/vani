@@ -41,8 +41,8 @@ final class OverlayController {
         show(.success)
         displayDuration = .milliseconds(700)
       case .unconfirmed:
-        show(.unconfirmed)
-        displayDuration = .milliseconds(1_200)
+        show(.copied)
+        displayDuration = .milliseconds(1_400)
       case nil:
         hide()
         return
@@ -86,7 +86,7 @@ private enum OverlayState: Equatable {
   case listening
   case processing
   case success
-  case unconfirmed
+  case copied
   case failure(String)
 }
 
@@ -137,7 +137,7 @@ private struct OverlayView: View {
       Image(systemName: "text.bubble.fill").foregroundStyle(.blue)
     case .success:
       Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
-    case .unconfirmed:
+    case .copied:
       Image(systemName: "clipboard.fill").foregroundStyle(.orange)
     case .failure:
       Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
@@ -150,7 +150,7 @@ private struct OverlayView: View {
     case .listening: "Listening"
     case .processing: "Writing"
     case .success: "Inserted"
-    case .unconfirmed: "Paste not confirmed"
+    case .copied: "Copied - paste if needed"
     case .failure(let message): message
     }
   }

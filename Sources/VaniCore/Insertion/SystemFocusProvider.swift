@@ -1,5 +1,4 @@
 import AppKit
-import ApplicationServices
 
 @MainActor
 public final class SystemFocusProvider: FocusProviding {
@@ -9,25 +8,7 @@ public final class SystemFocusProvider: FocusProviding {
     guard let application = NSWorkspace.shared.frontmostApplication else { return nil }
     return TextTarget(
       processIdentifier: application.processIdentifier,
-      bundleIdentifier: application.bundleIdentifier,
-      focusedElementIdentifier: focusedElementIdentifier()
+      bundleIdentifier: application.bundleIdentifier
     )
-  }
-
-  private func focusedElementIdentifier() -> UInt? {
-    let systemWide = AXUIElementCreateSystemWide()
-    var value: CFTypeRef?
-    guard
-      AXUIElementCopyAttributeValue(
-        systemWide,
-        kAXFocusedUIElementAttribute as CFString,
-        &value
-      ) == .success,
-      let value,
-      CFGetTypeID(value) == AXUIElementGetTypeID()
-    else {
-      return nil
-    }
-    return CFHash(value)
   }
 }

@@ -12,7 +12,8 @@ someone who wants private English voice typing without an account or cloud servi
 3. Speak while a non-activating overlay shows capture state.
 4. Release the shortcut.
 5. Transcribe locally and insert text into the focused application.
-6. If insertion cannot be verified, retain the transcript and offer manual paste.
+6. If insertion cannot be verified, keep the transcript on the clipboard and return to
+   ready without blocking the next recording.
 
 ## Experience direction
 
@@ -21,6 +22,15 @@ someone who wants private English voice typing without an account or cloud servi
 - Non-activating overlay with listening, processing, success, and error states
 - Restrained 120 to 180 ms state transitions with Reduce Motion support
 - No onboarding carousel, dashboard, editor, decorative cards, or hidden background work
+
+## Reliability baseline
+
+- A transiently unreadable Accessibility element must not block process-bound paste
+  delivery.
+- Slow rich-text fields receive a bounded verification window without automatic retries.
+- Verified delivery restores the user's previous clipboard only while Vani still owns it.
+- Unobservable delivery preserves the transcript and gives a truthful manual-paste hint.
+- A changed foreground application aborts delivery so Vani cannot type into the wrong app.
 
 ## Product success
 

@@ -67,9 +67,16 @@ does not overwrite an existing valid model.
 
 ## Text is ready to paste
 
-Vani keeps the transcript when the focused text target changes or macOS cannot verify
-insertion. Return to the intended text field and use the recovery action. Do not press
-the shortcut repeatedly because that can create a second transcript.
+Vani keeps the transcript when the focused application changes or macOS does not allow
+the paste event. Return to the intended text field and use the recovery action. Do not
+repeat the dictation because that creates a second transcript.
+
+## Copied - paste if needed
+
+Vani sent one paste command but the target did not expose enough Accessibility state to
+prove the resulting text change. If the text is already present, no action is needed.
+If it is missing, press `Cmd+V`; the transcript remains on the clipboard and Vani is
+already ready for another recording.
 
 ## Reporting a problem
 
