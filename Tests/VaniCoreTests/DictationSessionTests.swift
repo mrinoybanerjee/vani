@@ -136,6 +136,37 @@ func dictationSessionCompletesTheVerifiedHappyPath() async throws {
 }
 
 @Test @MainActor
+func secureTextFieldIsRejectedBeforeAudioCaptureStarts() async {
+  let audio = MockAudioCapture()
+  let speech = MockSpeechRecognizer(results: [.success(speechResult("secret"))])
+  let focus = MockFocusProvider()
+  focus.target = TextTarget(
+    processIdentifier: 42,
+    bundleIdentifier: "test.target",
+    isSecureTextField: true
+  )
+  let insertion = MockTextInserter(results: [.success(.verified)])
+  let session = DictationSession(
+    audioCapture: audio,
+    speechRecognizer: speech,
+    textInserter: insertion,
+    focusProvider: focus,
+    diagnostics: DiagnosticStore()
+  )
+
+  #expect(await session.prepareModels(allowDownload: false))
+  await session.beginDictation()
+
+  let snapshot = await session.snapshot()
+  #expect(snapshot.phase == .recoverableError)
+  #expect(snapshot.failure == .secureTextField)
+  #expect(!snapshot.hasRecoverableTranscript)
+  #expect(await audio.startCount == 0)
+  #expect(await speech.transcribeCount == 0)
+  #expect(insertion.insertedTexts.isEmpty)
+}
+
+@Test @MainActor
 func lastTranscriptCanBePastedWithoutDuplicatingHistory() async throws {
   let historyDirectory = FileManager.default.temporaryDirectory
     .appendingPathComponent("VaniLastTranscriptTests-\(UUID().uuidString)")

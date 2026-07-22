@@ -3,16 +3,19 @@ import Foundation
 public struct TextTarget: Sendable, Equatable {
   public let processIdentifier: Int32
   public let bundleIdentifier: String?
+  public let isSecureTextField: Bool
   /// Retained for source compatibility; insertion safety is scoped to the target process.
   public let focusedElementIdentifier: UInt?
 
   public init(
     processIdentifier: Int32,
     bundleIdentifier: String? = nil,
+    isSecureTextField: Bool = false,
     focusedElementIdentifier: UInt? = nil
   ) {
     self.processIdentifier = processIdentifier
     self.bundleIdentifier = bundleIdentifier
+    self.isSecureTextField = isSecureTextField
     self.focusedElementIdentifier = focusedElementIdentifier
   }
 }

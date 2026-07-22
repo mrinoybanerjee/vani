@@ -47,7 +47,8 @@ Vani records the focused process before capture and refuses insertion if the for
 application changes. At insertion time it re-resolves that process's focused
 Accessibility element, because dynamic web and rich-text controls can replace their AX
 objects without changing the user's target. A readable element is verification evidence,
-not a prerequisite for delivery.
+not a prerequisite for delivery. Apple's secure-text-field subrole is checked before
+capture and again before insertion; matching fields are rejected before pasteboard access.
 
 Vani snapshots the pasteboard, writes the transcript, and sends one paced paste command
 to the captured process. It polls app-scoped Accessibility state for up to two seconds

@@ -28,6 +28,7 @@ credentials and notarization.
 - Exact model-revision manifest with per-file SHA-256 verification
 - Local microphone capture and Core ML transcription
 - Process-bound paste delivery with app-scoped Accessibility verification
+- Native Accessibility refusal for password and secure text fields
 - Clipboard-preserving recovery when focus, insertion, or the clipboard changes
 - Memory-only Last Transcript controls with Control-Command-V paste and
   Control-Command-C copy shortcuts

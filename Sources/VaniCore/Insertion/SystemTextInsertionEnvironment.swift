@@ -4,6 +4,7 @@ import Foundation
 struct TextInsertionRead: Equatable {
   let observation: TextInsertionObservation
   let insertedText: String?
+  let isSecureTextField: Bool
 }
 
 @MainActor
@@ -29,6 +30,21 @@ enum AccessibilityFocusResolver {
       return nil
     }
     return element
+  }
+
+  static func isSecureTextField(_ element: AXUIElement) -> Bool {
+    var value: CFTypeRef?
+    guard
+      AXUIElementCopyAttributeValue(
+        element,
+        kAXSubroleAttribute as CFString,
+        &value
+      ) == .success,
+      let subrole = value as? String
+    else {
+      return false
+    }
+    return subrole == (kAXSecureTextFieldSubrole as String)
   }
 
   private static func focusedElement(on owner: AXUIElement) -> AXUIElement? {
@@ -85,7 +101,8 @@ final class SystemTextInsertionEnvironment: TextInsertionEnvironment {
           on: element
         )
       ),
-      insertedText: insertedRange.flatMap { string(in: $0, on: element) }
+      insertedText: insertedRange.flatMap { string(in: $0, on: element) },
+      isSecureTextField: AccessibilityFocusResolver.isSecureTextField(element)
     )
   }
 

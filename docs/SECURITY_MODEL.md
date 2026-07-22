@@ -26,6 +26,8 @@ and diagnostics.
 - Capture storage is preallocated and limited to two minutes.
 - Process focus is checked before insertion, after paste delivery, and during bounded
   verification polling.
+- Native Accessibility secure-field metadata is checked before recording and again before
+  insertion; Vani refuses password and other secure text fields without touching the clipboard.
 - Clipboard restoration is conditional on both insertion verification and an
   unchanged pasteboard change count.
 - Recovery preserves content when success cannot be proven.
@@ -49,6 +51,8 @@ and diagnostics.
 - Some controls do not expose readable Accessibility values. Vani still delivers one
   process-bound paste, leaves the transcript available for manual paste, and does not
   claim verified success.
+- Third-party controls that do not expose Apple's secure-text-field subrole cannot be
+  identified as secure. Users should not dictate passwords or other authentication secrets.
 - Ad-hoc local builds do not provide the identity or Gatekeeper assurance of a
   Developer ID signed, notarized release.
 - The app has no automatic updater in v1.

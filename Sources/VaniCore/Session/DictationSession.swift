@@ -121,6 +121,10 @@ public actor DictationSession {
       await recordIgnored("capture_start_cancelled", phase: machine.phase)
       return
     }
+    guard currentTarget?.isSecureTextField != true else {
+      await fail(.secureTextField)
+      return
+    }
     await recovery.clear()
     failure = nil
     insertionFeedback = nil
@@ -594,7 +598,8 @@ public actor DictationSession {
       .capture
     case .modelUnavailable, .modelDownloadFailed, .modelIntegrityFailed, .modelLoadFailed: .model
     case .transcriptionFailed, .emptyTranscript: .transcription
-    case .focusChanged, .insertionFailed, .insertionUnverified, .clipboardChanged:
+    case .focusChanged, .secureTextField, .insertionFailed, .insertionUnverified,
+      .clipboardChanged:
       .insertion
     case .historyCorrupt: .storage
     case .unsupportedHardware, .operationCancelled, .internalInvariant: .lifecycle

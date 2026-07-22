@@ -16,6 +16,10 @@ All notable changes follow semantic versioning.
 - Stable local signing support so macOS privacy grants survive normal rebuilds
 - Exact-revision, exact-path model downloader with verified atomic installation
 - Setup doctor, focused troubleshooting, and complete local uninstall guidance
+- Memory-only Last Transcript copy and paste controls
+- Local voice-triggered snippets with bounded exact expansion
+- Opt-in deterministic Smart Formatting for spoken punctuation, fillers, and structure
+- Secure-field detection that blocks recording and insertion in password fields
 
 ### Fixed
 
@@ -32,3 +36,5 @@ All notable changes follow semantic versioning.
 - Use the fastest sufficient single-architecture debug build for Swift CodeQL
 - Deliver paste events to the captured app even when its text field cannot be inspected,
   tolerate delayed rich-text updates, and preserve the transcript when verification is uncertain
+- Protect links, email addresses, snippet text, Unicode casing, and mixed-case names during
+  Smart Formatting

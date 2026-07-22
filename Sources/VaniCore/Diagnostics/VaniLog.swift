@@ -43,7 +43,8 @@ public enum VaniLog {
       .capture
     case .modelUnavailable, .modelDownloadFailed, .modelIntegrityFailed, .modelLoadFailed: .model
     case .transcriptionFailed, .emptyTranscript: .transcription
-    case .focusChanged, .insertionFailed, .insertionUnverified, .clipboardChanged:
+    case .focusChanged, .secureTextField, .insertionFailed, .insertionUnverified,
+      .clipboardChanged:
       .insertion
     case .historyCorrupt: .storage
     case .unsupportedHardware, .operationCancelled, .internalInvariant: .lifecycle
