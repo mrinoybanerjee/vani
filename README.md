@@ -67,9 +67,12 @@ The first source build can take several minutes. After Vani opens in the menu ba
 4. Hold Left Fn, speak, then release to insert text.
 
 Snippets and Smart Formatting are available in Settings. Smart Formatting is off by
-default; enabling it recognizes `comma`, `period`, `question mark`,
-`exclamation mark`, `colon`, `semicolon`, `new line`, and `new paragraph` and removes
-only `um`, `uh`, and `erm` fillers.
+default; enabling it recognizes `comma`, `period` or `full stop`, `question mark`,
+`exclamation mark` or `exclamation point`, `colon`, `semicolon`, `new line`, and
+`new paragraph`. It removes only standalone `um`, `uh`, and `erm` fillers and leaves
+links, email addresses, and snippet expansions unchanged. Spoken command words are
+necessarily interpreted as commands while the setting is on; turn it off when you need
+those words literally.
 
 If a permission does not update, quit and reopen the exact `/Applications/Vani.app`
 bundle after granting it. See [Troubleshooting](docs/TROUBLESHOOTING.md) for focused

@@ -116,11 +116,8 @@ public struct TextPipeline: Sendable {
   }
 
   private func applySmartFormatting(to text: String) -> String {
-    var result = text.replacingOccurrences(
-      of: #"(?i)(?<![\p{L}\p{N}])(?:um+|uh+|erm+)(?![\p{L}\p{N}])(?:[ \t]*,)?"#,
-      with: "",
-      options: .regularExpression
-    )
+    let protected = protectTechnicalTokens(in: text)
+    var result = removeFillers(in: protected.text)
 
     let structuralCommands: [(phrase: String, replacement: String)] = [
       ("new paragraph", "\n\n"),
@@ -145,10 +142,84 @@ public struct TextPipeline: Sendable {
     result = replaceSpokenCommands(
       punctuationCommands,
       in: result,
-      leadingArtifactPattern: #"[,.;:!?]"#
+      leadingArtifactPattern: #"[,.;:!?…]"#
     )
 
-    return capitalizeSentenceStarts(in: cleanSpacing(in: result))
+    result = capitalizeSentenceStarts(in: cleanSpacing(in: result))
+    for replacement in protected.replacements {
+      result = result.replacingOccurrences(of: replacement.token, with: replacement.value)
+    }
+    return result
+  }
+
+  private func protectTechnicalTokens(
+    in text: String
+  ) -> (text: String, replacements: [ProtectedText]) {
+    guard
+      let detector = try? NSDataDetector(
+        types: NSTextCheckingResult.CheckingType.link.rawValue
+      )
+    else {
+      return (text, [])
+    }
+
+    let source = text as NSString
+    let matches = detector.matches(
+      in: text,
+      range: NSRange(location: 0, length: source.length)
+    )
+    guard !matches.isEmpty else { return (text, []) }
+
+    let nonce = UUID().uuidString
+    let replacements = matches.enumerated().map { index, match in
+      ProtectedText(
+        token: "\u{E000}VANI_TECH_\(nonce)_\(index)\u{E001}",
+        value: source.substring(with: match.range)
+      )
+    }
+    let mutable = NSMutableString(string: text)
+    for (match, replacement) in zip(matches, replacements).reversed() {
+      mutable.replaceCharacters(in: match.range, with: replacement.token)
+    }
+    return (String(mutable), replacements)
+  }
+
+  private func removeFillers(in text: String) -> String {
+    let pattern =
+      #"(?i)(?<!["# + Self.lexicalCharacterPattern + #"])(?:um+|uh+|erm+)"#
+      + #"(?!["# + Self.lexicalCharacterPattern + #"])(?:[ \t]*[,.;:!?…]+)?"#
+    guard let expression = try? NSRegularExpression(pattern: pattern) else {
+      return text
+    }
+
+    let source = text as NSString
+    let mutable = NSMutableString(string: text)
+    let matches = expression.matches(
+      in: text,
+      range: NSRange(location: 0, length: source.length)
+    )
+    for match in matches.reversed() {
+      let previousCharacter = character(
+        in: source,
+        atUTF16Offset: match.range.location - 1
+      )
+      let nextCharacter = character(
+        in: source,
+        atUTF16Offset: NSMaxRange(match.range)
+      )
+      let replacement =
+        if let previousCharacter, let nextCharacter,
+          nextCharacter.isLetter || nextCharacter.isNumber,
+          previousCharacter.isLetter || previousCharacter.isNumber
+            || ",.;:!?".contains(previousCharacter)
+        {
+          " "
+        } else {
+          ""
+        }
+      mutable.replaceCharacters(in: match.range, with: replacement)
+    }
+    return String(mutable)
   }
 
   private func replaceSpokenCommands(
@@ -162,8 +233,8 @@ public struct TextPipeline: Sendable {
     }.joined(separator: "|")
     let pattern =
       #"(?i)(?:"# + leadingArtifactPattern
-      + #"+[ \t]*)?(?<![\p{L}\p{N}])("# + alternatives
-      + #")(?![\p{L}\p{N}])(?:[ \t]*[,.;:!?]+)?"#
+      + #"+[ \t]*)?(?<!["# + Self.lexicalCharacterPattern + #"])("# + alternatives
+      + #")(?!["# + Self.lexicalCharacterPattern + #"])(?:[ \t]*[,.;:!?…]+)?"#
     guard let expression = try? NSRegularExpression(pattern: pattern) else {
       return text
     }
@@ -180,9 +251,25 @@ public struct TextPipeline: Sendable {
     for match in matches.reversed() {
       let phrase = source.substring(with: match.range(at: 1)).lowercased()
       guard let replacement = replacements[phrase] else { continue }
-      mutable.replaceCharacters(in: match.range, with: replacement)
+      let matchEnd = NSMaxRange(match.range)
+      let nextCharacter = character(in: source, atUTF16Offset: matchEnd)
+      let replacementText: String
+      if replacement.last.map({ ",.;:!?".contains($0) }) == true,
+        let nextCharacter,
+        nextCharacter.isLetter || nextCharacter.isNumber
+      {
+        replacementText = replacement + " "
+      } else {
+        replacementText = replacement
+      }
+      mutable.replaceCharacters(in: match.range, with: replacementText)
     }
     return String(mutable)
+  }
+
+  private func character(in text: NSString, atUTF16Offset offset: Int) -> Character? {
+    guard offset >= 0, offset < text.length else { return nil }
+    return text.substring(with: text.rangeOfComposedCharacterSequence(at: offset)).first
   }
 
   private func cleanSpacing(in text: String) -> String {
@@ -199,23 +286,92 @@ public struct TextPipeline: Sendable {
   }
 
   private func capitalizeSentenceStarts(in text: String) -> String {
-    guard
-      let expression = try? NSRegularExpression(
-        pattern: #"(?m)(^|[.!?][ \t]+|\n+)([a-z])"#
-      )
-    else { return text }
+    let characters = Array(text)
+    var result = ""
+    result.reserveCapacity(text.utf8.count)
+    var atSentenceStart = true
+    var pendingSentenceEnd = false
 
-    let source = text as NSString
-    let mutable = NSMutableString(string: text)
-    let matches = expression.matches(
-      in: text,
-      range: NSRange(location: 0, length: source.length)
-    )
-    for match in matches.reversed() {
-      let range = match.range(at: 2)
-      mutable.replaceCharacters(in: range, with: source.substring(with: range).uppercased())
+    for (index, character) in characters.enumerated() {
+      if character.isNewline {
+        result.append(character)
+        atSentenceStart = true
+        pendingSentenceEnd = false
+        continue
+      }
+
+      if pendingSentenceEnd {
+        if Self.sentenceTerminators.contains(character)
+          || Self.closingSentenceDelimiters.contains(character)
+        {
+          result.append(character)
+          continue
+        }
+        if character.isWhitespace {
+          result.append(character)
+          atSentenceStart = true
+          pendingSentenceEnd = false
+          continue
+        }
+        pendingSentenceEnd = false
+      }
+
+      if atSentenceStart {
+        if character.isWhitespace || Self.openingSentenceDelimiters.contains(character) {
+          result.append(character)
+          continue
+        }
+
+        if character.isLowercase,
+          !shouldPreserveLeadingCase(in: characters, from: index)
+        {
+          result.append(contentsOf: String(character).uppercased())
+        } else {
+          result.append(character)
+        }
+        atSentenceStart = false
+      } else {
+        result.append(character)
+      }
+
+      if Self.sentenceTerminators.contains(character) {
+        pendingSentenceEnd = true
+      }
     }
-    return String(mutable)
+    return result
+  }
+
+  private func shouldPreserveLeadingCase(
+    in characters: [Character],
+    from startIndex: Int
+  ) -> Bool {
+    let token = String(characters[startIndex...].prefix { !$0.isWhitespace })
+    let lowercaseToken = token.lowercased()
+    if lowercaseToken.hasPrefix("http://")
+      || lowercaseToken.hasPrefix("https://")
+      || lowercaseToken.hasPrefix("www.")
+      || token.contains("@")
+    {
+      return true
+    }
+
+    return characters[(startIndex + 1)...].prefix(while: Self.isWordCharacter).contains {
+      $0.isUppercase
+    }
+  }
+
+  private static let lexicalCharacterPattern = #"\p{L}\p{M}\p{N}\p{Pc}\p{Pd}'’"#
+  private static let sentenceTerminators: Set<Character> = [".", "!", "?"]
+  private static let openingSentenceDelimiters: Set<Character> = [
+    "\"", "'", "“", "‘", "(", "[", "{",
+  ]
+  private static let closingSentenceDelimiters: Set<Character> = [
+    "\"", "'", "”", "’", ")", "]", "}",
+  ]
+
+  private static func isWordCharacter(_ character: Character) -> Bool {
+    character.isLetter || character.isNumber
+      || ["'", "’", "-", "‐", "‑", "_"].contains(character)
   }
 
   private struct PreparedSnippet {
@@ -228,5 +384,10 @@ public struct TextPipeline: Sendable {
     let trigger: String
     let token: String
     let expansion: String
+  }
+
+  private struct ProtectedText {
+    let token: String
+    let value: String
   }
 }
