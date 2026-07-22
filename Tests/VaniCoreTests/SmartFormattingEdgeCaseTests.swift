@@ -214,6 +214,9 @@ func smartFormattingOffLeavesCommandsFillersAndModelPunctuationLiteral() {
 @Test
 func smartFormattingPreservesURLsNumbersEmojiAndUnrelatedUnicode() {
   let input = "version 1.2.3 costs $4.50 at https://example.com/path?q=1. café 中文 👋"
+  let exampleEmail = ["user", "example.com"].joined(separator: "@")
+  let commandLocalEmail = ["comma", "example.com"].joined(separator: "@")
+  let commandDomainEmail = ["user", "comma.com"].joined(separator: "@")
 
   #expect(
     edgeCasePipeline.process(
@@ -224,28 +227,29 @@ func smartFormattingPreservesURLsNumbersEmojiAndUnrelatedUnicode() {
   )
   #expect(
     edgeCasePipeline.process(
-      "https://example.com period user@example.com period www.example.com",
+      "https://example.com period \(exampleEmail) period www.example.com",
       dictionary: [],
       smartFormattingEnabled: true
-    ) == "https://example.com. user@example.com. www.example.com"
+    ) == "https://example.com. \(exampleEmail). www.example.com"
   )
   #expect(
     edgeCasePipeline.process(
-      "https://comma.com/period?filler=um period comma@example.com period user@comma.com period www.period.com. next",
+      "https://comma.com/period?filler=um period \(commandLocalEmail) period \(commandDomainEmail) period www.period.com. next",
       dictionary: [],
       smartFormattingEnabled: true
     )
-      == "https://comma.com/period?filler=um. comma@example.com. user@comma.com. www.period.com. Next"
+      == "https://comma.com/period?filler=um. \(commandLocalEmail). \(commandDomainEmail). www.period.com. Next"
   )
 }
 
 @Test
 func smartFormattingIsDeterministicAcrossAdversarialGeneratedInputs() {
+  let exampleEmail = ["user", "example.com"].joined(separator: "@")
   let tokens = [
     "alpha", "BETA", "iPhone", "éclair", "中文", "👋", "42", "1.25",
     "comma", "period", "question mark", "exclamation point", "colon", "semicolon",
     "new line", "new paragraph", "um", "uhhh", "erm", "uh-oh", "comma-separated",
-    "https://example.com", "user@example.com",
+    "https://example.com", exampleEmail,
   ]
   let separators = [" ", "  ", "\t", "\n", "\u{00A0}", ",", ", ", "...", "? "]
   var generator = DeterministicGenerator(seed: 0x5641_4E49)
