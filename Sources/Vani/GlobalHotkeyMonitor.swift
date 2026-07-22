@@ -8,6 +8,8 @@ import VaniCore
 final class GlobalHotkeyMonitor {
   var onPress: (() -> Void)?
   var onRelease: (() -> Void)?
+  var onPasteLast: (() -> Void)?
+  var onCopyLast: (() -> Void)?
 
   private var eventTap: CFMachPort?
   private var runLoopSource: CFRunLoopSource?
@@ -26,7 +28,9 @@ final class GlobalHotkeyMonitor {
     }
 
     self.shortcut = shortcut
-    let mask = CGEventMask(1 << CGEventType.flagsChanged.rawValue)
+    let mask =
+      CGEventMask(1 << CGEventType.flagsChanged.rawValue)
+      | CGEventMask(1 << CGEventType.keyDown.rawValue)
     guard
       let tap = CGEvent.tapCreate(
         tap: .cgSessionEventTap,
@@ -144,6 +148,17 @@ final class GlobalHotkeyMonitor {
     }
   }
 
+  private func handleLastTranscriptShortcut(_ action: LastTranscriptShortcutAction) {
+    switch action {
+    case .paste:
+      VaniLog.event(category: .insertion, code: "paste_last_shortcut")
+      onPasteLast?()
+    case .copy:
+      VaniLog.event(category: .recovery, code: "copy_last_shortcut")
+      onCopyLast?()
+    }
+  }
+
   private static let callback: CGEventTapCallBack = {
     _, type, event, userInfo in
     guard let userInfo else { return Unmanaged.passUnretained(event) }
@@ -152,6 +167,23 @@ final class GlobalHotkeyMonitor {
       .takeUnretainedValue()
     let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
     let typeRawValue = type.rawValue
+
+    if type == .keyDown {
+      guard keyCode == 8 || keyCode == 9 else {
+        return Unmanaged.passUnretained(event)
+      }
+      guard
+        let action = LastTranscriptShortcutResolver.action(
+          keyCode: keyCode,
+          modifierFlagsRawValue: event.flags.rawValue,
+          isRepeat: event.getIntegerValueField(.keyboardEventAutorepeat) != 0
+        )
+      else { return Unmanaged.passUnretained(event) }
+      Task { @MainActor in
+        monitor.handleLastTranscriptShortcut(action)
+      }
+      return Unmanaged.passUnretained(event)
+    }
 
     Task { @MainActor in
       let keyStateIsPressed = CGEventSource.keyState(

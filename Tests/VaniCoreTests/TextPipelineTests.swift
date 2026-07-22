@@ -201,3 +201,106 @@ func dictionaryReplacementTreatsDollarAndBackslashAsLiteralText() {
 
   #expect(textPipeline.process("the price", dictionary: dictionary) == "the $5\\item")
 }
+
+@Test
+func snippetsExpandWholePhrasesOnceAndIgnoreCase() {
+  let snippets = [
+    SnippetEntry(trigger: "sign off", expansion: "Use greeting"),
+    SnippetEntry(trigger: "greeting", expansion: "Hello,\nMrinoy"),
+  ]
+
+  #expect(
+    textPipeline.process(
+      "SIGN OFF then greeting",
+      dictionary: [],
+      snippets: snippets
+    ) == "Use greeting then Hello,\nMrinoy"
+  )
+}
+
+@Test
+func snippetsRespectWordBoundariesAndPreferTheLongestTrigger() {
+  let snippets = [
+    SnippetEntry(trigger: "off", expansion: "wrong"),
+    SnippetEntry(trigger: "sign off", expansion: "Thanks"),
+    SnippetEntry(trigger: "cat", expansion: "pet"),
+  ]
+
+  #expect(
+    textPipeline.process(
+      "sign off and concatenate cat",
+      dictionary: [],
+      snippets: snippets
+    ) == "Thanks and concatenate pet"
+  )
+}
+
+@Test
+func dictionaryCorrectionsCanFeedSnippetTriggers() {
+  #expect(
+    textPipeline.process(
+      "vee any",
+      dictionary: [DictionaryEntry(spoken: "vee any", replacement: "vani")],
+      snippets: [SnippetEntry(trigger: "vani", expansion: "Vani project")]
+    ) == "Vani project"
+  )
+}
+
+@Test
+func smartFormattingIsOptIn() {
+  #expect(
+    textPipeline.process(
+      "um hello comma new line world period",
+      dictionary: []
+    ) == "um hello comma new line world period"
+  )
+}
+
+@Test
+func smartFormattingHandlesConservativeFillersPunctuationAndStructure() {
+  #expect(
+    textPipeline.process(
+      "um, hello comma new line uh this is fine period new paragraph next thought question mark",
+      dictionary: [],
+      smartFormattingEnabled: true
+    ) == "Hello,\nThis is fine.\n\nNext thought?"
+  )
+}
+
+@Test
+func smartFormattingPreservesSnippetTextExactly() {
+  #expect(
+    textPipeline.process(
+      "sign off period next sentence period",
+      dictionary: [],
+      snippets: [SnippetEntry(trigger: "sign off", expansion: "thanks period,\nMrinoy")],
+      smartFormattingEnabled: true
+    ) == "thanks period,\nMrinoy. Next sentence."
+  )
+}
+
+@Test
+func snippetExpansionTreatsDollarAndBackslashAsLiteralText() {
+  #expect(
+    textPipeline.process(
+      "price block",
+      dictionary: [],
+      snippets: [SnippetEntry(trigger: "price block", expansion: "$5\\item")]
+    ) == "$5\\item"
+  )
+}
+
+@Test
+func maximumSnippetSetUsesTheExpectedLiteralMatch() {
+  let snippets = (0..<VaniSettings.maximumSnippetCount).map {
+    SnippetEntry(trigger: "trigger \($0)", expansion: "replacement \($0)")
+  }
+
+  #expect(
+    textPipeline.process(
+      "trigger 199",
+      dictionary: [],
+      snippets: snippets
+    ) == "replacement 199"
+  )
+}

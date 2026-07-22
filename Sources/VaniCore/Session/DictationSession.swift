@@ -23,7 +23,9 @@ public actor DictationSession {
   private var isPreparingRequest = false
   private var preparationGeneration: UInt64 = 0
   private var isStartingCapture = false
+  private var isPastingLastTranscript = false
   private var currentTarget: TextTarget?
+  private var lastTranscript: String?
   private var insertionFeedback: InsertionFeedback?
   private var observer: Observer?
 
@@ -208,6 +210,54 @@ public actor DictationSession {
     )
   }
 
+  public func copyLastTranscript() async throws {
+    guard let lastTranscript else {
+      throw VaniFailure.emptyTranscript
+    }
+    try await textInserter.copyForManualPaste(lastTranscript)
+    await diagnostics.record(
+      DiagnosticEvent(category: .recovery, code: "last_transcript_copied", phase: machine.phase)
+    )
+  }
+
+  public func pasteLastTranscript() async {
+    guard machine.phase == .ready, !isPastingLastTranscript else {
+      await recordIgnored("paste_last", phase: machine.phase)
+      return
+    }
+    guard let lastTranscript else {
+      await recordIgnored("paste_last_empty", phase: machine.phase)
+      return
+    }
+
+    isPastingLastTranscript = true
+    defer { isPastingLastTranscript = false }
+
+    currentTarget = await focusProvider.currentTarget()
+    guard machine.phase == .ready else {
+      await recordIgnored("paste_last_cancelled", phase: machine.phase)
+      return
+    }
+
+    failure = nil
+    insertionFeedback = nil
+    await recovery.retainTranscript(
+      lastTranscript,
+      target: currentTarget,
+      shouldAppendToHistory: false
+    )
+
+    do {
+      try await transition(.pasteLastRequested)
+      guard let payload = await recovery.latest() else {
+        throw VaniFailure.internalInvariant
+      }
+      try await insertRecoveredTranscript(payload)
+    } catch {
+      await fail(map(error, fallback: .insertionFailed))
+    }
+  }
+
   public func discardRecovery() async {
     await recovery.clear()
     failure = nil
@@ -373,8 +423,14 @@ public actor DictationSession {
       defer { VaniSignpost.endTranscription(signpost) }
       result = try await speechRecognizer.transcribe(audio)
     }
-    let text = textPipeline.process(result.text, dictionary: settings.dictionary)
+    let text = textPipeline.process(
+      result.text,
+      dictionary: settings.dictionary,
+      snippets: settings.snippets,
+      smartFormattingEnabled: settings.smartFormattingEnabled
+    )
     guard !text.isEmpty else { throw VaniFailure.emptyTranscript }
+    lastTranscript = text
 
     await diagnostics.record(
       DiagnosticEvent(
@@ -426,7 +482,7 @@ public actor DictationSession {
         durationMilliseconds: milliseconds(since: startedAt)
       )
     )
-    if settings.historyEnabled {
+    if settings.historyEnabled, payload.shouldAppendToHistory {
       do {
         try await history.append(
           TranscriptHistoryEntry(text: transcript),
@@ -513,6 +569,7 @@ public actor DictationSession {
       failure: failure,
       modelProgress: modelProgress,
       isModelReady: modelReady,
+      hasLastTranscript: lastTranscript != nil,
       hasRecoverableTranscript: payload?.transcript != nil,
       recoverableTranscript: payload?.transcript,
       insertionFeedback: insertionFeedback

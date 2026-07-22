@@ -36,8 +36,10 @@ network. Captured audio is converted to mono 16 kHz float samples after recordin
 uses CPU plus Neural Engine compute units. Vani downloads only an allowlist of exact
 paths from a pinned model revision into private staging. Before atomic installation
 and loading, it verifies the exact file set, sizes, and SHA-256 digests. `TextPipeline`
-performs only conservative whitespace cleanup and user-defined exact phrase
-replacement. V1 does not infer punctuation, style, intent, or surrounding context.
+performs conservative whitespace cleanup, user-defined exact phrase replacement,
+one-pass snippet expansion, and optional deterministic Smart Formatting. Formatting
+recognizes a small fixed English command set; it does not use an LLM, surrounding
+application context, or network access.
 
 ## Insertion contract
 
@@ -58,8 +60,8 @@ neutral manual-paste hint; it is never reported as verified.
 
 Settings are Codable values stored in `UserDefaults`. Optional history uses an
 atomic local JSON file, is bounded, and quarantines corrupt data. Recovery audio and
-the latest failed transcript are memory-only. Diagnostics are bounded and metadata
-only.
+the latest failed or successful transcript are memory-only. Diagnostics are bounded
+and metadata only.
 
 ## Dependency boundary
 

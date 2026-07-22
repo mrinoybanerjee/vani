@@ -21,12 +21,18 @@ and diagnostics.
 ## Controls
 
 - Hold-to-record means no background microphone capture while idle.
+- Global key-down events are filtered to the exact Last Transcript chords before
+  they reach the main actor; key content is not retained or logged.
 - Capture storage is preallocated and limited to two minutes.
 - Process focus is checked before insertion, after paste delivery, and during bounded
   verification polling.
 - Clipboard restoration is conditional on both insertion verification and an
   unchanged pasteboard change count.
 - Recovery preserves content when success cannot be proven.
+- Last Transcript content is memory-only and is never added to history a second time
+  when pasted again.
+- Snippet matching uses escaped literal triggers and one-pass expansion, preventing
+  regex injection and recursive expansion.
 - History is opt-in, bounded, atomic, and clearable.
 - Diagnostics are content-free and bounded.
 - Unexpected, missing, changed, hidden, or symlinked model artifacts are rejected.

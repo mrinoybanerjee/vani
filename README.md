@@ -29,6 +29,11 @@ credentials and notarization.
 - Local microphone capture and Core ML transcription
 - Process-bound paste delivery with app-scoped Accessibility verification
 - Clipboard-preserving recovery when focus, insertion, or the clipboard changes
+- Memory-only Last Transcript controls with Control-Command-V paste and
+  Control-Command-C copy shortcuts
+- Voice-triggered snippets with multiline expansions
+- Opt-in local Smart Formatting for conservative fillers, spoken punctuation,
+  sentence casing, and line breaks
 - Optional bounded history, disabled by default
 - Personal phrase dictionary and launch-at-login setting
 - Metadata-only diagnostics with no transcript or audio content
@@ -60,6 +65,11 @@ The first source build can take several minutes. After Vani opens in the menu ba
    download after the source dependencies are resolved.
 3. In System Settings > Keyboard, set "Press Globe key to" to "Do Nothing."
 4. Hold Left Fn, speak, then release to insert text.
+
+Snippets and Smart Formatting are available in Settings. Smart Formatting is off by
+default; enabling it recognizes `comma`, `period`, `question mark`,
+`exclamation mark`, `colon`, `semicolon`, `new line`, and `new paragraph` and removes
+only `um`, `uh`, and `erm` fillers.
 
 If a permission does not update, quit and reopen the exact `/Applications/Vani.app`
 bundle after granting it. See [Troubleshooting](docs/TROUBLESHOOTING.md) for focused

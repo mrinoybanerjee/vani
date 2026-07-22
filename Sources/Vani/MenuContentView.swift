@@ -180,26 +180,49 @@ private struct ReadyView: View {
   @EnvironmentObject private var coordinator: AppCoordinator
 
   var body: some View {
-    HStack(spacing: 12) {
-      Image(systemName: phaseIcon)
-        .font(.system(size: 22, weight: .medium))
-        .foregroundStyle(phaseColor)
-        .frame(width: 32, height: 32)
-      VStack(alignment: .leading, spacing: 3) {
-        Text(phaseTitle)
-          .font(.system(size: 14, weight: .semibold))
-        if coordinator.snapshot.phase == .ready {
-          Text(coordinator.settings.shortcut.label)
-            .font(.caption)
-            .foregroundStyle(.secondary)
+    VStack(alignment: .leading, spacing: 12) {
+      HStack(spacing: 12) {
+        Image(systemName: phaseIcon)
+          .font(.system(size: 22, weight: .medium))
+          .foregroundStyle(phaseColor)
+          .frame(width: 32, height: 32)
+        VStack(alignment: .leading, spacing: 3) {
+          Text(phaseTitle)
+            .font(.system(size: 14, weight: .semibold))
+          if coordinator.snapshot.phase == .ready {
+            Text(coordinator.settings.shortcut.label)
+              .font(.caption)
+              .foregroundStyle(.secondary)
+          }
+        }
+        Spacer()
+        if coordinator.snapshot.phase == .transcribing
+          || coordinator.snapshot.phase == .inserting
+        {
+          ProgressView()
+            .controlSize(.small)
         }
       }
-      Spacer()
-      if coordinator.snapshot.phase == .transcribing
-        || coordinator.snapshot.phase == .inserting
+
+      if coordinator.snapshot.phase == .ready,
+        coordinator.snapshot.hasLastTranscript
       {
-        ProgressView()
-          .controlSize(.small)
+        Divider()
+        HStack(spacing: 8) {
+          Button("Paste Last", systemImage: "arrow.down.doc") {
+            coordinator.pasteLastTranscript()
+          }
+          .buttonStyle(.borderedProminent)
+          .help("Paste last transcript (Control-Command-V)")
+
+          Button("Copy", systemImage: "doc.on.doc") {
+            coordinator.copyLastTranscript()
+          }
+          .help("Copy last transcript (Control-Command-C)")
+
+          Spacer()
+        }
+        .controlSize(.small)
       }
     }
   }
