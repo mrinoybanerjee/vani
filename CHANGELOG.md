@@ -30,3 +30,5 @@ All notable changes follow semantic versioning.
 - Report local and release signing identities correctly under shell pipe-failure checks
 - Cancel superseded CodeQL runs to avoid wasting macOS CI capacity
 - Use the fastest sufficient single-architecture debug build for Swift CodeQL
+- Deliver paste events to the captured app even when its text field cannot be inspected,
+  tolerate delayed rich-text updates, and preserve the transcript when verification is uncertain
