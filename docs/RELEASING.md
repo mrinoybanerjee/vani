@@ -17,8 +17,9 @@ material in repository files, artifacts, logs, or pull requests.
 1. Ensure CI is green on `main`.
 2. Update `CHANGELOG.md` and `Resources/Info.plist`.
 3. Create and push a signed semantic tag such as `v0.1.0`.
-4. The Release workflow builds, Developer ID signs, notarizes, staples, assesses,
-   archives, checksums, and publishes the app.
+4. The Release workflow rejects malformed tags and commits outside `main`, reruns lint and
+   tests, then Developer ID signs, notarizes, staples, assesses, archives, checksums, and
+   publishes the app.
 5. Download the release on a separate Mac, verify the checksum, and complete one
    clean-install dictation before announcing it.
 

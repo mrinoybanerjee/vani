@@ -10,6 +10,7 @@ public struct SessionSnapshot: Sendable, Equatable {
   public let failure: VaniFailure?
   public let modelProgress: Double?
   public let isModelReady: Bool
+  public let hasLastTranscript: Bool
   public let hasRecoverableTranscript: Bool
   public let recoverableTranscript: String?
   public let insertionFeedback: InsertionFeedback?
@@ -19,6 +20,7 @@ public struct SessionSnapshot: Sendable, Equatable {
     failure: VaniFailure? = nil,
     modelProgress: Double? = nil,
     isModelReady: Bool = false,
+    hasLastTranscript: Bool = false,
     hasRecoverableTranscript: Bool = false,
     recoverableTranscript: String? = nil,
     insertionFeedback: InsertionFeedback? = nil
@@ -27,6 +29,7 @@ public struct SessionSnapshot: Sendable, Equatable {
     self.failure = failure
     self.modelProgress = modelProgress
     self.isModelReady = isModelReady
+    self.hasLastTranscript = hasLastTranscript
     self.hasRecoverableTranscript = hasRecoverableTranscript
     self.recoverableTranscript = recoverableTranscript
     self.insertionFeedback = insertionFeedback

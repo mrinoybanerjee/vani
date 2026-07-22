@@ -20,6 +20,25 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+
+      - name: Validate release source and version
+        run: |
+          if [[ ! "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "error: release tags must use vMAJOR.MINOR.PATCH" >&2
+            exit 1
+          fi
+          git fetch origin main --quiet
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "error: release commit is not contained in origin/main" >&2
+            exit 1
+          fi
+
+      - name: Lint and test release source
+        run: |
+          ./scripts/lint.sh
+          ./scripts/test.sh
 
       - name: Validate release credentials
         env:

@@ -64,6 +64,14 @@ private actor MockSpeechRecognizer: SpeechRecognizing {
     progress(1)
   }
 
+  func waitUntilPreparationStarts() async -> Bool {
+    for _ in 0..<5_000 {
+      if prepareCount > 0 { return true }
+      try? await Task.sleep(for: .milliseconds(1))
+    }
+    return false
+  }
+
   func transcribe(_ audio: CapturedAudio) async throws -> SpeechResult {
     transcribeCount += 1
     guard !results.isEmpty else { throw VaniFailure.transcriptionFailed }
@@ -124,11 +132,136 @@ func dictationSessionCompletesTheVerifiedHappyPath() async throws {
   let snapshot = await session.snapshot()
   #expect(snapshot.phase == .ready)
   #expect(snapshot.failure == nil)
+  #expect(snapshot.hasLastTranscript)
   #expect(!snapshot.hasRecoverableTranscript)
   #expect(snapshot.insertionFeedback == .verified)
   #expect(insertion.insertedTexts == ["hello world"])
   #expect(await audio.startCount == 1)
   #expect(await audio.stopCount == 1)
+
+  try await session.copyLastTranscript()
+  #expect(insertion.copiedTexts == ["hello world"])
+}
+
+@Test @MainActor
+func secureTextFieldIsRejectedBeforeAudioCaptureStarts() async {
+  let audio = MockAudioCapture()
+  let speech = MockSpeechRecognizer(results: [.success(speechResult("secret"))])
+  let focus = MockFocusProvider()
+  focus.target = TextTarget(
+    processIdentifier: 42,
+    bundleIdentifier: "test.target",
+    isSecureTextField: true
+  )
+  let insertion = MockTextInserter(results: [.success(.verified)])
+  let session = DictationSession(
+    audioCapture: audio,
+    speechRecognizer: speech,
+    textInserter: insertion,
+    focusProvider: focus,
+    diagnostics: DiagnosticStore()
+  )
+
+  #expect(await session.prepareModels(allowDownload: false))
+  await session.beginDictation()
+
+  let snapshot = await session.snapshot()
+  #expect(snapshot.phase == .recoverableError)
+  #expect(snapshot.failure == .secureTextField)
+  #expect(!snapshot.hasRecoverableTranscript)
+  #expect(await audio.startCount == 0)
+  #expect(await speech.transcribeCount == 0)
+  #expect(insertion.insertedTexts.isEmpty)
+}
+
+@Test @MainActor
+func lastTranscriptCanBePastedWithoutDuplicatingHistory() async throws {
+  let historyDirectory = FileManager.default.temporaryDirectory
+    .appendingPathComponent("VaniLastTranscriptTests-\(UUID().uuidString)")
+  defer { try? FileManager.default.removeItem(at: historyDirectory) }
+
+  let history = TranscriptHistoryStore(directory: historyDirectory)
+  let insertion = MockTextInserter(results: [
+    .success(.verified),
+    .success(.verified),
+  ])
+  let session = DictationSession(
+    audioCapture: MockAudioCapture(),
+    speechRecognizer: MockSpeechRecognizer(results: [.success(speechResult("repeat me"))]),
+    textInserter: insertion,
+    focusProvider: MockFocusProvider(),
+    history: history,
+    diagnostics: DiagnosticStore(),
+    settings: VaniSettings(historyEnabled: true)
+  )
+
+  #expect(await session.prepareModels(allowDownload: false))
+  await session.beginDictation()
+  await session.endDictation()
+  await session.pasteLastTranscript()
+
+  let snapshot = await session.snapshot()
+  #expect(snapshot.phase == .ready)
+  #expect(snapshot.hasLastTranscript)
+  #expect(insertion.insertedTexts == ["repeat me", "repeat me"])
+  #expect(try await history.load().map(\.text) == ["repeat me"])
+}
+
+@Test @MainActor
+func dictationSessionAppliesConfiguredSnippetsAndSmartFormatting() async throws {
+  let insertion = MockTextInserter(results: [.success(.verified)])
+  let session = DictationSession(
+    audioCapture: MockAudioCapture(),
+    speechRecognizer: MockSpeechRecognizer(
+      results: [.success(speechResult("um sign off period next thought question mark"))]
+    ),
+    textInserter: insertion,
+    focusProvider: MockFocusProvider(),
+    diagnostics: DiagnosticStore(),
+    settings: VaniSettings(
+      snippets: [SnippetEntry(trigger: "sign off", expansion: "Thanks,\nMrinoy")],
+      smartFormattingEnabled: true
+    )
+  )
+
+  #expect(await session.prepareModels(allowDownload: false))
+  await session.beginDictation()
+  await session.endDictation()
+
+  #expect(insertion.insertedTexts == ["Thanks,\nMrinoy. Next thought?"])
+}
+
+@Test @MainActor
+func failedLastTranscriptPasteRemainsRecoverableAndRetryable() async throws {
+  let insertion = MockTextInserter(results: [
+    .success(.verified),
+    .failure(.insertionFailed),
+    .success(.verified),
+  ])
+  let session = DictationSession(
+    audioCapture: MockAudioCapture(),
+    speechRecognizer: MockSpeechRecognizer(results: [.success(speechResult("keep this"))]),
+    textInserter: insertion,
+    focusProvider: MockFocusProvider(),
+    diagnostics: DiagnosticStore()
+  )
+
+  #expect(await session.prepareModels(allowDownload: false))
+  await session.beginDictation()
+  await session.endDictation()
+  await session.pasteLastTranscript()
+
+  var snapshot = await session.snapshot()
+  #expect(snapshot.phase == .recoverableError)
+  #expect(snapshot.failure == .insertionFailed)
+  #expect(snapshot.recoverableTranscript == "keep this")
+  #expect(snapshot.hasLastTranscript)
+
+  await session.retry()
+  snapshot = await session.snapshot()
+  #expect(snapshot.phase == .ready)
+  #expect(snapshot.hasLastTranscript)
+  #expect(insertion.insertedTexts == ["keep this", "keep this", "keep this"])
 }
 
 @Test @MainActor
@@ -363,7 +496,8 @@ func permissionRevocationDuringPreparationReturnsToSetupWithoutInternalFailure()
   )
 
   async let preparation = session.prepareModels(allowDownload: false)
-  try await Task.sleep(for: .milliseconds(5))
+  #expect(await speech.waitUntilPreparationStarts())
+  #expect(await session.snapshot().phase == .preparing)
   await session.permissionWasRevoked(.microphonePermissionDenied)
   _ = await preparation
 

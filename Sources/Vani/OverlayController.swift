@@ -41,7 +41,7 @@ final class OverlayController {
         show(.success)
         displayDuration = .milliseconds(700)
       case .unconfirmed:
-        show(.copied)
+        show(.backupCopied)
         displayDuration = .milliseconds(1_400)
       case nil:
         hide()
@@ -54,6 +54,16 @@ final class OverlayController {
       }
     case .setup, .preparing, .ready, .disabled:
       hide()
+    }
+  }
+
+  func showLastTranscriptCopied() {
+    hideTask?.cancel()
+    show(.lastTranscriptCopied)
+    hideTask = Task { [weak self] in
+      try? await Task.sleep(for: .milliseconds(900))
+      guard !Task.isCancelled else { return }
+      self?.hide()
     }
   }
 
@@ -86,7 +96,8 @@ private enum OverlayState: Equatable {
   case listening
   case processing
   case success
-  case copied
+  case backupCopied
+  case lastTranscriptCopied
   case failure(String)
 }
 
@@ -137,8 +148,10 @@ private struct OverlayView: View {
       Image(systemName: "text.bubble.fill").foregroundStyle(.blue)
     case .success:
       Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
-    case .copied:
-      Image(systemName: "clipboard.fill").foregroundStyle(.orange)
+    case .backupCopied:
+      Image(systemName: "clipboard.fill").foregroundStyle(.blue)
+    case .lastTranscriptCopied:
+      Image(systemName: "doc.on.clipboard.fill").foregroundStyle(.teal)
     case .failure:
       Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
     }
@@ -150,7 +163,8 @@ private struct OverlayView: View {
     case .listening: "Listening"
     case .processing: "Writing"
     case .success: "Inserted"
-    case .copied: "Copied - paste if needed"
+    case .backupCopied: "Paste sent - backup copied"
+    case .lastTranscriptCopied: "Last transcript copied"
     case .failure(let message): message
     }
   }

@@ -31,13 +31,15 @@ struct SettingsView: View {
           .tabItem { Label("General", systemImage: "slider.horizontal.3") }
         DictionarySettingsView()
           .tabItem { Label("Dictionary", systemImage: "character.book.closed") }
+        SnippetSettingsView()
+          .tabItem { Label("Snippets", systemImage: "text.badge.plus") }
         HistorySettingsView()
           .tabItem { Label("History", systemImage: "clock") }
         DiagnosticsSettingsView()
           .tabItem { Label("Diagnostics", systemImage: "stethoscope") }
       }
     }
-    .frame(width: 560, height: 410)
+    .frame(width: 560, height: 450)
   }
 }
 
@@ -76,6 +78,15 @@ private struct GeneralSettingsView: View {
           isOn: Binding(
             get: { coordinator.settings.historyEnabled },
             set: { coordinator.setHistoryEnabled($0) }
+          ))
+      }
+
+      Section("Writing") {
+        Toggle(
+          "Smart Formatting",
+          isOn: Binding(
+            get: { coordinator.settings.smartFormattingEnabled },
+            set: { coordinator.setSmartFormattingEnabled($0) }
           ))
       }
 
@@ -123,6 +134,141 @@ private struct DictionarySettingsView: View {
       }
     }
     .padding(20)
+  }
+}
+
+private struct SnippetSettingsView: View {
+  @EnvironmentObject private var coordinator: AppCoordinator
+  @State private var trigger = ""
+  @State private var expansion = ""
+  @State private var editingSnippetID: UUID?
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 12) {
+      TextField("Voice trigger", text: $trigger)
+
+      ZStack(alignment: .topLeading) {
+        if expansion.isEmpty {
+          Text("Expanded text")
+            .foregroundStyle(.tertiary)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 7)
+            .allowsHitTesting(false)
+        }
+        TextEditor(text: $expansion)
+          .font(.body)
+          .scrollContentBackground(.hidden)
+          .padding(2)
+      }
+      .frame(height: 72)
+      .background(.background)
+      .overlay {
+        RoundedRectangle(cornerRadius: 5)
+          .strokeBorder(.quaternary, lineWidth: 1)
+      }
+
+      HStack {
+        Text("\(expansion.count)/\(SnippetEntry.maximumExpansionLength)")
+          .font(.caption.monospacedDigit())
+          .foregroundStyle(.secondary)
+        Spacer()
+        if editingSnippetID != nil {
+          Button {
+            resetDraft()
+          } label: {
+            Image(systemName: "xmark")
+          }
+          .help("Cancel editing")
+        }
+        Button(
+          editingSnippetID == nil ? "Add" : "Save",
+          systemImage: editingSnippetID == nil ? "plus" : "checkmark"
+        ) {
+          commitDraft()
+        }
+        .disabled(!draftIsValid)
+      }
+
+      Divider()
+
+      if coordinator.settings.snippets.isEmpty {
+        ContentUnavailableView("No Snippets", systemImage: "text.badge.plus")
+          .frame(maxWidth: .infinity, maxHeight: .infinity)
+      } else {
+        List {
+          ForEach(coordinator.settings.snippets) { snippet in
+            HStack(spacing: 10) {
+              VStack(alignment: .leading, spacing: 3) {
+                Text(snippet.trigger)
+                  .font(.system(size: 13, weight: .medium))
+                Text(snippet.expansion)
+                  .font(.caption)
+                  .foregroundStyle(.secondary)
+                  .lineLimit(2)
+                  .textSelection(.enabled)
+              }
+              Spacer()
+              Button {
+                beginEditing(snippet)
+              } label: {
+                Image(systemName: "pencil")
+                  .frame(width: 22, height: 22)
+              }
+              .buttonStyle(.borderless)
+              .help("Edit snippet")
+            }
+            .padding(.vertical, 2)
+          }
+          .onDelete { offsets in
+            if let editingSnippetID,
+              offsets.contains(where: {
+                coordinator.settings.snippets[$0].id == editingSnippetID
+              })
+            {
+              resetDraft()
+            }
+            coordinator.removeSnippets(at: offsets)
+          }
+        }
+      }
+    }
+    .padding(20)
+  }
+
+  private var draftIsValid: Bool {
+    (editingSnippetID != nil
+      || coordinator.settings.snippets.count < VaniSettings.maximumSnippetCount)
+      && SnippetEntry(trigger: trigger, expansion: expansion).isValid
+  }
+
+  private func beginEditing(_ snippet: SnippetEntry) {
+    editingSnippetID = snippet.id
+    trigger = snippet.trigger
+    expansion = snippet.expansion
+    coordinator.dismissSettingsError()
+  }
+
+  private func commitDraft() {
+    let saved: Bool
+    if let editingSnippetID {
+      saved = coordinator.updateSnippet(
+        id: editingSnippetID,
+        trigger: trigger,
+        expansion: expansion
+      )
+    } else {
+      saved = coordinator.addSnippet(trigger: trigger, expansion: expansion)
+    }
+    if saved {
+      resetDraft()
+    }
+  }
+
+  private func resetDraft() {
+    editingSnippetID = nil
+    trigger = ""
+    expansion = ""
+    coordinator.dismissSettingsError()
   }
 }
 

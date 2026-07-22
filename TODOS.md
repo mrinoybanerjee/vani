@@ -1,4 +1,12 @@
-# Deferred Work
+# Roadmap
+
+## Next Candidates
+
+- Escape to cancel an active dictation without inserting text
+- Optional hands-free recording after cancel and timeout recovery are hardened
+- Configurable bindings for Last Transcript shortcuts
+
+## Longer Term
 
 These items are intentionally outside v1.
 
@@ -12,5 +20,4 @@ These items are intentionally outside v1.
 - Plugin or model marketplace
 - Background auto-updater
 - Screen or surrounding-text context awareness
-- Snippet expansion and command phrases
 - Multiple simultaneous speech engines

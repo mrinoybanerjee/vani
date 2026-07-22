@@ -35,6 +35,7 @@ func everyPhaseEventPairMatchesTheApprovedTransitionTable() throws {
 
     .init(phase: .ready, event: .prepare): .preparing,
     .init(phase: .ready, event: .captureStarted): .listening,
+    .init(phase: .ready, event: .pasteLastRequested): .inserting,
     .init(phase: .ready, event: .failed): .recoverableError,
     .init(phase: .ready, event: .permissionsLost): .setup,
     .init(phase: .ready, event: .audioRouteChanged): .preparing,

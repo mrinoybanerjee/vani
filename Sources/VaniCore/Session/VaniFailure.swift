@@ -29,6 +29,7 @@ public enum VaniFailure: String, Error, Codable, CaseIterable, Sendable, Equatab
   case transcriptionFailed
   case emptyTranscript
   case focusChanged
+  case secureTextField
   case insertionFailed
   case insertionUnverified
   case clipboardChanged
@@ -56,6 +57,7 @@ public enum VaniFailure: String, Error, Codable, CaseIterable, Sendable, Equatab
     case .transcriptionFailed: "Transcription failed"
     case .emptyTranscript: "No words recognized"
     case .focusChanged: "Text target changed"
+    case .secureTextField: "Secure field blocked"
     case .insertionFailed: "Could not insert text"
     case .insertionUnverified: "Text is ready to paste"
     case .clipboardChanged: "Clipboard changed"
@@ -99,6 +101,8 @@ public enum VaniFailure: String, Error, Codable, CaseIterable, Sendable, Equatab
       "The model returned no text. Try speaking closer to the microphone."
     case .focusChanged:
       "Vani did not type because the focused application changed."
+    case .secureTextField:
+      "Vani does not record or insert into password and other secure text fields."
     case .insertionFailed:
       "The transcript remains available for retry or manual paste."
     case .insertionUnverified:
@@ -127,6 +131,7 @@ public enum VaniFailure: String, Error, Codable, CaseIterable, Sendable, Equatab
     case .audioDeviceUnavailable, .audioCaptureFailed, .recordingTooShort,
       .recordingTooLong, .noSpeechDetected, .emptyTranscript, .internalInvariant:
       .startAgain
+    case .secureTextField: .startAgain
     case .unsupportedHardware, .historyCorrupt, .operationCancelled: .none
     }
   }

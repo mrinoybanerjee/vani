@@ -77,6 +77,10 @@ public final class SystemTextInserter: TextInserting {
       return .manualPasteRequired
     }
     try verifyFocus(target)
+    guard !target.isSecureTextField else {
+      VaniLog.event(category: .insertion, code: "secure_field_blocked")
+      throw VaniFailure.secureTextField
+    }
 
     guard environment.canPostPaste else {
       VaniLog.event(category: .insertion, code: "paste_event_access_denied")
@@ -84,7 +88,12 @@ public final class SystemTextInserter: TextInserting {
       throw VaniFailure.accessibilityPermissionDenied
     }
 
-    let before = environment.read(target: target, insertedRange: nil)?.observation
+    let preflight = environment.read(target: target, insertedRange: nil)
+    guard preflight?.isSecureTextField != true else {
+      VaniLog.event(category: .insertion, code: "secure_field_blocked")
+      throw VaniFailure.secureTextField
+    }
+    let before = preflight?.observation
     VaniLog.event(
       category: .insertion,
       code: before == nil ? "paste_preflight_unobservable" : "paste_preflight_observable"

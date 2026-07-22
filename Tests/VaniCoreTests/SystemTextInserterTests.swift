@@ -47,7 +47,8 @@ private func insertionRead(
   value: String?,
   range: NSRange?,
   count: Int?,
-  insertedText: String? = nil
+  insertedText: String? = nil,
+  isSecureTextField: Bool = false
 ) -> TextInsertionRead {
   TextInsertionRead(
     observation: TextInsertionObservation(
@@ -55,7 +56,8 @@ private func insertionRead(
       selectedRange: range,
       characterCount: count
     ),
-    insertedText: insertedText
+    insertedText: insertedText,
+    isSecureTextField: isSecureTextField
   )
 }
 
@@ -148,6 +150,32 @@ func changedForegroundApplicationAbortsBeforeTouchingTheClipboard() async {
       environment: environment,
       pasteboard: pasteboard
     ).insert("do not paste", into: capturedTarget)
+  }
+
+  #expect(environment.postCount == 0)
+  #expect(pasteboard.string(forType: .string) == "original")
+}
+
+@Test @MainActor
+func secureTextFieldAbortsBeforeTouchingTheClipboard() async {
+  let focus = InsertionFocusProvider()
+  let secureRead = insertionRead(
+    value: nil,
+    range: nil,
+    count: nil,
+    isSecureTextField: true
+  )
+  let environment = InsertionEnvironment(reads: [secureRead])
+  let pasteboard = NSPasteboard.withUniqueName()
+  defer { pasteboard.releaseGlobally() }
+  pasteboard.setString("original", forType: .string)
+
+  await #expect(throws: VaniFailure.secureTextField) {
+    try await makeInserter(
+      focus: focus,
+      environment: environment,
+      pasteboard: pasteboard
+    ).insert("do not paste", into: focus.target)
   }
 
   #expect(environment.postCount == 0)

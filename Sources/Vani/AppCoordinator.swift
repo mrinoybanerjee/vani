@@ -91,6 +91,12 @@ final class AppCoordinator: ObservableObject {
     hotkeyMonitor.onRelease = { [weak self] in
       self?.endDictation()
     }
+    hotkeyMonitor.onPasteLast = { [weak self] in
+      self?.pasteLastTranscript()
+    }
+    hotkeyMonitor.onCopyLast = { [weak self] in
+      self?.copyLastTranscript()
+    }
     installSystemObservers()
     showQAWindowIfRequested()
     await refreshPermissions()
@@ -219,6 +225,23 @@ final class AppCoordinator: ObservableObject {
     }
   }
 
+  func pasteLastTranscript() {
+    guard snapshot.phase == .ready, snapshot.hasLastTranscript else { return }
+    Task { await session.pasteLastTranscript() }
+  }
+
+  func copyLastTranscript() {
+    guard snapshot.phase == .ready, snapshot.hasLastTranscript else { return }
+    Task {
+      do {
+        try await session.copyLastTranscript()
+        overlay.showLastTranscriptCopied()
+      } catch {
+        settingsError = (error as? VaniFailure)?.message ?? "Could not copy transcript."
+      }
+    }
+  }
+
   func discardRecovery() {
     Task { await session.discardRecovery() }
   }
@@ -233,6 +256,11 @@ final class AppCoordinator: ObservableObject {
     settings.historyEnabled = enabled
     persistSettings()
     Task { await refreshHistory() }
+  }
+
+  func setSmartFormattingEnabled(_ enabled: Bool) {
+    settings.smartFormattingEnabled = enabled
+    persistSettings()
   }
 
   func setLaunchAtLogin(_ enabled: Bool) {
@@ -260,6 +288,52 @@ final class AppCoordinator: ObservableObject {
 
   func removeDictionaryEntries(at offsets: IndexSet) {
     settings.dictionary.remove(atOffsets: offsets)
+    persistSettings()
+  }
+
+  @discardableResult
+  func addSnippet(trigger: String, expansion: String) -> Bool {
+    let entry = SnippetEntry(trigger: trigger, expansion: expansion)
+    guard settings.snippets.count < VaniSettings.maximumSnippetCount else {
+      settingsError = "Vani supports up to 200 snippets."
+      return false
+    }
+    if let validationError = snippetValidationError(for: entry) {
+      settingsError = validationError
+      return false
+    }
+
+    settings.snippets.append(
+      SnippetEntry(trigger: entry.normalizedTrigger, expansion: entry.expansion)
+    )
+    persistSettings()
+    return true
+  }
+
+  @discardableResult
+  func updateSnippet(id: UUID, trigger: String, expansion: String) -> Bool {
+    guard let index = settings.snippets.firstIndex(where: { $0.id == id }) else {
+      settingsError = "That snippet no longer exists."
+      return false
+    }
+
+    let entry = SnippetEntry(id: id, trigger: trigger, expansion: expansion)
+    if let validationError = snippetValidationError(for: entry, excludingID: id) {
+      settingsError = validationError
+      return false
+    }
+
+    settings.snippets[index] = SnippetEntry(
+      id: id,
+      trigger: entry.normalizedTrigger,
+      expansion: entry.expansion
+    )
+    persistSettings()
+    return true
+  }
+
+  func removeSnippets(at offsets: IndexSet) {
+    settings.snippets.remove(atOffsets: offsets)
     persistSettings()
   }
 
@@ -291,6 +365,29 @@ final class AppCoordinator: ObservableObject {
 
   func dismissSettingsError() {
     settingsError = nil
+  }
+
+  private func snippetValidationError(
+    for entry: SnippetEntry,
+    excludingID: UUID? = nil
+  ) -> String? {
+    guard entry.isValid else {
+      return "Snippet triggers must be 1-100 characters; text can be up to 4,000."
+    }
+
+    let normalizedTrigger = entry.normalizedTrigger.lowercased()
+    if settings.snippets.contains(where: {
+      $0.id != excludingID && $0.normalizedTrigger.lowercased() == normalizedTrigger
+    }) {
+      return "That snippet trigger is already in use."
+    }
+    if settings.dictionary.contains(where: {
+      SnippetEntry(trigger: $0.spoken, expansion: "x").normalizedTrigger.lowercased()
+        == normalizedTrigger
+    }) {
+      return "That phrase is already used by the dictionary."
+    }
+    return nil
   }
 
   private func beginDictation() {
