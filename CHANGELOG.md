@@ -4,6 +4,8 @@ All notable changes follow semantic versioning.
 
 ## Unreleased
 
+## 0.1.0 - 2026-07-22
+
 ### Added
 
 - Native Swift 6 menu-bar app for Apple Silicon macOS

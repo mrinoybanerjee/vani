@@ -16,10 +16,11 @@ cloud transcription, or generative rewriting.
 
 ## Status
 
-Vani is a functional development beta for macOS 14 or newer on Apple Silicon. The
-core workflow, recovery paths, native UI, deterministic audio fixture, and 500-cycle
-reliability harness are implemented. Public releases remain blocked on Developer ID
-credentials and notarization.
+Vani is a functional source beta for macOS 14 or newer on Apple Silicon. The core
+workflow, recovery paths, native UI, deterministic audio fixture, and 500-cycle
+reliability harness are implemented. Free source releases can be built locally;
+prebuilt Gatekeeper-trusted downloads still require paid Developer ID signing and
+Apple notarization.
 
 ## What Works
 
