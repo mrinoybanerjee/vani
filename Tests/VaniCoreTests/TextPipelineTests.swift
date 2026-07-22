@@ -268,6 +268,28 @@ func smartFormattingHandlesConservativeFillersPunctuationAndStructure() {
 }
 
 @Test
+func smartFormattingAbsorbsRecognizerPunctuationAroundCommands() {
+  #expect(
+    textPipeline.process(
+      "Hello, comma, this is a test, period, new paragraph, it works.",
+      dictionary: [],
+      smartFormattingEnabled: true
+    ) == "Hello, this is a test.\n\nIt works."
+  )
+}
+
+@Test
+func smartFormattingPreservesSentenceEndBeforeAParagraphCommand() {
+  #expect(
+    textPipeline.process(
+      "first thought. new paragraph, next thought",
+      dictionary: [],
+      smartFormattingEnabled: true
+    ) == "First thought.\n\nNext thought"
+  )
+}
+
+@Test
 func smartFormattingPreservesSnippetTextExactly() {
   #expect(
     textPipeline.process(

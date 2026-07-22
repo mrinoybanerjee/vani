@@ -122,29 +122,67 @@ public struct TextPipeline: Sendable {
       options: .regularExpression
     )
 
-    let commands: [(phrase: String, replacement: String)] = [
+    let structuralCommands: [(phrase: String, replacement: String)] = [
+      ("new paragraph", "\n\n"),
+      ("new line", "\n"),
+    ]
+    result = replaceSpokenCommands(
+      structuralCommands,
+      in: result,
+      leadingArtifactPattern: #"[,;:]"#
+    )
+
+    let punctuationCommands: [(phrase: String, replacement: String)] = [
       ("exclamation point", "!"),
       ("exclamation mark", "!"),
-      ("new paragraph", "\n\n"),
       ("question mark", "?"),
-      ("new line", "\n"),
       ("full stop", "."),
       ("semicolon", ";"),
       ("period", "."),
       ("comma", ","),
       ("colon", ":"),
     ]
-
-    for command in commands {
-      let escaped = NSRegularExpression.escapedPattern(for: command.phrase)
-      result = result.replacingOccurrences(
-        of: #"(?i)(?<![\p{L}\p{N}])"# + escaped + #"(?![\p{L}\p{N}])"#,
-        with: NSRegularExpression.escapedTemplate(for: command.replacement),
-        options: .regularExpression
-      )
-    }
+    result = replaceSpokenCommands(
+      punctuationCommands,
+      in: result,
+      leadingArtifactPattern: #"[,.;:!?]"#
+    )
 
     return capitalizeSentenceStarts(in: cleanSpacing(in: result))
+  }
+
+  private func replaceSpokenCommands(
+    _ commands: [(phrase: String, replacement: String)],
+    in text: String,
+    leadingArtifactPattern: String
+  ) -> String {
+    let orderedCommands = commands.sorted { $0.phrase.count > $1.phrase.count }
+    let alternatives = orderedCommands.map {
+      NSRegularExpression.escapedPattern(for: $0.phrase)
+    }.joined(separator: "|")
+    let pattern =
+      #"(?i)(?:"# + leadingArtifactPattern
+      + #"+[ \t]*)?(?<![\p{L}\p{N}])("# + alternatives
+      + #")(?![\p{L}\p{N}])(?:[ \t]*[,.;:!?]+)?"#
+    guard let expression = try? NSRegularExpression(pattern: pattern) else {
+      return text
+    }
+
+    let replacements = Dictionary(
+      uniqueKeysWithValues: orderedCommands.map { ($0.phrase.lowercased(), $0.replacement) }
+    )
+    let source = text as NSString
+    let mutable = NSMutableString(string: text)
+    let matches = expression.matches(
+      in: text,
+      range: NSRange(location: 0, length: source.length)
+    )
+    for match in matches.reversed() {
+      let phrase = source.substring(with: match.range(at: 1)).lowercased()
+      guard let replacement = replacements[phrase] else { continue }
+      mutable.replaceCharacters(in: match.range, with: replacement)
+    }
+    return String(mutable)
   }
 
   private func cleanSpacing(in text: String) -> String {
