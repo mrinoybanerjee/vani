@@ -6,17 +6,15 @@ on:
       - "v*"
 
 permissions:
-  contents: write
-  id-token: write
-  attestations: write
+  contents: read
 
 jobs:
-  release:
-    name: Sign, notarize, and release
-    if: startsWith(github.ref, 'refs/tags/v')
+  source-release:
+    name: Validate and publish source release
     runs-on: macos-15
-    timeout-minutes: 45
-    environment: release
+    timeout-minutes: 30
+    permissions:
+      contents: write
     steps:
       - name: Check out repository
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -34,11 +32,56 @@ jobs:
             echo "error: release commit is not contained in origin/main" >&2
             exit 1
           fi
+          VERSION="${GITHUB_REF_NAME#v}"
+          BUNDLE_VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' Resources/Info.plist)"
+          if [[ "$VERSION" != "$BUNDLE_VERSION" ]]; then
+            echo "error: tag version $VERSION does not match bundle version $BUNDLE_VERSION" >&2
+            exit 1
+          fi
+          if ! grep -Fq "## $VERSION -" CHANGELOG.md; then
+            echo "error: CHANGELOG.md has no dated section for $VERSION" >&2
+            exit 1
+          fi
 
       - name: Lint and test release source
         run: |
           ./scripts/lint.sh
           ./scripts/test.sh
+
+      - name: Publish source beta
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          cat > "$RUNNER_TEMP/release-notes.md" <<EOF
+          This is a source-only beta for Apple Silicon Macs running macOS 14 or newer.
+
+          Clone this tag and follow the [local setup instructions](https://github.com/${GITHUB_REPOSITORY}#run-locally). Vani builds and runs entirely on your Mac. GitHub automatically provides the source archives below.
+
+          A prebuilt app is intentionally not attached: Gatekeeper-trusted public binaries require paid Apple Developer ID signing and notarization. See the [changelog](https://github.com/${GITHUB_REPOSITORY}/blob/${GITHUB_REF_NAME}/CHANGELOG.md) for included changes.
+          EOF
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release edit "$GITHUB_REF_NAME" --prerelease --title "Vani $VERSION source beta" --notes-file "$RUNNER_TEMP/release-notes.md"
+          else
+            gh release create "$GITHUB_REF_NAME" --verify-tag --prerelease --title "Vani $VERSION source beta" --notes-file "$RUNNER_TEMP/release-notes.md"
+          fi
+
+  signed-release:
+    name: Sign, notarize, and attach macOS app
+    if: vars.APPLE_DISTRIBUTION_ENABLED == 'true'
+    needs: source-release
+    runs-on: macos-15
+    timeout-minutes: 45
+    environment: release
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
 
       - name: Validate release credentials
         env:
@@ -110,6 +153,7 @@ jobs:
         run: |
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
             gh release upload "$GITHUB_REF_NAME" Vani-macOS-arm64.zip Vani-macOS-arm64.zip.sha256 --clobber
+            gh release edit "$GITHUB_REF_NAME" --prerelease=false --title "Vani ${GITHUB_REF_NAME#v}"
           else
             gh release create "$GITHUB_REF_NAME" Vani-macOS-arm64.zip Vani-macOS-arm64.zip.sha256 --verify-tag --generate-notes
           fi
