@@ -1,6 +1,34 @@
 import AVFoundation
 import Foundation
 
+// The buffer is immutable after init; the lock protects one-shot delivery from
+// AVFoundation's Sendable input callback.
+private final class AudioConverterInputState: @unchecked Sendable {
+  private let lock = NSLock()
+  private let inputBuffer: AVAudioPCMBuffer
+  private var hasProvidedInput = false
+
+  init(inputBuffer: AVAudioPCMBuffer) {
+    self.inputBuffer = inputBuffer
+  }
+
+  func nextBuffer(
+    outputStatus: UnsafeMutablePointer<AVAudioConverterInputStatus>
+  ) -> AVAudioBuffer? {
+    lock.lock()
+    defer { lock.unlock() }
+
+    guard !hasProvidedInput else {
+      outputStatus.pointee = .endOfStream
+      return nil
+    }
+
+    hasProvidedInput = true
+    outputStatus.pointee = .haveData
+    return inputBuffer
+  }
+}
+
 enum SampleRateConverter {
   static func convert(
     _ samples: [Float],
@@ -54,18 +82,18 @@ enum SampleRateConverter {
       throw VaniFailure.audioCaptureFailed
     }
 
-    var inputProvided = false
+    let inputState = AudioConverterInputState(inputBuffer: inputBuffer)
+    let inputBlock:
+      @Sendable (AVAudioPacketCount, UnsafeMutablePointer<AVAudioConverterInputStatus>)
+        -> AVAudioBuffer? = { _, outputStatus in
+          inputState.nextBuffer(outputStatus: outputStatus)
+        }
     var conversionError: NSError?
-    let status = converter.convert(to: outputBuffer, error: &conversionError) {
-      _, outputStatus in
-      if inputProvided {
-        outputStatus.pointee = .endOfStream
-        return nil
-      }
-      inputProvided = true
-      outputStatus.pointee = .haveData
-      return inputBuffer
-    }
+    let status = converter.convert(
+      to: outputBuffer,
+      error: &conversionError,
+      withInputFrom: inputBlock
+    )
 
     guard conversionError == nil,
       status == .haveData || status == .endOfStream || status == .inputRanDry,

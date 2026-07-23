@@ -50,3 +50,20 @@ func loadsAndResamplesAnAudioFixture() throws {
   #expect(audio.duration > 5)
   #expect(audio.rootMeanSquare > 0.0015)
 }
+
+@Test
+func resamplesFortyEightKilohertzAudioToSixteenKilohertz() throws {
+  let inputSampleRate = 48_000.0
+  let samples = (0..<Int(inputSampleRate)).map { frame in
+    Float(sin(2 * Double.pi * 440 * Double(frame) / inputSampleRate) * 0.25)
+  }
+
+  let converted = try SampleRateConverter.convert(
+    samples,
+    from: inputSampleRate
+  )
+
+  #expect((15_900...16_100).contains(converted.count))
+  #expect(converted.allSatisfy { $0.isFinite })
+  #expect(converted.map(abs).max() ?? 0 > 0.1)
+}
