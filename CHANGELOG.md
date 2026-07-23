@@ -4,6 +4,13 @@ All notable changes follow semantic versioning.
 
 ## Unreleased
 
+## 0.1.1 - 2026-07-22
+
+### Fixed
+
+- Make AVAudioConverter input ownership explicit and concurrency-safe under Swift 6.3
+- Exercise real 48 kHz to 16 kHz audio conversion in the regression suite
+
 ## 0.1.0 - 2026-07-22
 
 ### Added
