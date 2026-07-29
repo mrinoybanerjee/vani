@@ -29,6 +29,14 @@ private actor MockAudioCapture: AudioCapturing {
     return audio
   }
 
+  func waitUntilStart() async -> Bool {
+    for _ in 0..<5_000 {
+      if startCount > 0 { return true }
+      try? await Task.sleep(for: .milliseconds(1))
+    }
+    return false
+  }
+
   func cancel() async {}
 }
 
@@ -462,6 +470,30 @@ func concurrentStartRequestsOnlyStartOneCapture() async throws {
 
   #expect(await session.snapshot().phase == .listening)
   #expect(await audio.startCount == 1)
+}
+
+@Test @MainActor
+func releaseDuringCaptureStartupStopsAfterTheMicrophoneStarts() async throws {
+  let audio = MockAudioCapture(startDelay: .milliseconds(25))
+  let insertion = MockTextInserter(results: [.success(.verified)])
+  let session = DictationSession(
+    audioCapture: audio,
+    speechRecognizer: MockSpeechRecognizer(results: [.success(speechResult("quick release"))]),
+    textInserter: insertion,
+    focusProvider: MockFocusProvider(),
+    diagnostics: DiagnosticStore()
+  )
+
+  #expect(await session.prepareModels(allowDownload: false))
+  async let start: Void = session.beginDictation()
+  #expect(await audio.waitUntilStart())
+  await session.endDictation()
+  await start
+
+  #expect(await session.snapshot().phase == .ready)
+  #expect(await audio.startCount == 1)
+  #expect(await audio.stopCount == 1)
+  #expect(insertion.insertedTexts == ["quick release"])
 }
 
 @Test @MainActor

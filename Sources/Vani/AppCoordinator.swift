@@ -25,6 +25,7 @@ final class AppCoordinator: ObservableObject {
   private let overlay = OverlayController()
   private var notificationTokens: [NSObjectProtocol] = []
   private var qaWindow: NSWindow?
+  private var captureStartTask: Task<Void, Never>?
   private var settingsRevision: UInt64 = 0
   private var started = false
 
@@ -46,17 +47,6 @@ final class AppCoordinator: ObservableObject {
 
     Task { [weak self] in
       await self?.start()
-    }
-  }
-
-  var menuBarIconName: String {
-    switch snapshot.phase {
-    case .listening: "waveform.circle.fill"
-    case .transcribing, .inserting, .preparing: "waveform.badge.magnifyingglass"
-    case .recoverableError: "exclamationmark.circle.fill"
-    case .setup: "waveform.circle"
-    case .ready: "waveform"
-    case .disabled: "waveform.slash"
     }
   }
 
@@ -391,12 +381,15 @@ final class AppCoordinator: ObservableObject {
   }
 
   private func beginDictation() {
-    guard canDictate else { return }
-    Task { await session.beginDictation() }
+    guard canDictate, captureStartTask == nil else { return }
+    captureStartTask = Task { await session.beginDictation() }
   }
 
   private func endDictation() {
+    let startTask = captureStartTask
+    captureStartTask = nil
     Task {
+      await startTask?.value
       await session.endDictation()
       await refreshHistory()
     }

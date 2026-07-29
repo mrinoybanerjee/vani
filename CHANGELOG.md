@@ -4,6 +4,19 @@ All notable changes follow semantic versioning.
 
 ## Unreleased
 
+### Changed
+
+- Use a compact Vani speech-bubble mark in the menu bar and status popover
+- Move dictation feedback below the upper-right menu-bar area so it does not cover
+  bottom-edge text fields
+- Include Vani's license and third-party notices in built app bundles
+- Update pinned GitHub Actions and CodeQL actions together
+
+### Fixed
+
+- Preserve rapid shortcut releases that arrive while microphone capture is starting
+- Keep waveform animation dimensions stable to avoid unnecessary panel relayout
+
 ## 0.1.1 - 2026-07-22
 
 ### Fixed

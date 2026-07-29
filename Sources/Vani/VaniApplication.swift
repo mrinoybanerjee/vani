@@ -11,7 +11,9 @@ struct VaniApplication: App {
       MenuContentView()
         .environmentObject(coordinator)
     } label: {
-      Label("Vani", systemImage: coordinator.menuBarIconName)
+      VaniStatusMark(phase: coordinator.snapshot.phase)
+        .foregroundStyle(.primary)
+        .accessibilityLabel("Vani")
     }
     .menuBarExtraStyle(.window)
 

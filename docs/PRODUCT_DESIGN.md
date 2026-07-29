@@ -19,7 +19,8 @@ someone who wants private English voice typing without an account or cloud servi
 
 - Native system typography, materials, colors, controls, and accessibility behavior
 - Compact menu-bar popover and one settings window
-- Non-activating overlay with listening, processing, success, and error states
+- Non-activating upper-right overlay with listening, processing, success, and error
+  states, positioned below the menu bar so it does not cover common text composers
 - Restrained 120 to 180 ms state transitions with Reduce Motion support
 - No onboarding carousel, dashboard, editor, decorative cards, or hidden background work
 

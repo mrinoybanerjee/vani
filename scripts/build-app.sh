@@ -52,6 +52,10 @@ mkdir -p "$STAGING_APP/Contents/MacOS" "$STAGING_APP/Contents/Resources"
 install -m 0755 "$BIN_PATH/Vani" "$STAGING_APP/Contents/MacOS/Vani"
 install -m 0644 "$ROOT/Resources/Info.plist" "$STAGING_APP/Contents/Info.plist"
 install -m 0644 "$ROOT/Resources/AppIcon.icns" "$STAGING_APP/Contents/Resources/AppIcon.icns"
+install -m 0644 "$ROOT/LICENSE" "$STAGING_APP/Contents/Resources/LICENSE.txt"
+install -m 0644 \
+    "$ROOT/THIRD_PARTY_NOTICES.md" \
+    "$STAGING_APP/Contents/Resources/THIRD_PARTY_NOTICES.md"
 /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" "$STAGING_APP/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_NUMBER" "$STAGING_APP/Contents/Info.plist"
 

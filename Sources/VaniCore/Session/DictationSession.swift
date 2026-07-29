@@ -23,6 +23,7 @@ public actor DictationSession {
   private var isPreparingRequest = false
   private var preparationGeneration: UInt64 = 0
   private var isStartingCapture = false
+  private var shouldStopAfterCaptureStarts = false
   private var isPastingLastTranscript = false
   private var currentTarget: TextTarget?
   private var lastTranscript: String?
@@ -114,7 +115,13 @@ public actor DictationSession {
       return
     }
     isStartingCapture = true
-    defer { isStartingCapture = false }
+    shouldStopAfterCaptureStarts = false
+    defer {
+      isStartingCapture = false
+      if machine.phase != .listening {
+        shouldStopAfterCaptureStarts = false
+      }
+    }
 
     currentTarget = await focusProvider.currentTarget()
     guard machine.phase == .ready else {
@@ -137,17 +144,30 @@ public actor DictationSession {
         return
       }
       try await transition(.captureStarted)
+      if shouldStopAfterCaptureStarts {
+        shouldStopAfterCaptureStarts = false
+        await finishDictation()
+      }
     } catch {
       await fail(map(error, fallback: .audioCaptureFailed))
     }
   }
 
   public func endDictation() async {
+    if isStartingCapture {
+      shouldStopAfterCaptureStarts = true
+      VaniLog.event(category: .capture, code: "capture_stop_queued")
+      return
+    }
     guard machine.phase == .listening else {
       await recordIgnored("capture_stop", phase: machine.phase)
       return
     }
 
+    await finishDictation()
+  }
+
+  private func finishDictation() async {
     do {
       try await transition(.captureStopped)
       let audio = try await audioCapture.stop()
