@@ -1,4 +1,3 @@
-<!-- /autoplan restore point: /Users/mrinoy/.gstack/projects/vani/main-autoplan-restore-20260717-205034.md -->
 # Vani V1 Implementation Plan
 
 Status: Implemented; public release credentials and dogfood percentiles remain open
