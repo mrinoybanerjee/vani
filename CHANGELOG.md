@@ -14,6 +14,7 @@ All notable changes follow semantic versioning.
 
 ### Fixed
 
+- Keep the Vani menu-bar status item visible in light and dark menu bars
 - Preserve rapid shortcut releases that arrive while microphone capture is starting
 - Keep waveform animation dimensions stable to avoid unnecessary panel relayout
 

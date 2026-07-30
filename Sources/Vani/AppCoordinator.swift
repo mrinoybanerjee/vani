@@ -50,6 +50,17 @@ final class AppCoordinator: ObservableObject {
     }
   }
 
+  var menuBarIconName: String {
+    switch snapshot.phase {
+    case .listening: "waveform.circle.fill"
+    case .transcribing, .inserting, .preparing: "waveform.badge.magnifyingglass"
+    case .recoverableError: "exclamationmark.circle.fill"
+    case .setup: "waveform.circle"
+    case .ready: "waveform"
+    case .disabled: "waveform.slash"
+    }
+  }
+
   var canDictate: Bool {
     snapshot.phase == .ready
       && microphonePermission.isGranted
