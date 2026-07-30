@@ -45,6 +45,13 @@ jobs:
       - name: Run tests
         run: ./scripts/test.sh
 
+      - name: Test 20-minute capture boundary
+        env:
+          VANI_RUN_LONG_AUDIO_TESTS: "1"
+        run: >-
+          swift test -c release
+          --filter twentyMinutePagedCaptureDrainsAndResamples
+
       - name: Archive development app
         run: ditto -c -k --keepParent dist/Vani.app Vani-development.zip
 

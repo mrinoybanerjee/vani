@@ -91,6 +91,20 @@ run the bundled English fixture through the real engine with:
 VANI_RUN_MODEL_TESTS=1 swift test --filter bundledEnglishFixtureTranscribesLocally
 ```
 
+The 20-minute model path has a separate opt-in test so routine development stays fast:
+
+```bash
+VANI_RUN_LONG_MODEL_TESTS=1 swift test -c release \
+  --filter twentyMinuteEnglishFixtureTranscribesLocally
+```
+
+The full paged capture and 48 kHz conversion boundary is also opt-in:
+
+```bash
+VANI_RUN_LONG_AUDIO_TESTS=1 swift test -c release \
+  --filter twentyMinutePagedCaptureDrainsAndResamples
+```
+
 ## Environment variables
 
 | Variable | Purpose |

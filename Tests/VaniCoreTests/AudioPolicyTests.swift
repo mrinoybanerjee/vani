@@ -11,6 +11,23 @@ func acceptsAudibleRecordingInsideBounds() throws {
 }
 
 @Test
+func defaultAudioPolicyAllowsTwentyMinuteDictation() {
+  #expect(AudioPolicy.default.maximumDuration == 20 * 60)
+}
+
+@Test
+func acceptsRecordingAtTheExactDurationLimit() throws {
+  let policy = AudioPolicy(
+    minimumDuration: 0.01,
+    maximumDuration: 1,
+    minimumRootMeanSquare: 0.0015
+  )
+  let audio = CapturedAudio(samples: Array(repeating: 0.05, count: 16_000))
+
+  try policy.validate(audio)
+}
+
+@Test
 func rejectsShortRecording() {
   let audio = CapturedAudio(samples: Array(repeating: 0.05, count: 1_000))
   #expect(throws: VaniFailure.recordingTooShort) {

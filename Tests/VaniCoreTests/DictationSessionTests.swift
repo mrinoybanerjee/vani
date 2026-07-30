@@ -7,18 +7,25 @@ private actor MockAudioCapture: AudioCapturing {
   let audio: CapturedAudio
   let startDelay: Duration?
   let startFailure: VaniFailure?
+  let stopFailure: VaniFailure?
+  private var pendingAudio: CapturedAudio?
   private(set) var startCount = 0
   private(set) var stopCount = 0
+  private(set) var recoverPendingCount = 0
   private(set) var cancelCount = 0
 
   init(
     audio: CapturedAudio = CapturedAudio(samples: Array(repeating: 0.05, count: 8_000)),
     startDelay: Duration? = nil,
-    startFailure: VaniFailure? = nil
+    startFailure: VaniFailure? = nil,
+    stopFailure: VaniFailure? = nil,
+    pendingAudio: CapturedAudio? = nil
   ) {
     self.audio = audio
     self.startDelay = startDelay
     self.startFailure = startFailure
+    self.stopFailure = stopFailure
+    self.pendingAudio = pendingAudio
   }
 
   func start() async throws {
@@ -33,6 +40,16 @@ private actor MockAudioCapture: AudioCapturing {
 
   func stop() async throws -> CapturedAudio {
     stopCount += 1
+    if let stopFailure {
+      throw stopFailure
+    }
+    return audio
+  }
+
+  func recoverPendingAudio() async throws -> CapturedAudio? {
+    recoverPendingCount += 1
+    let audio = pendingAudio
+    pendingAudio = nil
     return audio
   }
 
@@ -46,6 +63,7 @@ private actor MockAudioCapture: AudioCapturing {
 
   func cancel() async {
     cancelCount += 1
+    pendingAudio = nil
   }
 }
 
@@ -208,6 +226,269 @@ func dictationSessionCompletesTheVerifiedHappyPath() async throws {
 }
 
 @Test @MainActor
+func recordingLimitWarnsThenAutomaticallyFinishesOnce() async throws {
+  let audio = MockAudioCapture(
+    audio: CapturedAudio(samples: Array(repeating: 0.05, count: 1_600))
+  )
+  let speech = MockSpeechRecognizer(results: [.success(speechResult("long dictation"))])
+  let insertion = MockTextInserter(results: [.success(.verified)])
+  let session = DictationSession(
+    audioCapture: audio,
+    speechRecognizer: speech,
+    textInserter: insertion,
+    focusProvider: MockFocusProvider(),
+    diagnostics: DiagnosticStore(),
+    audioPolicy: AudioPolicy(
+      minimumDuration: 0.01,
+      maximumDuration: 0.4,
+      minimumRootMeanSquare: 0.0015
+    )
+  )
+
+  #expect(await session.prepareModels(allowDownload: false))
+  await session.beginDictation()
+
+  var observedWarning = false
+  for _ in 0..<1_000 {
+    if await session.snapshot().isRecordingLimitApproaching {
+      observedWarning = true
+      break
+    }
+    try await Task.sleep(for: .milliseconds(1))
+  }
+  #expect(observedWarning)
+
+  var snapshot = await session.snapshot()
+  for _ in 0..<1_000 {
+    snapshot = await session.snapshot()
+    if snapshot.phase == .ready { break }
+    try await Task.sleep(for: .milliseconds(1))
+  }
+  #expect(snapshot.phase == .ready)
+  #expect(!snapshot.isRecordingLimitApproaching)
+  #expect(await audio.stopCount == 1)
+  #expect(await speech.transcribeCount == 1)
+  #expect(insertion.insertedTexts == ["long dictation"])
+
+  await session.endDictation()
+  #expect(await audio.stopCount == 1)
+}
+
+@Test @MainActor
+func manualStopCancelsTheRecordingLimitTimer() async throws {
+  let audio = MockAudioCapture(
+    audio: CapturedAudio(samples: Array(repeating: 0.05, count: 480))
+  )
+  let session = DictationSession(
+    audioCapture: audio,
+    speechRecognizer: MockSpeechRecognizer(results: [.success(speechResult("short"))]),
+    textInserter: MockTextInserter(results: [.success(.verified)]),
+    focusProvider: MockFocusProvider(),
+    diagnostics: DiagnosticStore(),
+    audioPolicy: AudioPolicy(
+      minimumDuration: 0.01,
+      maximumDuration: 0.05,
+      minimumRootMeanSquare: 0.0015
+    )
+  )
+
+  #expect(await session.prepareModels(allowDownload: false))
+  await session.beginDictation()
+  await session.endDictation()
+  try await Task.sleep(for: .milliseconds(100))
+
+  let snapshot = await session.snapshot()
+  #expect(snapshot.phase == .ready)
+  #expect(!snapshot.isRecordingLimitApproaching)
+  #expect(await audio.stopCount == 1)
+}
+
+@Test @MainActor
+func overLimitAudioIsRetainedAndCanBeTranscribedWithoutRecordingAgain() async throws {
+  let audio = MockAudioCapture(
+    audio: CapturedAudio(samples: Array(repeating: 0.05, count: 32_000))
+  )
+  let speech = MockSpeechRecognizer(results: [.success(speechResult("preserved"))])
+  let insertion = MockTextInserter(results: [.success(.verified)])
+  let session = DictationSession(
+    audioCapture: audio,
+    speechRecognizer: speech,
+    textInserter: insertion,
+    focusProvider: MockFocusProvider(),
+    diagnostics: DiagnosticStore(),
+    audioPolicy: AudioPolicy(
+      minimumDuration: 0.01,
+      maximumDuration: 1,
+      minimumRootMeanSquare: 0.0015
+    )
+  )
+
+  #expect(await session.prepareModels(allowDownload: false))
+  await session.beginDictation()
+  await session.endDictation()
+
+  var snapshot = await session.snapshot()
+  #expect(snapshot.phase == .recoverableError)
+  #expect(snapshot.failure == .recordingTooLong)
+  #expect(snapshot.failure?.recoveryAction == .retryTranscription)
+  #expect(await speech.transcribeCount == 0)
+
+  await session.retry()
+
+  snapshot = await session.snapshot()
+  #expect(snapshot.phase == .ready)
+  #expect(snapshot.failure == nil)
+  #expect(await audio.startCount == 1)
+  #expect(await speech.transcribeCount == 1)
+  #expect(insertion.insertedTexts == ["preserved"])
+}
+
+@Test @MainActor
+func earlyCaptureTruncationIsInsertedWithAnExplicitWarning() async throws {
+  let audio = MockAudioCapture(
+    audio: CapturedAudio(
+      samples: Array(repeating: 0.05, count: 8_000),
+      wasTruncated: true
+    )
+  )
+  let session = DictationSession(
+    audioCapture: audio,
+    speechRecognizer: MockSpeechRecognizer(results: [.success(speechResult("partial"))]),
+    textInserter: MockTextInserter(results: [.success(.verified)]),
+    focusProvider: MockFocusProvider(),
+    diagnostics: DiagnosticStore(),
+    audioPolicy: AudioPolicy(
+      minimumDuration: 0.01,
+      maximumDuration: 1,
+      minimumRootMeanSquare: 0.0015
+    )
+  )
+
+  #expect(await session.prepareModels(allowDownload: false))
+  await session.beginDictation()
+  await session.endDictation()
+
+  let snapshot = await session.snapshot()
+  #expect(snapshot.phase == .ready)
+  #expect(snapshot.insertionFeedback == .verifiedCaptureTruncated)
+}
+
+@Test @MainActor
+func truncationAtTheExpectedLimitStillReportsNormalInsertion() async throws {
+  let audio = MockAudioCapture(
+    audio: CapturedAudio(
+      samples: Array(repeating: 0.05, count: 16_000),
+      wasTruncated: true
+    )
+  )
+  let session = DictationSession(
+    audioCapture: audio,
+    speechRecognizer: MockSpeechRecognizer(results: [.success(speechResult("complete"))]),
+    textInserter: MockTextInserter(results: [.success(.verified)]),
+    focusProvider: MockFocusProvider(),
+    diagnostics: DiagnosticStore(),
+    audioPolicy: AudioPolicy(
+      minimumDuration: 0.01,
+      maximumDuration: 1,
+      minimumRootMeanSquare: 0.0015
+    )
+  )
+
+  #expect(await session.prepareModels(allowDownload: false))
+  await session.beginDictation()
+  await session.endDictation()
+
+  #expect(await session.snapshot().insertionFeedback == .verified)
+}
+
+@Test @MainActor
+func automaticStopCanRetryAudioFinalizationWithoutRecordingAgain() async throws {
+  let pendingAudio = CapturedAudio(samples: Array(repeating: 0.05, count: 480))
+  let audio = MockAudioCapture(
+    audio: pendingAudio,
+    stopFailure: .audioFinalizationFailed,
+    pendingAudio: pendingAudio
+  )
+  let speech = MockSpeechRecognizer(results: [.success(speechResult("recovered"))])
+  let insertion = MockTextInserter(results: [.success(.verified)])
+  let session = DictationSession(
+    audioCapture: audio,
+    speechRecognizer: speech,
+    textInserter: insertion,
+    focusProvider: MockFocusProvider(),
+    diagnostics: DiagnosticStore(),
+    audioPolicy: AudioPolicy(
+      minimumDuration: 0.01,
+      maximumDuration: 0.05,
+      minimumRootMeanSquare: 0.0015
+    )
+  )
+
+  #expect(await session.prepareModels(allowDownload: false))
+  await session.beginDictation()
+
+  var failedSnapshot: SessionSnapshot?
+  for _ in 0..<1_000 {
+    let snapshot = await session.snapshot()
+    if snapshot.failure == .audioFinalizationFailed {
+      failedSnapshot = snapshot
+      break
+    }
+    try await Task.sleep(for: .milliseconds(1))
+  }
+
+  #expect(failedSnapshot?.phase == .recoverableError)
+  #expect(failedSnapshot?.failure?.recoveryAction == .retryAudioFinalization)
+  #expect(await audio.stopCount == 1)
+  #expect(await audio.recoverPendingCount == 0)
+  #expect(await speech.transcribeCount == 0)
+  #expect(insertion.insertedTexts.isEmpty)
+
+  await session.retry()
+
+  #expect(await session.snapshot().phase == .ready)
+  #expect(await audio.startCount == 1)
+  #expect(await audio.stopCount == 1)
+  #expect(await audio.recoverPendingCount == 1)
+  #expect(await speech.transcribeCount == 1)
+  #expect(insertion.insertedTexts == ["recovered"])
+}
+
+@Test @MainActor
+func routeChangeDoesNotDiscardAudioWaitingForFinalizationRetry() async throws {
+  let pendingAudio = CapturedAudio(samples: Array(repeating: 0.05, count: 8_000))
+  let audio = MockAudioCapture(
+    audio: pendingAudio,
+    stopFailure: .audioFinalizationFailed,
+    pendingAudio: pendingAudio
+  )
+  let speech = MockSpeechRecognizer(results: [.success(speechResult("still preserved"))])
+  let insertion = MockTextInserter(results: [.success(.verified)])
+  let session = DictationSession(
+    audioCapture: audio,
+    speechRecognizer: speech,
+    textInserter: insertion,
+    focusProvider: MockFocusProvider(),
+    diagnostics: DiagnosticStore()
+  )
+
+  #expect(await session.prepareModels(allowDownload: false))
+  await session.beginDictation()
+  await session.endDictation()
+  #expect(await session.snapshot().failure == .audioFinalizationFailed)
+
+  await session.audioRouteDidChange()
+  #expect(await audio.cancelCount == 0)
+  #expect(await session.snapshot().failure == .audioFinalizationFailed)
+
+  await session.retry()
+
+  #expect(await session.snapshot().phase == .ready)
+  #expect(await audio.recoverPendingCount == 1)
+  #expect(insertion.insertedTexts == ["still preserved"])
+}
+
+@Test @MainActor
 func secureTextFieldIsRejectedBeforeAudioCaptureStarts() async {
   let audio = MockAudioCapture()
   let speech = MockSpeechRecognizer(results: [.success(speechResult("secret"))])
@@ -303,7 +584,7 @@ func microphoneStartFailureDoesNotAttemptTranscriptionOrInsertion() async {
 }
 
 @Test @MainActor
-func sleepDuringCaptureCancelsAudioWithoutInserting() async {
+func sleepDuringCapturePreservesAudioForRetry() async {
   let audio = MockAudioCapture()
   let insertion = MockTextInserter(results: [.success(.verified)])
   let session = DictationSession(
@@ -320,18 +601,26 @@ func sleepDuringCaptureCancelsAudioWithoutInserting() async {
 
   let snapshot = await session.snapshot()
   #expect(snapshot.phase == .recoverableError)
-  #expect(snapshot.failure == .operationCancelled)
-  #expect(await audio.cancelCount == 1)
+  #expect(snapshot.failure == .recordingInterrupted)
+  #expect(snapshot.failure?.recoveryAction == .retryTranscription)
+  #expect(snapshot.hasRecoverableTranscript == false)
+  #expect(await audio.stopCount == 1)
+  #expect(await audio.cancelCount == 0)
   #expect(insertion.insertedTexts.isEmpty)
+
+  await session.retry()
+  #expect(await session.snapshot().phase == .ready)
+  #expect(insertion.insertedTexts == ["unused"])
 }
 
 @Test @MainActor
-func audioRouteChangeDuringCaptureCancelsAndRequestsANewRecording() async {
+func audioRouteChangeDuringCapturePreservesAudioForRetry() async {
   let audio = MockAudioCapture()
+  let insertion = MockTextInserter(results: [.success(.verified)])
   let session = DictationSession(
     audioCapture: audio,
     speechRecognizer: MockSpeechRecognizer(results: [.success(speechResult("unused"))]),
-    textInserter: MockTextInserter(results: [.success(.verified)]),
+    textInserter: insertion,
     focusProvider: MockFocusProvider(),
     diagnostics: DiagnosticStore()
   )
@@ -342,9 +631,14 @@ func audioRouteChangeDuringCaptureCancelsAndRequestsANewRecording() async {
 
   let snapshot = await session.snapshot()
   #expect(snapshot.phase == .recoverableError)
-  #expect(snapshot.failure == .audioDeviceUnavailable)
-  #expect(snapshot.failure?.recoveryAction == .startAgain)
-  #expect(await audio.cancelCount == 1)
+  #expect(snapshot.failure == .recordingInterrupted)
+  #expect(snapshot.failure?.recoveryAction == .retryTranscription)
+  #expect(await audio.stopCount == 1)
+  #expect(await audio.cancelCount == 0)
+
+  await session.retry()
+  #expect(await session.snapshot().phase == .ready)
+  #expect(insertion.insertedTexts == ["unused"])
 }
 
 @Test @MainActor
@@ -914,11 +1208,12 @@ func permissionRevocationDuringPreparationReturnsToSetupWithoutInternalFailure()
 }
 
 @Test @MainActor
-func restoredPermissionReturnsInterruptedCaptureToReady() async throws {
+func restoredPermissionKeepsInterruptedCaptureAvailableForRetry() async throws {
+  let insertion = MockTextInserter(results: [.success(.verified)])
   let session = DictationSession(
     audioCapture: MockAudioCapture(),
-    speechRecognizer: MockSpeechRecognizer(results: []),
-    textInserter: MockTextInserter(results: []),
+    speechRecognizer: MockSpeechRecognizer(results: [.success(speechResult("preserved"))]),
+    textInserter: insertion,
     focusProvider: MockFocusProvider(),
     diagnostics: DiagnosticStore()
   )
@@ -927,11 +1222,16 @@ func restoredPermissionReturnsInterruptedCaptureToReady() async throws {
   await session.beginDictation()
   await session.permissionWasRevoked(.microphonePermissionDenied)
   #expect(await session.snapshot().phase == .recoverableError)
+  #expect(await session.snapshot().failure == .recordingInterrupted)
 
   await session.permissionsWereRestored()
 
+  #expect(await session.snapshot().phase == .recoverableError)
+  #expect(await session.snapshot().failure == .recordingInterrupted)
+
+  await session.retry()
   #expect(await session.snapshot().phase == .ready)
-  #expect(await session.snapshot().failure == nil)
+  #expect(insertion.insertedTexts == ["preserved"])
 }
 
 @Test @MainActor

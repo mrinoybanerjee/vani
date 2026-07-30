@@ -38,7 +38,8 @@ public enum VaniLog {
     case .microphonePermissionDenied, .accessibilityPermissionDenied,
       .inputMonitoringPermissionDenied:
       .permission
-    case .audioDeviceUnavailable, .audioCaptureFailed, .recordingTooShort,
+    case .audioDeviceUnavailable, .unsupportedInputSampleRate, .audioCaptureFailed,
+      .audioFinalizationFailed, .recordingInterrupted, .recordingTooShort,
       .recordingTooLong, .noSpeechDetected:
       .capture
     case .modelUnavailable, .modelDownloadFailed, .modelIntegrityFailed, .modelLoadFailed: .model
@@ -47,7 +48,7 @@ public enum VaniLog {
       .clipboardChanged:
       .insertion
     case .historyCorrupt: .storage
-    case .unsupportedHardware, .operationCancelled, .internalInvariant: .lifecycle
+    case .unsupportedHardware, .internalInvariant: .lifecycle
     }
   }
 }

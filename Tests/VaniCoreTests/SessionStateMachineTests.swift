@@ -132,6 +132,9 @@ func recoveryRoutesAreExplicit() throws {
   #expect(try ready.transition(.dismissToReady) == .ready)
 
   #expect(VaniFailure.insertionFailed.recoveryAction == .retryInsertion)
+  #expect(VaniFailure.audioFinalizationFailed.recoveryAction == .retryAudioFinalization)
+  #expect(VaniFailure.recordingInterrupted.recoveryAction == .retryTranscription)
+  #expect(VaniFailure.unsupportedInputSampleRate.recoveryAction == .startAgain)
   #expect(VaniFailure.insertionUnverified.recoveryAction == .copyTranscript)
   #expect(VaniFailure.focusChanged.recoveryAction == .copyTranscript)
   #expect(VaniFailure.clipboardChanged.recoveryAction == .copyTranscript)

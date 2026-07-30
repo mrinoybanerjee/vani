@@ -29,7 +29,7 @@ final class OverlayController {
     hideTask?.cancel()
     switch snapshot.phase {
     case .listening:
-      show(.listening)
+      show(snapshot.isRecordingLimitApproaching ? .recordingLimitWarning : .listening)
     case .transcribing, .inserting:
       show(.processing)
     case .recoverableError:
@@ -40,6 +40,9 @@ final class OverlayController {
       case .verified:
         show(.success)
         displayDuration = .milliseconds(700)
+      case .verifiedCaptureTruncated:
+        show(.captureTruncated)
+        displayDuration = .milliseconds(2_000)
       case .unconfirmed:
         show(.backupCopied)
         displayDuration = .milliseconds(1_400)
@@ -101,8 +104,10 @@ final class OverlayController {
 private enum OverlayState: Equatable {
   case hidden
   case listening
+  case recordingLimitWarning
   case processing
   case success
+  case captureTruncated
   case backupCopied
   case lastTranscriptCopied
   case failure(String)
@@ -125,7 +130,7 @@ private struct OverlayView: View {
         .font(.system(size: 13, weight: .semibold))
         .lineLimit(1)
       Spacer(minLength: 4)
-      if model.state == .listening {
+      if model.state == .listening || model.state == .recordingLimitWarning {
         WaveformBars(animated: !reduceMotion)
           .frame(width: 44, height: 22)
       } else if model.state == .processing {
@@ -151,10 +156,14 @@ private struct OverlayView: View {
       EmptyView()
     case .listening:
       Image(systemName: "waveform.circle.fill").foregroundStyle(.teal)
+    case .recordingLimitWarning:
+      Image(systemName: "waveform.circle.fill").foregroundStyle(.orange)
     case .processing:
       Image(systemName: "text.bubble.fill").foregroundStyle(.blue)
     case .success:
       Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+    case .captureTruncated:
+      Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
     case .backupCopied:
       Image(systemName: "clipboard.fill").foregroundStyle(.blue)
     case .lastTranscriptCopied:
@@ -168,8 +177,10 @@ private struct OverlayView: View {
     switch model.state {
     case .hidden: ""
     case .listening: "Listening"
+    case .recordingLimitWarning: "1 minute remaining"
     case .processing: "Writing"
     case .success: "Inserted"
+    case .captureTruncated: "Inserted captured portion"
     case .backupCopied: "Paste sent - backup copied"
     case .lastTranscriptCopied: "Last transcript copied"
     case .failure(let message): message

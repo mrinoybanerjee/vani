@@ -8,10 +8,16 @@ public struct CapturedAudio: Sendable, Equatable {
   public let duration: TimeInterval
   public let peakAmplitude: Float
   public let rootMeanSquare: Float
+  public let wasTruncated: Bool
 
-  public init(samples: [Float], sampleRate: Int = targetSampleRate) {
+  public init(
+    samples: [Float],
+    sampleRate: Int = targetSampleRate,
+    wasTruncated: Bool = false
+  ) {
     self.samples = samples
     self.sampleRate = sampleRate
+    self.wasTruncated = wasTruncated
     duration = sampleRate > 0 ? Double(samples.count) / Double(sampleRate) : 0
 
     var peak: Float = 0
@@ -35,7 +41,7 @@ public struct AudioPolicy: Sendable, Equatable {
 
   public init(
     minimumDuration: TimeInterval = 0.18,
-    maximumDuration: TimeInterval = 120,
+    maximumDuration: TimeInterval = 20 * 60,
     minimumRootMeanSquare: Float = 0.0015
   ) {
     self.minimumDuration = minimumDuration

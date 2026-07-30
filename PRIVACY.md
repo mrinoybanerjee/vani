@@ -23,6 +23,8 @@ setup, dictation does not need a network connection.
   preferences.
 - The latest failed transcript or audio stays in memory until retry, success,
   discard, or app exit.
+- Audio retained after sleep, permission loss, or a microphone-route interruption
+  follows the same memory-only recovery lifecycle.
 - The latest recognized transcript stays in memory for copy or paste until it is
   replaced or the app exits.
 - Transcript history is written only when the user enables it. History is bounded,
