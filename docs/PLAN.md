@@ -1,6 +1,6 @@
 # Vani V1 Implementation Plan
 
-Status: Implemented; public release credentials and dogfood percentiles remain open
+Status: Implemented; Developer ID distribution and dogfood percentiles are optional future work
 Owner: mrinoybanerjee
 Target: Apple Silicon macOS, English
 
