@@ -7,8 +7,12 @@ import Testing
 @MainActor
 private final class InsertionFocusProvider: FocusProviding {
   var target = TextTarget(processIdentifier: 42, bundleIdentifier: "test.target")
+  var onCurrentTarget: (() -> Void)?
 
-  func currentTarget() -> TextTarget? { target }
+  func currentTarget() -> TextTarget? {
+    onCurrentTarget?()
+    return target
+  }
 }
 
 @MainActor
@@ -19,6 +23,7 @@ private final class InsertionEnvironment: TextInsertionEnvironment {
   var onRead: (() -> Void)?
   var onPost: (() -> Void)?
   private(set) var postCount = 0
+  private(set) var deliveryCount = 0
   private var lastRead: TextInsertionRead?
 
   init(reads: [TextInsertionRead?]) {
@@ -35,10 +40,13 @@ private final class InsertionEnvironment: TextInsertionEnvironment {
 
   func postPasteShortcut(
     to processIdentifier: Int32,
-    interval: Duration
-  ) async -> Bool {
+    interval: Duration,
+    beforePaste: @MainActor () throws -> Void
+  ) async throws -> Bool {
     postCount += 1
     onPost?()
+    try beforePaste()
+    deliveryCount += 1
     return postResult
   }
 }
@@ -61,6 +69,46 @@ private func insertionRead(
   )
 }
 
+private struct PostedKeyEvent: Equatable {
+  let processIdentifier: Int32
+  let keyCode: Int64
+  let typeRawValue: UInt32
+  let flagsRawValue: UInt64
+}
+
+private final class KeyEventRecorder: @unchecked Sendable {
+  private let lock = NSLock()
+  private var events: [PostedKeyEvent] = []
+
+  func record(_ event: CGEvent, processIdentifier: Int32) {
+    lock.withLock {
+      events.append(
+        PostedKeyEvent(
+          processIdentifier: processIdentifier,
+          keyCode: event.getIntegerValueField(.keyboardEventKeycode),
+          typeRawValue: event.type.rawValue,
+          flagsRawValue: event.flags.rawValue
+        )
+      )
+    }
+  }
+
+  func snapshot() -> [PostedKeyEvent] {
+    lock.withLock { events }
+  }
+}
+
+private func keyEvent(
+  source: CGEventSource,
+  keyCode: CGKeyCode,
+  isDown: Bool,
+  flags: CGEventFlags
+) -> CGEvent {
+  let event = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: isDown)!
+  event.flags = flags
+  return event
+}
+
 @MainActor
 private func makeInserter(
   focus: InsertionFocusProvider,
@@ -76,6 +124,75 @@ private func makeInserter(
     verificationPollInterval: .milliseconds(1),
     eventInterval: .zero,
     clipboardRestoreDelay: .zero
+  )
+}
+
+@Test
+func cancelledPasteSequenceReleasesEachPressedKeyExactlyOnce() throws {
+  let source = try #require(CGEventSource(stateID: .privateState))
+  let recorder = KeyEventRecorder()
+  let processIdentifier: Int32 = 42
+  let sequence = PasteKeySequence(
+    processIdentifier: processIdentifier,
+    commandDown: keyEvent(
+      source: source,
+      keyCode: 55,
+      isDown: true,
+      flags: .maskCommand
+    ),
+    keyDown: keyEvent(
+      source: source,
+      keyCode: 9,
+      isDown: true,
+      flags: .maskCommand
+    ),
+    keyUp: keyEvent(
+      source: source,
+      keyCode: 9,
+      isDown: false,
+      flags: .maskCommand
+    ),
+    commandUp: keyEvent(source: source, keyCode: 55, isDown: false, flags: []),
+    post: recorder.record
+  )
+
+  #expect(sequence.postCommandDown())
+  #expect(sequence.postKeyDown())
+  sequence.cancelAndReleasePressedKeys()
+  sequence.releasePressedKeys()
+  sequence.postKeyUp()
+  sequence.postCommandUp()
+  #expect(!sequence.postCommandDown())
+  #expect(!sequence.postKeyDown())
+
+  #expect(
+    recorder.snapshot()
+      == [
+        PostedKeyEvent(
+          processIdentifier: 42,
+          keyCode: 55,
+          typeRawValue: CGEventType.flagsChanged.rawValue,
+          flagsRawValue: CGEventFlags.maskCommand.rawValue
+        ),
+        PostedKeyEvent(
+          processIdentifier: 42,
+          keyCode: 9,
+          typeRawValue: CGEventType.keyDown.rawValue,
+          flagsRawValue: CGEventFlags.maskCommand.rawValue
+        ),
+        PostedKeyEvent(
+          processIdentifier: 42,
+          keyCode: 9,
+          typeRawValue: CGEventType.keyUp.rawValue,
+          flagsRawValue: CGEventFlags.maskCommand.rawValue
+        ),
+        PostedKeyEvent(
+          processIdentifier: 42,
+          keyCode: 55,
+          typeRawValue: CGEventType.flagsChanged.rawValue,
+          flagsRawValue: 0
+        ),
+      ]
   )
 }
 
@@ -203,6 +320,63 @@ func focusChangeDuringPreflightRestoresClipboardAndDoesNotPost() async {
   }
 
   #expect(environment.postCount == 0)
+  #expect(pasteboard.string(forType: .string) == "original")
+}
+
+@Test @MainActor
+func clipboardChangeBeforePasteDeliveryAbortsWithoutPosting() async {
+  let focus = InsertionFocusProvider()
+  let environment = InsertionEnvironment(reads: [nil])
+  let pasteboard = NSPasteboard.withUniqueName()
+  defer { pasteboard.releaseGlobally() }
+  pasteboard.setString("original", forType: .string)
+
+  var focusReadCount = 0
+  focus.onCurrentTarget = {
+    focusReadCount += 1
+    if focusReadCount == 2 {
+      pasteboard.clearContents()
+      pasteboard.setString("newer", forType: .string)
+    }
+  }
+
+  await #expect(throws: VaniFailure.clipboardChanged) {
+    try await makeInserter(
+      focus: focus,
+      environment: environment,
+      pasteboard: pasteboard
+    ).insert("do not paste", into: focus.target)
+  }
+
+  #expect(environment.postCount == 0)
+  #expect(pasteboard.string(forType: .string) == "newer")
+}
+
+@Test @MainActor
+func secureFieldChangeAtPasteBoundaryRestoresClipboardAndDoesNotDeliver() async {
+  let focus = InsertionFocusProvider()
+  let environment = InsertionEnvironment(reads: [nil])
+  environment.onPost = {
+    focus.target = TextTarget(
+      processIdentifier: 42,
+      bundleIdentifier: "test.target",
+      isSecureTextField: true
+    )
+  }
+  let pasteboard = NSPasteboard.withUniqueName()
+  defer { pasteboard.releaseGlobally() }
+  pasteboard.setString("original", forType: .string)
+
+  await #expect(throws: VaniFailure.secureTextField) {
+    try await makeInserter(
+      focus: focus,
+      environment: environment,
+      pasteboard: pasteboard
+    ).insert("do not paste", into: focus.target)
+  }
+
+  #expect(environment.postCount == 1)
+  #expect(environment.deliveryCount == 0)
   #expect(pasteboard.string(forType: .string) == "original")
 }
 
@@ -343,6 +517,7 @@ func externalClipboardChangeIsNeverOverwritten() async {
   }
 
   #expect(environment.postCount == 1)
+  #expect(environment.deliveryCount == 0)
   #expect(pasteboard.string(forType: .string) == "newer")
 }
 

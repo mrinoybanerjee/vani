@@ -107,9 +107,10 @@ private struct DictionarySettingsView: View {
         TextField("Spoken phrase", text: $spoken)
         TextField("Replacement", text: $replacement)
         Button {
-          coordinator.addDictionaryEntry(spoken: spoken, replacement: replacement)
-          spoken = ""
-          replacement = ""
+          if coordinator.addDictionaryEntry(spoken: spoken, replacement: replacement) {
+            spoken = ""
+            replacement = ""
+          }
         } label: {
           Image(systemName: "plus")
         }
@@ -296,7 +297,7 @@ private struct HistorySettingsView: View {
         Button("Clear", role: .destructive) {
           coordinator.clearHistory()
         }
-        .disabled(coordinator.history.isEmpty)
+        .disabled(!coordinator.hasStoredHistoryData)
       }
     }
     .padding(20)

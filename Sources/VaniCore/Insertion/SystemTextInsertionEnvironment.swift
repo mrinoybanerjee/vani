@@ -12,7 +12,11 @@ protocol TextInsertionEnvironment: AnyObject {
   var canPostPaste: Bool { get }
 
   func read(target: TextTarget, insertedRange: NSRange?) -> TextInsertionRead?
-  func postPasteShortcut(to processIdentifier: Int32, interval: Duration) async -> Bool
+  func postPasteShortcut(
+    to processIdentifier: Int32,
+    interval: Duration,
+    beforePaste: @MainActor () throws -> Void
+  ) async throws -> Bool
 }
 
 enum AccessibilityFocusResolver {
@@ -77,6 +81,7 @@ enum AccessibilityFocusResolver {
 final class SystemTextInsertionEnvironment: TextInsertionEnvironment {
   private static let commandKeyCode: CGKeyCode = 55
   private static let vKeyCode: CGKeyCode = 9
+  private static let maximumReadableValueCharacters = 1_000_000
 
   var canPostPaste: Bool {
     CGPreflightPostEventAccess()
@@ -92,14 +97,22 @@ final class SystemTextInsertionEnvironment: TextInsertionEnvironment {
       return nil
     }
 
+    let characterCount = integerAttribute(
+      kAXNumberOfCharactersAttribute as CFString,
+      on: element
+    )
+    let value: String? =
+      if characterCount.map({ $0 <= Self.maximumReadableValueCharacters }) != false {
+        readableValue(of: element)
+      } else {
+        nil
+      }
+
     return TextInsertionRead(
       observation: TextInsertionObservation(
-        value: readableValue(of: element),
+        value: value,
         selectedRange: selectedTextRange(of: element),
-        characterCount: integerAttribute(
-          kAXNumberOfCharactersAttribute as CFString,
-          on: element
-        )
+        characterCount: characterCount
       ),
       insertedText: insertedRange.flatMap { string(in: $0, on: element) },
       isSecureTextField: AccessibilityFocusResolver.isSecureTextField(element)
@@ -108,8 +121,9 @@ final class SystemTextInsertionEnvironment: TextInsertionEnvironment {
 
   func postPasteShortcut(
     to processIdentifier: Int32,
-    interval: Duration
-  ) async -> Bool {
+    interval: Duration,
+    beforePaste: @MainActor () throws -> Void
+  ) async throws -> Bool {
     guard canPostPaste else { return false }
     guard let source = CGEventSource(stateID: .privateState),
       let commandDown = CGEvent(
@@ -141,14 +155,37 @@ final class SystemTextInsertionEnvironment: TextInsertionEnvironment {
     keyUp.flags = .maskCommand
     commandUp.flags = []
 
-    let events = [commandDown, keyDown, keyUp, commandUp]
-    for (index, event) in events.enumerated() {
-      event.postToPid(processIdentifier)
-      if index < events.count - 1, interval > .zero {
-        try? await Task.sleep(for: interval)
+    let sequence = PasteKeySequence(
+      processIdentifier: processIdentifier,
+      commandDown: commandDown,
+      keyDown: keyDown,
+      keyUp: keyUp,
+      commandUp: commandUp
+    )
+    return try await withTaskCancellationHandler {
+      defer { sequence.releasePressedKeys() }
+
+      guard sequence.postCommandDown() else { throw CancellationError() }
+      if interval > .zero {
+        try await Task.sleep(for: interval)
       }
+
+      try beforePaste()
+      guard sequence.postKeyDown() else { throw CancellationError() }
+      if interval > .zero {
+        try await Task.sleep(for: interval)
+      }
+
+      sequence.postKeyUp()
+      if interval > .zero {
+        try await Task.sleep(for: interval)
+      }
+
+      sequence.postCommandUp()
+      return true
+    } onCancel: {
+      sequence.cancelAndReleasePressedKeys()
     }
-    return true
   }
 
   private func readableValue(of element: AXUIElement) -> String? {
@@ -213,5 +250,97 @@ final class SystemTextInsertionEnvironment: TextInsertionEnvironment {
       return nil
     }
     return SystemTextInserter.readableString(from: value)
+  }
+}
+
+/// Serializes synthetic key state so cancellation can release modifiers immediately.
+final class PasteKeySequence: @unchecked Sendable {
+  typealias EventPoster = @Sendable (CGEvent, Int32) -> Void
+
+  private let lock = NSLock()
+  private let processIdentifier: Int32
+  private let commandDown: CGEvent
+  private let keyDown: CGEvent
+  private let keyUp: CGEvent
+  private let commandUp: CGEvent
+  private let post: EventPoster
+  private var isCancelled = false
+  private var commandIsDown = false
+  private var keyIsDown = false
+
+  init(
+    processIdentifier: Int32,
+    commandDown: CGEvent,
+    keyDown: CGEvent,
+    keyUp: CGEvent,
+    commandUp: CGEvent,
+    post: @escaping EventPoster = { event, processIdentifier in
+      event.postToPid(processIdentifier)
+    }
+  ) {
+    self.processIdentifier = processIdentifier
+    self.commandDown = commandDown
+    self.keyDown = keyDown
+    self.keyUp = keyUp
+    self.commandUp = commandUp
+    self.post = post
+  }
+
+  func postCommandDown() -> Bool {
+    lock.withLock {
+      guard !isCancelled else { return false }
+      post(commandDown, processIdentifier)
+      commandIsDown = true
+      return true
+    }
+  }
+
+  func postKeyDown() -> Bool {
+    lock.withLock {
+      guard !isCancelled else { return false }
+      post(keyDown, processIdentifier)
+      keyIsDown = true
+      return true
+    }
+  }
+
+  func postKeyUp() {
+    lock.withLock {
+      guard keyIsDown else { return }
+      post(keyUp, processIdentifier)
+      keyIsDown = false
+    }
+  }
+
+  func postCommandUp() {
+    lock.withLock {
+      guard commandIsDown else { return }
+      post(commandUp, processIdentifier)
+      commandIsDown = false
+    }
+  }
+
+  func cancelAndReleasePressedKeys() {
+    lock.withLock {
+      isCancelled = true
+      releasePressedKeysLocked()
+    }
+  }
+
+  func releasePressedKeys() {
+    lock.withLock {
+      releasePressedKeysLocked()
+    }
+  }
+
+  private func releasePressedKeysLocked() {
+    if keyIsDown {
+      post(keyUp, processIdentifier)
+      keyIsDown = false
+    }
+    if commandIsDown {
+      post(commandUp, processIdentifier)
+      commandIsDown = false
+    }
   }
 }

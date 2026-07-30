@@ -1,7 +1,7 @@
 import Foundation
 
 public actor DictationSession {
-  public typealias Observer = @Sendable (SessionSnapshot) -> Void
+  public typealias Observer = @MainActor @Sendable (SessionSnapshot) -> Void
 
   private let audioCapture: any AudioCapturing
   private let speechRecognizer: any SpeechRecognizing
@@ -23,11 +23,13 @@ public actor DictationSession {
   private var isPreparingRequest = false
   private var preparationGeneration: UInt64 = 0
   private var isStartingCapture = false
+  private var shouldStopAfterCaptureStarts = false
   private var isPastingLastTranscript = false
   private var currentTarget: TextTarget?
   private var lastTranscript: String?
   private var insertionFeedback: InsertionFeedback?
   private var observer: Observer?
+  private var snapshotGeneration: UInt64 = 0
 
   public init(
     audioCapture: any AudioCapturing,
@@ -114,7 +116,13 @@ public actor DictationSession {
       return
     }
     isStartingCapture = true
-    defer { isStartingCapture = false }
+    shouldStopAfterCaptureStarts = false
+    defer {
+      isStartingCapture = false
+      if machine.phase != .listening {
+        shouldStopAfterCaptureStarts = false
+      }
+    }
 
     currentTarget = await focusProvider.currentTarget()
     guard machine.phase == .ready else {
@@ -137,24 +145,41 @@ public actor DictationSession {
         return
       }
       try await transition(.captureStarted)
+      if shouldStopAfterCaptureStarts {
+        shouldStopAfterCaptureStarts = false
+        await finishDictation()
+      }
     } catch {
+      guard machine.phase != .disabled else { return }
       await fail(map(error, fallback: .audioCaptureFailed))
     }
   }
 
   public func endDictation() async {
+    if isStartingCapture {
+      shouldStopAfterCaptureStarts = true
+      VaniLog.event(category: .capture, code: "capture_stop_queued")
+      return
+    }
     guard machine.phase == .listening else {
       await recordIgnored("capture_stop", phase: machine.phase)
       return
     }
 
+    await finishDictation()
+  }
+
+  private func finishDictation() async {
     do {
       try await transition(.captureStopped)
       let audio = try await audioCapture.stop()
+      guard machine.phase == .transcribing else { return }
       try audioPolicy.validate(audio)
       await recovery.retainAudio(audio, target: currentTarget)
+      guard machine.phase == .transcribing else { return }
       try await transcribeAndInsert(audio)
     } catch {
+      guard machine.phase != .disabled else { return }
       await fail(map(error, fallback: .audioCaptureFailed))
     }
   }
@@ -183,6 +208,7 @@ public actor DictationSession {
         try await transition(.retryTranscription)
         try await transcribeAndInsert(audio)
       } catch {
+        guard machine.phase != .disabled else { return }
         await fail(map(error, fallback: .transcriptionFailed))
       }
 
@@ -195,6 +221,7 @@ public actor DictationSession {
         try await transition(.retryInsertion)
         try await insertRecoveredTranscript(payload)
       } catch {
+        guard machine.phase != .disabled else { return }
         await fail(map(error, fallback: .insertionFailed))
       }
 
@@ -258,6 +285,7 @@ public actor DictationSession {
       }
       try await insertRecoveredTranscript(payload)
     } catch {
+      guard machine.phase != .disabled else { return }
       await fail(map(error, fallback: .insertionFailed))
     }
   }
@@ -361,7 +389,12 @@ public actor DictationSession {
   }
 
   public func terminate() async {
+    preparationGeneration &+= 1
     await audioCapture.cancel()
+    await recovery.clear()
+    currentTarget = nil
+    failure = nil
+    modelProgress = nil
     do {
       try await transition(.terminate)
     } catch {
@@ -427,6 +460,7 @@ public actor DictationSession {
       defer { VaniSignpost.endTranscription(signpost) }
       result = try await speechRecognizer.transcribe(audio)
     }
+    guard machine.phase == .transcribing else { return }
     let text = textPipeline.process(
       result.text,
       dictionary: settings.dictionary,
@@ -444,7 +478,9 @@ public actor DictationSession {
         durationMilliseconds: milliseconds(since: startedAt)
       )
     )
+    guard machine.phase == .transcribing else { return }
     await recovery.retainTranscript(text, target: currentTarget)
+    guard machine.phase == .transcribing else { return }
     try await transition(.transcriptReady)
     guard let payload = await recovery.latest() else {
       throw VaniFailure.internalInvariant
@@ -453,6 +489,7 @@ public actor DictationSession {
   }
 
   private func insertRecoveredTranscript(_ payload: RecoveryPayload) async throws {
+    guard machine.phase == .inserting else { return }
     guard let transcript = payload.transcript else {
       throw VaniFailure.emptyTranscript
     }
@@ -461,6 +498,7 @@ public actor DictationSession {
     let signpost = VaniSignpost.beginInsertion()
     defer { VaniSignpost.endInsertion(signpost) }
     let result = try await textInserter.insert(transcript, into: payload.target)
+    guard machine.phase == .inserting else { return }
 
     let diagnosticCode: String
     switch result {
@@ -486,6 +524,7 @@ public actor DictationSession {
         durationMilliseconds: milliseconds(since: startedAt)
       )
     )
+    guard machine.phase == .inserting else { return }
     if settings.historyEnabled, payload.shouldAppendToHistory {
       do {
         try await history.append(
@@ -498,6 +537,7 @@ public actor DictationSession {
         )
       }
     }
+    guard machine.phase == .inserting else { return }
     await recovery.clear()
     currentTarget = nil
     failure = nil
@@ -563,7 +603,11 @@ public actor DictationSession {
   }
 
   private func publishSnapshot() async {
-    observer?(await makeSnapshot())
+    snapshotGeneration &+= 1
+    let generation = snapshotGeneration
+    let snapshot = await makeSnapshot()
+    guard generation == snapshotGeneration else { return }
+    await observer?(snapshot)
   }
 
   private func makeSnapshot() async -> SessionSnapshot {

@@ -21,13 +21,30 @@ cleanup() {
 }
 trap cleanup EXIT
 
+wait_for_vani_exit() {
+    local attempt
+    for attempt in {1..20}; do
+        if ! pgrep -x Vani >/dev/null 2>&1; then
+            return 0
+        fi
+        sleep 0.25
+    done
+    return 1
+}
+
 INSTALL_ROOT="$INSTALL_ROOT" "$ROOT/scripts/doctor.sh"
 printf '\nBuilding a release-mode Vani app. The first source build can take several minutes.\n'
 CONFIGURATION=release "$ROOT/scripts/build-app.sh"
 
 if pgrep -x Vani >/dev/null 2>&1; then
     osascript -e 'tell application id "com.mrinoy.vani" to quit' >/dev/null 2>&1 || true
-    sleep 1
+    if ! wait_for_vani_exit; then
+        pkill -TERM -x Vani >/dev/null 2>&1 || true
+        if ! wait_for_vani_exit; then
+            echo "error: Vani is still running. Quit it, then run the installer again." >&2
+            exit 1
+        fi
+    fi
 fi
 
 mkdir -p "$INSTALL_ROOT"

@@ -26,16 +26,16 @@ and diagnostics.
 - Capture storage is preallocated and limited to two minutes.
 - Process focus is checked before insertion, after paste delivery, and during bounded
   verification polling.
-- Native Accessibility secure-field metadata is checked before recording and again before
-  insertion; Vani refuses password and other secure text fields without touching the clipboard.
-- Clipboard restoration is conditional on both insertion verification and an
-  unchanged pasteboard change count.
+- Native Accessibility secure-field metadata is checked before recording, before
+  pasteboard access, and at the final paste boundary.
+- Clipboard ownership is rechecked at the final paste boundary. Restoration is
+  conditional on both insertion verification and an unchanged pasteboard change count.
 - Recovery preserves content when success cannot be proven.
 - Last Transcript content is memory-only and is never added to history a second time
   when pasted again.
 - Snippet matching uses escaped literal triggers and one-pass expansion, preventing
   regex injection and recursive expansion.
-- History is opt-in, bounded, atomic, and clearable.
+- History is opt-in, capped at 500 entries and a 64 MiB file, atomic, and clearable.
 - Diagnostics are content-free and bounded.
 - Unexpected, missing, changed, hidden, or symlinked model artifacts are rejected.
 - Model files are downloaded to a private staging directory, verified in full, and
@@ -46,11 +46,16 @@ and diagnostics.
 
 ## Known limitations
 
+- Vani does not isolate data from another malicious process already running as the same
+  macOS user; that process can access the user's app-support files and pasteboard directly.
 - Accessibility APIs are powerful by design. Install only builds from this repository
   or signed releases whose checksum you verify.
 - Some controls do not expose readable Accessibility values. Vani still delivers one
   process-bound paste, leaves the transcript available for manual paste, and does not
   claim verified success.
+- Insertion is bound to the captured process, not an individual field. If focus moves
+  between fields inside the same application before delivery, Vani cannot reliably
+  identify the original field.
 - Third-party controls that do not expose Apple's secure-text-field subrole cannot be
   identified as secure. Users should not dictate passwords or other authentication secrets.
 - Ad-hoc local builds do not provide the identity or Gatekeeper assurance of a

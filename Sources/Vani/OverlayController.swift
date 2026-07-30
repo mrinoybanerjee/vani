@@ -85,9 +85,16 @@ final class OverlayController {
       ?? NSScreen.main
     guard let screen else { return }
     let visible = screen.visibleFrame
-    let x = visible.midX - panel.frame.width / 2
-    let y = visible.minY + 24
-    panel.setFrameOrigin(NSPoint(x: x.rounded(), y: y.rounded()))
+    let x = max(visible.minX, visible.maxX - panel.frame.width - 16)
+    let y = max(visible.minY, visible.maxY - panel.frame.height - 12)
+    let origin = NSPoint(x: x.rounded(), y: y.rounded())
+    guard
+      abs(panel.frame.origin.x - origin.x) > 0.5
+        || abs(panel.frame.origin.y - origin.y) > 0.5
+    else {
+      return
+    }
+    panel.setFrameOrigin(origin)
   }
 }
 
@@ -181,7 +188,8 @@ private struct WaveformBars: View {
           let wave = sin(time * 7 + Double(index) * 0.9)
           Capsule()
             .fill(.teal)
-            .frame(width: 4, height: animated ? 8 + abs(wave) * 13 : 12)
+            .frame(width: 4, height: 21)
+            .scaleEffect(y: animated ? (8 + abs(wave) * 13) / 21 : 12 / 21)
         }
       }
       .frame(maxHeight: .infinity)

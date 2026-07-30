@@ -14,6 +14,7 @@ final class AppCoordinator: ObservableObject {
   @Published private(set) var modelInstalled = false
   @Published private(set) var diagnostics: [DiagnosticEvent] = []
   @Published private(set) var history: [TranscriptHistoryEntry] = []
+  @Published private(set) var hasStoredHistoryData = false
   @Published private(set) var settingsError: String?
   @Published var settings: VaniSettings = .default
 
@@ -25,7 +26,13 @@ final class AppCoordinator: ObservableObject {
   private let overlay = OverlayController()
   private var notificationTokens: [NSObjectProtocol] = []
   private var qaWindow: NSWindow?
+  private var captureStartTask: Task<Void, Never>?
+  private var sessionOperationTask: Task<Void, Never>?
+  private var captureStartGeneration: UInt64 = 0
+  private var sessionOperationGeneration: UInt64 = 0
+  private var historyRevision: UInt64 = 0
   private var settingsRevision: UInt64 = 0
+  private var isTerminating = false
   private var started = false
 
   init() {
@@ -43,6 +50,7 @@ final class AppCoordinator: ObservableObject {
       history: historyStore,
       diagnostics: diagnosticStore
     )
+    AppDelegate.coordinator = self
 
     Task { [weak self] in
       await self?.start()
@@ -80,9 +88,7 @@ final class AppCoordinator: ObservableObject {
     settings = await settingsStore.load()
     await session.updateSettings(settings)
     await session.setObserver { [weak self] snapshot in
-      Task { @MainActor in
-        self?.apply(snapshot)
-      }
+      self?.apply(snapshot)
     }
 
     hotkeyMonitor.onPress = { [weak self] in
@@ -171,7 +177,9 @@ final class AppCoordinator: ObservableObject {
   }
 
   func retry() {
-    Task { await session.retry() }
+    performSessionOperation { coordinator in
+      await coordinator.session.retry()
+    }
   }
 
   func performPrimaryRecoveryAction() {
@@ -227,7 +235,9 @@ final class AppCoordinator: ObservableObject {
 
   func pasteLastTranscript() {
     guard snapshot.phase == .ready, snapshot.hasLastTranscript else { return }
-    Task { await session.pasteLastTranscript() }
+    performSessionOperation { coordinator in
+      await coordinator.session.pasteLastTranscript()
+    }
   }
 
   func copyLastTranscript() {
@@ -244,6 +254,23 @@ final class AppCoordinator: ObservableObject {
 
   func discardRecovery() {
     Task { await session.discardRecovery() }
+  }
+
+  func quit() {
+    NSApplication.shared.terminate(nil)
+  }
+
+  func prepareForTermination() async {
+    guard !isTerminating else { return }
+    isTerminating = true
+    hotkeyMonitor.stop()
+    let captureTask = captureStartTask
+    let operationTask = sessionOperationTask
+    captureTask?.cancel()
+    operationTask?.cancel()
+    await session.terminate()
+    captureStartTask = nil
+    sessionOperationTask = nil
   }
 
   func setShortcut(_ shortcut: HoldShortcut) {
@@ -279,11 +306,40 @@ final class AppCoordinator: ObservableObject {
     }
   }
 
-  func addDictionaryEntry(spoken: String, replacement: String) {
+  @discardableResult
+  func addDictionaryEntry(spoken: String, replacement: String) -> Bool {
     let entry = DictionaryEntry(spoken: spoken, replacement: replacement)
-    guard entry.isValid else { return }
-    settings.dictionary.append(entry)
+    guard settings.dictionary.count < VaniSettings.maximumDictionaryEntryCount else {
+      settingsError =
+        "Vani supports up to \(VaniSettings.maximumDictionaryEntryCount) dictionary entries."
+      return false
+    }
+    guard entry.isValid else {
+      settingsError =
+        "Spoken phrases must be 1-\(DictionaryEntry.maximumSpokenLength) characters; "
+        + "replacements can be up to \(DictionaryEntry.maximumReplacementLength)."
+      return false
+    }
+
+    let normalizedSpoken = entry.normalizedSpoken.lowercased()
+    if settings.dictionary.contains(where: {
+      $0.normalizedSpoken.lowercased() == normalizedSpoken
+    }) {
+      settingsError = "That spoken phrase is already in the dictionary."
+      return false
+    }
+    if settings.snippets.contains(where: {
+      $0.normalizedTrigger.lowercased() == normalizedSpoken
+    }) {
+      settingsError = "That phrase is already used by a snippet."
+      return false
+    }
+
+    settings.dictionary.append(
+      DictionaryEntry(spoken: entry.normalizedSpoken, replacement: entry.replacement)
+    )
     persistSettings()
+    return true
   }
 
   func removeDictionaryEntries(at offsets: IndexSet) {
@@ -351,12 +407,17 @@ final class AppCoordinator: ObservableObject {
   }
 
   func clearHistory() {
+    historyRevision &+= 1
+    let revision = historyRevision
     Task {
       do {
         try await historyStore.clear()
+        historyRevision &+= 1
         history = []
+        hasStoredHistoryData = false
         settingsError = nil
       } catch {
+        guard revision == historyRevision else { return }
         settingsError = "Transcript history could not be cleared."
         recordDiagnostic(category: .storage, code: "history_clear_failed")
       }
@@ -382,8 +443,7 @@ final class AppCoordinator: ObservableObject {
       return "That snippet trigger is already in use."
     }
     if settings.dictionary.contains(where: {
-      SnippetEntry(trigger: $0.spoken, expansion: "x").normalizedTrigger.lowercased()
-        == normalizedTrigger
+      $0.normalizedSpoken.lowercased() == normalizedTrigger
     }) {
       return "That phrase is already used by the dictionary."
     }
@@ -391,14 +451,40 @@ final class AppCoordinator: ObservableObject {
   }
 
   private func beginDictation() {
-    guard canDictate else { return }
-    Task { await session.beginDictation() }
+    guard canDictate, captureStartTask == nil else { return }
+    captureStartGeneration &+= 1
+    let generation = captureStartGeneration
+    captureStartTask = Task { [weak self] in
+      guard let self else { return }
+      await session.beginDictation()
+      if generation == captureStartGeneration {
+        captureStartTask = nil
+      }
+    }
   }
 
   private func endDictation() {
-    Task {
-      await session.endDictation()
-      await refreshHistory()
+    let startTask = captureStartTask
+    performSessionOperation { coordinator in
+      await startTask?.value
+      guard !Task.isCancelled else { return }
+      await coordinator.session.endDictation()
+      await coordinator.refreshHistory()
+    }
+  }
+
+  private func performSessionOperation(
+    _ operation: @escaping @MainActor (AppCoordinator) async -> Void
+  ) {
+    guard !isTerminating, sessionOperationTask == nil else { return }
+    sessionOperationGeneration &+= 1
+    let generation = sessionOperationGeneration
+    sessionOperationTask = Task { [weak self] in
+      guard let self else { return }
+      await operation(self)
+      if generation == sessionOperationGeneration {
+        sessionOperationTask = nil
+      }
     }
   }
 
@@ -489,15 +575,28 @@ final class AppCoordinator: ObservableObject {
   }
 
   private func refreshHistory() async {
-    guard settings.historyEnabled else {
-      history = []
-      return
-    }
+    historyRevision &+= 1
+    let revision = historyRevision
     do {
-      history = try await historyStore.load()
-    } catch {
+      let loadedHistory = try await historyStore.load()
+      let hasStoredData =
+        (try? await historyStore.hasStoredData()) ?? !loadedHistory.isEmpty
+      guard revision == historyRevision else { return }
+      history = loadedHistory
+      hasStoredHistoryData = hasStoredData
+    } catch VaniFailure.historyCorrupt {
+      guard revision == historyRevision else { return }
       history = []
+      hasStoredHistoryData = true
       settingsError = "Unreadable transcript history was quarantined."
+      recordDiagnostic(category: .storage, code: "history_load_failed")
+    } catch {
+      let hasStoredData =
+        (try? await historyStore.hasStoredData()) ?? true
+      guard revision == historyRevision else { return }
+      history = []
+      hasStoredHistoryData = hasStoredData
+      settingsError = "Transcript history could not be read or quarantined."
       recordDiagnostic(category: .storage, code: "history_load_failed")
     }
   }

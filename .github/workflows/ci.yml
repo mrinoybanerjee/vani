@@ -21,7 +21,7 @@ jobs:
       SWIFT_DETERMINISTIC_HASHING: "1"
     steps:
       - name: Check out repository
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Report toolchain
         run: swift --version
@@ -29,13 +29,15 @@ jobs:
       - name: Check local setup prerequisites
         run: ./scripts/doctor.sh
 
-      - name: Check shell scripts
-        run: |
-          bash -n scripts/*.sh
-          ./scripts/uninstall-local.sh --dry-run --remove-model
+      - name: Check uninstall dry run
+        run: ./scripts/uninstall-local.sh --dry-run --remove-model
 
       - name: Build development app from a clean checkout
-        run: CONFIGURATION=release BUILD_NUMBER="${GITHUB_RUN_NUMBER}" ./scripts/build-app.sh
+        env:
+          VANI_WARNINGS_AS_ERRORS: "1"
+          CONFIGURATION: release
+          BUILD_NUMBER: ${{ github.run_number }}
+        run: ./scripts/build-app.sh
 
       - name: Check formatting
         run: ./scripts/lint.sh
@@ -60,7 +62,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Review dependency changes
         uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0

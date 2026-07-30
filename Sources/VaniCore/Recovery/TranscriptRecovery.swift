@@ -1,5 +1,3 @@
-import Foundation
-
 public enum RecoveryStage: String, Codable, Sendable, Equatable {
   case transcription
   case insertion

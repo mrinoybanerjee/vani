@@ -311,8 +311,8 @@ Design decisions:
 
 - Default shortcut is Left Fn, with a small preset list rather than arbitrary
   shortcut composition in the first slice.
-- Overlay appears on the active display, centered 24 points above the safe bottom
-  edge, and never activates or intercepts clicks.
+- Overlay appears on the active display near the upper-right menu-bar area, clear of
+  common bottom-edge text composers, and never activates or intercepts clicks.
 - Listening uses a low-cost five-bar meter. Processing uses an indeterminate native
   progress treatment. Success is a brief confirmation only when success is known.
 - Errors remain until dismissed or recovered and contain one clear action.
@@ -329,10 +329,10 @@ Design decisions:
 Vani executable
   -> AppCoordinator (@MainActor)
       -> DictationSession actor
-          -> AudioCapturing protocol -> AVAudioEngineAudioCapture
-          -> SpeechRecognizing protocol -> FluidAudioSpeechEngine
-          -> TextProcessing value pipeline
-          -> TextInserting protocol -> SafePasteInsertion
+          -> AudioCapturing protocol -> AVAudioEngineCapture
+          -> SpeechRecognizing protocol -> FluidAudioSpeechRecognizer
+          -> TextPipeline value pipeline
+          -> TextInserting protocol -> SystemTextInserter
           -> TranscriptRecovery actor
       -> OverlayController (non-activating NSPanel)
       -> SettingsStore

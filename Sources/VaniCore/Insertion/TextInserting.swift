@@ -1,5 +1,3 @@
-import Foundation
-
 public struct TextTarget: Sendable, Equatable {
   public let processIdentifier: Int32
   public let bundleIdentifier: String?

@@ -107,7 +107,8 @@ VANI_RUN_MODEL_TESTS=1 swift test --filter bundledEnglishFixtureTranscribesLocal
 
 - App: `/Applications/Vani.app`
 - Settings: `~/Library/Preferences/com.mrinoy.vani.plist`
-- Optional history: `~/Library/Application Support/Vani/history.json`
+- Optional history: `~/Library/Application Support/Vani/history.json` and quarantined
+  `history.corrupt-*.json` files, all clearable from Settings
 - Cache: `~/Library/Caches/com.mrinoy.vani`
 - Shared speech model: `~/Library/Application Support/FluidAudio/Models/parakeet-tdt-0.6b-v2`
 

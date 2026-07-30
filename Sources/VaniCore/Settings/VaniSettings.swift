@@ -1,5 +1,15 @@
 import Foundation
 
+private func normalizedPhrase(_ phrase: String) -> String {
+  phrase
+    .trimmingCharacters(in: .whitespacesAndNewlines)
+    .replacingOccurrences(
+      of: #"[\t\n\r ]+"#,
+      with: " ",
+      options: .regularExpression
+    )
+}
+
 public enum HoldShortcut: String, Codable, CaseIterable, Sendable, Equatable, Identifiable {
   case rightOption
   case rightCommand
@@ -32,6 +42,9 @@ public enum HoldShortcut: String, Codable, CaseIterable, Sendable, Equatable, Id
 }
 
 public struct DictionaryEntry: Identifiable, Codable, Sendable, Equatable {
+  public static let maximumSpokenLength = 100
+  public static let maximumReplacementLength = 1_000
+
   public let id: UUID
   public var spoken: String
   public var replacement: String
@@ -42,9 +55,15 @@ public struct DictionaryEntry: Identifiable, Codable, Sendable, Equatable {
     self.replacement = replacement
   }
 
+  public var normalizedSpoken: String {
+    normalizedPhrase(spoken)
+  }
+
   public var isValid: Bool {
-    !spoken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    !normalizedSpoken.isEmpty
+      && normalizedSpoken.count <= Self.maximumSpokenLength
       && !replacement.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+      && replacement.count <= Self.maximumReplacementLength
   }
 }
 
@@ -63,13 +82,7 @@ public struct SnippetEntry: Identifiable, Codable, Sendable, Equatable {
   }
 
   public var normalizedTrigger: String {
-    trigger
-      .trimmingCharacters(in: .whitespacesAndNewlines)
-      .replacingOccurrences(
-        of: #"[\t\n\r ]+"#,
-        with: " ",
-        options: .regularExpression
-      )
+    normalizedPhrase(trigger)
   }
 
   public var isValid: Bool {
@@ -81,6 +94,7 @@ public struct SnippetEntry: Identifiable, Codable, Sendable, Equatable {
 }
 
 public struct VaniSettings: Codable, Sendable, Equatable {
+  public static let maximumDictionaryEntryCount = 500
   public static let maximumSnippetCount = 200
 
   public var shortcut: HoldShortcut
@@ -104,8 +118,39 @@ public struct VaniSettings: Codable, Sendable, Equatable {
     self.launchAtLogin = launchAtLogin
     self.historyEnabled = historyEnabled
     self.historyLimit = min(max(historyLimit, 10), 500)
-    self.dictionary = dictionary.filter(\.isValid)
-    self.snippets = Array(snippets.filter(\.isValid).prefix(Self.maximumSnippetCount))
+
+    var dictionaryKeys = Set<String>()
+    var boundedDictionary: [DictionaryEntry] = []
+    boundedDictionary.reserveCapacity(
+      min(dictionary.count, Self.maximumDictionaryEntryCount)
+    )
+    for entry in dictionary where entry.isValid {
+      guard dictionaryKeys.insert(entry.normalizedSpoken.lowercased()).inserted else {
+        continue
+      }
+      boundedDictionary.append(entry)
+      if boundedDictionary.count == Self.maximumDictionaryEntryCount {
+        break
+      }
+    }
+    self.dictionary = boundedDictionary
+
+    var snippetKeys = Set<String>()
+    var boundedSnippets: [SnippetEntry] = []
+    boundedSnippets.reserveCapacity(min(snippets.count, Self.maximumSnippetCount))
+    for entry in snippets where entry.isValid {
+      let key = entry.normalizedTrigger.lowercased()
+      guard !dictionaryKeys.contains(key),
+        snippetKeys.insert(key).inserted
+      else {
+        continue
+      }
+      boundedSnippets.append(entry)
+      if boundedSnippets.count == Self.maximumSnippetCount {
+        break
+      }
+    }
+    self.snippets = boundedSnippets
     self.smartFormattingEnabled = smartFormattingEnabled
   }
 

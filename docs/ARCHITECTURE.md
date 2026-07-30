@@ -48,14 +48,15 @@ application changes. At insertion time it re-resolves that process's focused
 Accessibility element, because dynamic web and rich-text controls can replace their AX
 objects without changing the user's target. A readable element is verification evidence,
 not a prerequisite for delivery. Apple's secure-text-field subrole is checked before
-capture and again before insertion; matching fields are rejected before pasteboard access.
+capture, before pasteboard access, and at the final paste boundary.
 
 Vani snapshots the pasteboard, writes the transcript, and sends one paced paste command
 to the captured process. It polls app-scoped Accessibility state for up to two seconds
-for an observable value, selection, range, or character-count change. It restores the
-snapshot only after verification and only if another process did not change the
-pasteboard. An unobservable paste leaves the transcript on the clipboard and presents a
-neutral manual-paste hint; it is never reported as verified.
+for an observable value, selection, range, or character-count change. Full control-value
+reads are capped at one million characters; larger documents use bounded range and count
+evidence. Vani restores the snapshot only after verification and only if another process
+did not change the pasteboard. An unobservable paste leaves the transcript on the
+clipboard and presents a neutral manual-paste hint; it is never reported as verified.
 
 ## Persistence
 

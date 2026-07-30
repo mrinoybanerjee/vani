@@ -2,7 +2,34 @@
 
 All notable changes follow semantic versioning.
 
-## Unreleased
+## 0.1.2 - 2026-07-30
+
+### Changed
+
+- Use a native phase-aware waveform in the menu bar and the Vani speech-bubble
+  mark in the status popover
+- Keep stored transcript history clearable after history capture is disabled or a
+  corrupt file is quarantined
+- Normalize and bound dictionary entries, and reject duplicate or conflicting phrases
+- Finish active capture cleanup before Vani quits
+- Enforce warning-free Swift compilation in CI and release builds
+- Move dictation feedback below the upper-right menu-bar area so it does not cover
+  bottom-edge text fields
+- Include Vani's license and third-party notices in built app bundles
+- Update pinned GitHub Actions and CodeQL actions together
+
+### Fixed
+
+- Keep the Vani menu-bar status item visible in light and dark menu bars
+- Preserve rapid shortcut releases that arrive while microphone capture is starting
+- Preserve held-key state when macOS reactivates Vani
+- Keep waveform animation dimensions stable to avoid unnecessary panel relayout
+- Recheck secure fields and clipboard ownership at the exact paste-delivery boundary
+- Require an exact value edit before treating selection-free insertion as verified
+- Prevent stale session or history updates from overwriting newer UI state
+- Stop late transcription and insertion work from mutating a disabled session
+- Wait for an existing Vani process to exit before replacing the installed app
+- Exclude release compilation time from reliability benchmark timing
 
 ## 0.1.1 - 2026-07-22
 

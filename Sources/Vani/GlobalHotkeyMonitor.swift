@@ -19,6 +19,20 @@ final class GlobalHotkeyMonitor {
   private var isPressed = false
 
   func start(shortcut: HoldShortcut) throws {
+    if self.shortcut == shortcut,
+      let eventTap,
+      CFMachPortIsValid(eventTap),
+      globalMonitor != nil,
+      localMonitor != nil
+    {
+      return
+    }
+
+    if isPressed {
+      isPressed = false
+      VaniLog.event(category: .capture, code: "shortcut_released_before_reconfigure")
+      onRelease?()
+    }
     stop()
     guard AXIsProcessTrusted() else {
       throw VaniFailure.accessibilityPermissionDenied
@@ -50,6 +64,10 @@ final class GlobalHotkeyMonitor {
     eventTap = tap
     runLoopSource = source
     installAppKitMonitors()
+    guard globalMonitor != nil, localMonitor != nil else {
+      stop()
+      throw VaniFailure.inputMonitoringPermissionDenied
+    }
   }
 
   func stop() {
@@ -73,6 +91,8 @@ final class GlobalHotkeyMonitor {
   }
 
   private func installAppKitMonitors() {
+    // AppKit covers Fn transitions that some keyboards omit from the CGEvent tap.
+    // isPressed deduplicates events observed by both paths.
     globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: .flagsChanged) {
       [weak self] event in
       let keyCode = Int64(event.keyCode)

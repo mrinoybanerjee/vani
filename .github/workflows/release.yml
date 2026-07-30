@@ -17,7 +17,7 @@ jobs:
       contents: write
     steps:
       - name: Check out repository
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
 
@@ -47,6 +47,7 @@ jobs:
         run: |
           ./scripts/lint.sh
           ./scripts/test.sh
+          swift build -c release --arch arm64 -Xswiftc -warnings-as-errors
 
       - name: Publish source beta
         env:
@@ -79,7 +80,7 @@ jobs:
       attestations: write
     steps:
       - name: Check out repository
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
 
@@ -120,6 +121,7 @@ jobs:
       - name: Build and sign
         env:
           CODESIGN_TIMESTAMP: "1"
+          VANI_WARNINGS_AS_ERRORS: "1"
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
           VERSION="$VERSION" BUILD_NUMBER="$GITHUB_RUN_NUMBER" ./scripts/build-app.sh
