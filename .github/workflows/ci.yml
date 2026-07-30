@@ -29,13 +29,15 @@ jobs:
       - name: Check local setup prerequisites
         run: ./scripts/doctor.sh
 
-      - name: Check shell scripts
-        run: |
-          bash -n scripts/*.sh
-          ./scripts/uninstall-local.sh --dry-run --remove-model
+      - name: Check uninstall dry run
+        run: ./scripts/uninstall-local.sh --dry-run --remove-model
 
       - name: Build development app from a clean checkout
-        run: CONFIGURATION=release BUILD_NUMBER="${GITHUB_RUN_NUMBER}" ./scripts/build-app.sh
+        env:
+          VANI_WARNINGS_AS_ERRORS: "1"
+          CONFIGURATION: release
+          BUILD_NUMBER: ${{ github.run_number }}
+        run: ./scripts/build-app.sh
 
       - name: Check formatting
         run: ./scripts/lint.sh

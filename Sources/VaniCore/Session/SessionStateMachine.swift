@@ -1,5 +1,3 @@
-import Foundation
-
 public enum SessionPhase: String, Codable, CaseIterable, Sendable, Equatable {
   case setup
   case preparing

@@ -1,5 +1,3 @@
-import Foundation
-
 public actor DiagnosticStore {
   public static let shared = DiagnosticStore()
 

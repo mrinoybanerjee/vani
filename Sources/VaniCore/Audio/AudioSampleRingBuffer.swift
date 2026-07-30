@@ -1,6 +1,5 @@
 import AVFoundation
 import Darwin
-import Foundation
 import os
 
 final class AudioSampleRingBuffer: Sendable {

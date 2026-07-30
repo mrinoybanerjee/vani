@@ -45,7 +45,11 @@ if [[ "$(uname -m)" != "arm64" ]]; then
 fi
 
 cd "$ROOT"
-swift build -c "$CONFIGURATION" --arch arm64
+SWIFT_BUILD_ARGUMENTS=(-c "$CONFIGURATION" --arch arm64)
+if [[ "${VANI_WARNINGS_AS_ERRORS:-0}" == "1" ]]; then
+    SWIFT_BUILD_ARGUMENTS+=(-Xswiftc -warnings-as-errors)
+fi
+swift build "${SWIFT_BUILD_ARGUMENTS[@]}"
 BIN_PATH="$(swift build -c "$CONFIGURATION" --arch arm64 --show-bin-path)"
 
 mkdir -p "$STAGING_APP/Contents/MacOS" "$STAGING_APP/Contents/Resources"

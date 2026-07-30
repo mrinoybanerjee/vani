@@ -1,4 +1,3 @@
-import AppKit
 import SwiftUI
 import VaniCore
 
@@ -71,7 +70,7 @@ struct MenuContentView: View {
       Spacer()
 
       Button {
-        NSApplication.shared.terminate(nil)
+        coordinator.quit()
       } label: {
         Image(systemName: "power")
           .frame(width: 24, height: 24)
@@ -297,8 +296,10 @@ private struct RecoveryView: View {
 
         Spacer()
 
-        Button("Discard", role: .destructive) {
-          coordinator.discardRecovery()
+        if coordinator.snapshot.failure?.recoveryAction != .startAgain {
+          Button("Discard", role: .destructive) {
+            coordinator.discardRecovery()
+          }
         }
       }
       .controlSize(.small)

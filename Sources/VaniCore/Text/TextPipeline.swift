@@ -55,7 +55,7 @@ public struct TextPipeline: Sendable {
     var result = text
     for entry in dictionary where entry.isValid {
       let escaped = NSRegularExpression.escapedPattern(
-        for: entry.spoken.trimmingCharacters(in: .whitespacesAndNewlines)
+        for: entry.normalizedSpoken
       )
       result = result.replacingOccurrences(
         of: #"(?i)(?<![\p{L}\p{N}])"# + escaped + #"(?![\p{L}\p{N}])"#,

@@ -1,5 +1,4 @@
 import CoreGraphics
-import Foundation
 
 public enum LastTranscriptShortcutAction: Sendable, Equatable {
   case paste

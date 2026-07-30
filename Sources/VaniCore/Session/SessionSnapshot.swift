@@ -1,5 +1,3 @@
-import Foundation
-
 public enum InsertionFeedback: Sendable, Equatable {
   case verified
   case unconfirmed

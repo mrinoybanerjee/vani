@@ -143,6 +143,52 @@ func rejectsUnchangedAccessibilityStateAfterPaste() {
 }
 
 @Test @MainActor
+func verifiesUnpositionedValueOnlyWhenItIsAnExactInsertion() {
+  let before = TextInsertionObservation(
+    value: "hello world",
+    selectedRange: nil,
+    characterCount: nil
+  )
+  let after = TextInsertionObservation(
+    value: "hello local world",
+    selectedRange: nil,
+    characterCount: nil
+  )
+
+  #expect(
+    SystemTextInserter.verifyInsertion(
+      "local ",
+      before: before,
+      after: after,
+      insertedText: nil
+    )
+  )
+}
+
+@Test @MainActor
+func rejectsChangedValueThatMerelyContainsTheTranscript() {
+  let before = TextInsertionObservation(
+    value: "hello",
+    selectedRange: nil,
+    characterCount: nil
+  )
+  let after = TextInsertionObservation(
+    value: "hello!",
+    selectedRange: nil,
+    characterCount: nil
+  )
+
+  #expect(
+    !SystemTextInserter.verifyInsertion(
+      "hello",
+      before: before,
+      after: after,
+      insertedText: nil
+    )
+  )
+}
+
+@Test @MainActor
 func rejectsSelectionMovementWithAnInconsistentCharacterCount() {
   let before = TextInsertionObservation(
     value: nil,
@@ -179,6 +225,15 @@ func dictionaryUsesWordBoundariesAndIgnoresCase() {
   #expect(
     textPipeline.process("VANI helps vanishing ideas", dictionary: dictionary)
       == "Vani helps vanishing ideas"
+  )
+}
+
+@Test
+func dictionaryNormalizesWhitespaceInSpokenPhrases() {
+  let dictionary = [DictionaryEntry(spoken: "  voice\t flow ", replacement: "Vani")]
+  #expect(
+    textPipeline.process("voice flow works", dictionary: dictionary)
+      == "Vani works"
   )
 }
 

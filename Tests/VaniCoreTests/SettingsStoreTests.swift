@@ -132,6 +132,31 @@ func settingsFromEarlierVersionsKeepTheirSavedValues() async throws {
 }
 
 @Test
+func legacySettingsGiveDictionaryEntriesPrecedenceOverConflictingSnippets() async {
+  let suite = "VaniCoreTests.\(UUID().uuidString)"
+  let store = SettingsStore(suiteName: suite)
+  let legacyJSON = Data(
+    """
+    {
+      "dictionary": [
+        {"id": "B680F390-659E-4E76-9B54-4C5537AB3149", "spoken": "sign off", "replacement": "Goodbye"}
+      ],
+      "snippets": [
+        {"id": "FB761B62-6D10-43D6-9907-9CDDE07AB76A", "trigger": "SIGN   OFF", "expansion": "Thanks"}
+      ]
+    }
+    """.utf8
+  )
+  await store.storeRawDataForTesting(legacyJSON)
+
+  let loaded = await store.load()
+
+  #expect(loaded.dictionary.map(\.replacement) == ["Goodbye"])
+  #expect(loaded.snippets.isEmpty)
+  await store.clearSuiteForTesting()
+}
+
+@Test
 func invalidOrOversizedSnippetsAreFilteredFromSettings() {
   let settings = VaniSettings(snippets: [
     SnippetEntry(trigger: " ", expansion: "text"),
@@ -144,6 +169,39 @@ func invalidOrOversizedSnippetsAreFilteredFromSettings() {
   ])
 
   #expect(settings.snippets.map(\.trigger) == ["works"])
+}
+
+@Test
+func settingsNormalizeDeduplicateAndBoundDictionaryEntries() {
+  let entries =
+    [
+      DictionaryEntry(spoken: "  voice\tflow ", replacement: "Vani"),
+      DictionaryEntry(spoken: "VOICE FLOW", replacement: "duplicate"),
+      DictionaryEntry(
+        spoken: String(repeating: "a", count: DictionaryEntry.maximumSpokenLength + 1),
+        replacement: "too long"
+      ),
+    ]
+    + (0..<VaniSettings.maximumDictionaryEntryCount).map {
+      DictionaryEntry(spoken: "phrase \($0)", replacement: "replacement \($0)")
+    }
+
+  let settings = VaniSettings(dictionary: entries)
+
+  #expect(settings.dictionary.count == VaniSettings.maximumDictionaryEntryCount)
+  #expect(settings.dictionary.first?.normalizedSpoken == "voice flow")
+  #expect(!settings.dictionary.contains(where: { $0.replacement == "duplicate" }))
+  #expect(!settings.dictionary.contains(where: { $0.replacement == "too long" }))
+}
+
+@Test
+func settingsDeduplicateSnippetTriggersAfterNormalization() {
+  let settings = VaniSettings(snippets: [
+    SnippetEntry(trigger: " sign   off ", expansion: "First"),
+    SnippetEntry(trigger: "SIGN OFF", expansion: "Second"),
+  ])
+
+  #expect(settings.snippets.map(\.expansion) == ["First"])
 }
 
 @Test

@@ -329,10 +329,10 @@ Design decisions:
 Vani executable
   -> AppCoordinator (@MainActor)
       -> DictationSession actor
-          -> AudioCapturing protocol -> AVAudioEngineAudioCapture
-          -> SpeechRecognizing protocol -> FluidAudioSpeechEngine
-          -> TextProcessing value pipeline
-          -> TextInserting protocol -> SafePasteInsertion
+          -> AudioCapturing protocol -> AVAudioEngineCapture
+          -> SpeechRecognizing protocol -> FluidAudioSpeechRecognizer
+          -> TextPipeline value pipeline
+          -> TextInserting protocol -> SystemTextInserter
           -> TranscriptRecovery actor
       -> OverlayController (non-activating NSPanel)
       -> SettingsStore

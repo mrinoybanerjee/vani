@@ -122,6 +122,9 @@ public final class SystemTextInserter: TextInserting {
 
     do {
       try verifyFocus(target)
+      guard pasteboard.changeCount == transcriptChangeCount else {
+        throw VaniFailure.clipboardChanged
+      }
     } catch {
       if pasteboard.changeCount == transcriptChangeCount {
         _ = original.restore(to: pasteboard)
@@ -129,12 +132,24 @@ public final class SystemTextInserter: TextInserting {
       throw error
     }
 
-    guard
-      await environment.postPasteShortcut(
+    let posted: Bool
+    do {
+      posted = try await environment.postPasteShortcut(
         to: target.processIdentifier,
         interval: eventInterval
-      )
-    else {
+      ) {
+        try self.verifyFocus(target)
+        guard self.pasteboard.changeCount == transcriptChangeCount else {
+          throw VaniFailure.clipboardChanged
+        }
+      }
+    } catch {
+      if pasteboard.changeCount == transcriptChangeCount {
+        _ = original.restore(to: pasteboard)
+      }
+      throw error
+    }
+    guard posted else {
       VaniLog.event(category: .insertion, code: "paste_event_post_failed")
       return .manualPasteRequired
     }
@@ -179,6 +194,9 @@ public final class SystemTextInserter: TextInserting {
       target.bundleIdentifier == nil || current.bundleIdentifier == target.bundleIdentifier
     else {
       throw VaniFailure.focusChanged
+    }
+    guard !current.isSecureTextField else {
+      throw VaniFailure.secureTextField
     }
   }
 
@@ -236,7 +254,13 @@ public final class SystemTextInserter: TextInserting {
         {
           return .valueAtRange
         }
-      } else if beforeValue != afterValue, afterValue.contains(text) {
+      } else if beforeValue != afterValue,
+        valueShowsUnpositionedInsertion(
+          text,
+          beforeValue: beforeValue,
+          afterValue: afterValue
+        )
+      {
         return .changedValue
       }
     }
@@ -284,6 +308,32 @@ public final class SystemTextInserter: TextInserting {
     let prefix = before.substring(to: selectedRange.location)
     let suffix = before.substring(from: NSMaxRange(selectedRange))
     return afterValue.hasPrefix(prefix) && afterValue.hasSuffix(suffix)
+  }
+
+  private static func valueShowsUnpositionedInsertion(
+    _ text: String,
+    beforeValue: String,
+    afterValue: String
+  ) -> Bool {
+    let before = beforeValue as NSString
+    let after = afterValue as NSString
+    let insertedLength = text.utf16.count
+    guard after.length == before.length + insertedLength else { return false }
+
+    var searchRange = NSRange(location: 0, length: after.length)
+    while searchRange.length >= insertedLength {
+      let match = after.range(of: text, options: [], range: searchRange)
+      guard match.location != NSNotFound else { return false }
+      if after.replacingCharacters(in: match, with: "") == beforeValue {
+        return true
+      }
+      let nextLocation = match.location + max(match.length, 1)
+      searchRange = NSRange(
+        location: nextLocation,
+        length: after.length - nextLocation
+      )
+    }
+    return false
   }
 
   private func waitForInsertion(
