@@ -29,6 +29,7 @@ All notable changes follow semantic versioning.
 - Prevent stale session or history updates from overwriting newer UI state
 - Stop late transcription and insertion work from mutating a disabled session
 - Wait for an existing Vani process to exit before replacing the installed app
+- Exclude release compilation time from reliability benchmark timing
 
 ## 0.1.1 - 2026-07-22
 
