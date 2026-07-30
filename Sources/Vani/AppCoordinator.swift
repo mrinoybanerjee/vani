@@ -190,7 +190,7 @@ final class AppCoordinator: ObservableObject {
       requestAccessibilityPermission()
     case .openInputMonitoringSettings:
       requestInputMonitoringPermission()
-    case .retryPreparation, .retryTranscription, .retryInsertion:
+    case .retryPreparation, .retryAudioFinalization, .retryTranscription, .retryInsertion:
       retry()
     case .copyTranscript:
       copyRecoveredTranscript()
@@ -206,7 +206,8 @@ final class AppCoordinator: ObservableObject {
     case .openMicrophoneSettings: "Allow Microphone"
     case .openAccessibilitySettings: "Allow Accessibility"
     case .openInputMonitoringSettings: "Allow Input Monitoring"
-    case .retryPreparation, .retryTranscription, .retryInsertion: "Retry"
+    case .retryPreparation, .retryAudioFinalization, .retryTranscription, .retryInsertion:
+      "Retry"
     case .copyTranscript: "Copy Transcript"
     case .startAgain: "Start Again"
     case .some(.none), nil: nil
@@ -469,7 +470,6 @@ final class AppCoordinator: ObservableObject {
       await startTask?.value
       guard !Task.isCancelled else { return }
       await coordinator.session.endDictation()
-      await coordinator.refreshHistory()
     }
   }
 
@@ -492,6 +492,11 @@ final class AppCoordinator: ObservableObject {
     let previous = snapshot.phase
     snapshot = newSnapshot
     overlay.update(snapshot: newSnapshot, previousPhase: previous)
+    if previous == .inserting, newSnapshot.phase == .ready {
+      Task { [weak self] in
+        await self?.refreshHistory()
+      }
+    }
   }
 
   private func persistSettings() {

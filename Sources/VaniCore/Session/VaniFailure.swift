@@ -5,6 +5,7 @@ public enum RecoveryAction: String, Codable, Sendable, Equatable {
   case openAccessibilitySettings
   case openInputMonitoringSettings
   case retryPreparation
+  case retryAudioFinalization
   case retryTranscription
   case retryInsertion
   case copyTranscript
@@ -18,7 +19,10 @@ public enum VaniFailure: String, Error, Codable, CaseIterable, Sendable, Equatab
   case accessibilityPermissionDenied
   case inputMonitoringPermissionDenied
   case audioDeviceUnavailable
+  case unsupportedInputSampleRate
   case audioCaptureFailed
+  case audioFinalizationFailed
+  case recordingInterrupted
   case recordingTooShort
   case recordingTooLong
   case noSpeechDetected
@@ -34,7 +38,6 @@ public enum VaniFailure: String, Error, Codable, CaseIterable, Sendable, Equatab
   case insertionUnverified
   case clipboardChanged
   case historyCorrupt
-  case operationCancelled
   case internalInvariant
 
   public var code: String { rawValue }
@@ -46,7 +49,10 @@ public enum VaniFailure: String, Error, Codable, CaseIterable, Sendable, Equatab
     case .accessibilityPermissionDenied: "Accessibility access needed"
     case .inputMonitoringPermissionDenied: "Input Monitoring access needed"
     case .audioDeviceUnavailable: "Microphone unavailable"
+    case .unsupportedInputSampleRate: "Microphone format unsupported"
     case .audioCaptureFailed: "Could not record"
+    case .audioFinalizationFailed: "Could not prepare recording"
+    case .recordingInterrupted: "Recording interrupted"
     case .recordingTooShort: "Keep holding a little longer"
     case .recordingTooLong: "Recording limit reached"
     case .noSpeechDetected: "No speech recorded"
@@ -62,7 +68,6 @@ public enum VaniFailure: String, Error, Codable, CaseIterable, Sendable, Equatab
     case .insertionUnverified: "Text is ready to paste"
     case .clipboardChanged: "Clipboard changed"
     case .historyCorrupt: "History was reset"
-    case .operationCancelled: "Operation cancelled"
     case .internalInvariant: "Vani needs to reset"
     }
   }
@@ -79,12 +84,18 @@ public enum VaniFailure: String, Error, Codable, CaseIterable, Sendable, Equatab
       "Allow Input Monitoring so Vani can detect the hold-to-talk shortcut."
     case .audioDeviceUnavailable:
       "Connect or select a microphone, then try again."
+    case .unsupportedInputSampleRate:
+      "Set the input device to 48 kHz or lower in Audio MIDI Setup, then try again."
     case .audioCaptureFailed:
       "The microphone stopped unexpectedly. Try another recording."
+    case .audioFinalizationFailed:
+      "The recording remains in memory. Retry to prepare and transcribe it."
+    case .recordingInterrupted:
+      "The captured speech remains in memory. Retry to transcribe it."
     case .recordingTooShort:
       "The recording ended before speech could be captured."
     case .recordingTooLong:
-      "Vani stopped at the two-minute safety limit."
+      "Vani stopped at the 20-minute safety limit and preserved the captured audio."
     case .noSpeechDetected:
       "Vani heard silence or audio below the speech threshold."
     case .modelUnavailable:
@@ -111,8 +122,6 @@ public enum VaniFailure: String, Error, Codable, CaseIterable, Sendable, Equatab
       "Vani did not overwrite newer clipboard content. The transcript remains recoverable."
     case .historyCorrupt:
       "Unreadable history was quarantined. Dictation can continue safely."
-    case .operationCancelled:
-      "Nothing was inserted."
     case .internalInvariant:
       "The session entered an unexpected state and was safely stopped."
     }
@@ -125,14 +134,15 @@ public enum VaniFailure: String, Error, Codable, CaseIterable, Sendable, Equatab
     case .inputMonitoringPermissionDenied: .openInputMonitoringSettings
     case .modelUnavailable, .modelDownloadFailed, .modelIntegrityFailed, .modelLoadFailed:
       .retryPreparation
-    case .transcriptionFailed: .retryTranscription
+    case .audioFinalizationFailed: .retryAudioFinalization
+    case .recordingInterrupted, .recordingTooLong, .transcriptionFailed: .retryTranscription
     case .insertionFailed: .retryInsertion
     case .focusChanged, .insertionUnverified, .clipboardChanged: .copyTranscript
-    case .audioDeviceUnavailable, .audioCaptureFailed, .recordingTooShort,
-      .recordingTooLong, .noSpeechDetected, .emptyTranscript, .internalInvariant:
+    case .audioDeviceUnavailable, .unsupportedInputSampleRate, .audioCaptureFailed,
+      .recordingTooShort, .noSpeechDetected, .emptyTranscript, .internalInvariant:
       .startAgain
     case .secureTextField: .startAgain
-    case .unsupportedHardware, .historyCorrupt, .operationCancelled: .none
+    case .unsupportedHardware, .historyCorrupt: .none
     }
   }
 

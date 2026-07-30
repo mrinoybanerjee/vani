@@ -23,7 +23,15 @@ and diagnostics.
 - Hold-to-record means no background microphone capture while idle.
 - Global key-down events are filtered to the exact Last Transcript chords before
   they reach the main actor; key content is not retained or logged.
-- Capture storage is preallocated and limited to two minutes.
+- Capture storage remains memory-only and is limited to 20 minutes. Capacity is
+  reserved in bounded pages away from the real-time callback, with a one-minute warning
+  and automatic stop at the limit.
+- Reaching capture capacity preserves the retained audio for transcription or recovery;
+  it never turns usable audio into a content-free failure.
+- A failed post-capture conversion keeps one bounded raw snapshot in memory until the
+  user retries, discards it, or quits. No temporary audio file is created.
+- Sleep, permission loss, and microphone-route changes stop and retain an active
+  recording for explicit retry instead of clearing its captured speech.
 - Process focus is checked before insertion, after paste delivery, and during bounded
   verification polling.
 - Native Accessibility secure-field metadata is checked before recording, before

@@ -26,9 +26,25 @@ and termination have explicit transitions.
 ## Audio path
 
 `AVAudioEngineCapture` installs one microphone tap. The tap copies samples into a
-preallocated, duration-bounded ring buffer protected by `OSAllocatedUnfairLock`.
-It does not log, allocate a growing collection, perform model work, or access the
-network. Captured audio is converted to mono 16 kHz float samples after recording.
+duration-bounded, paged buffer protected by `OSAllocatedUnfairLock`. Three minutes of
+pages are reserved before capture; one additional minute is reserved off the real-time
+thread for each minute that recording continues, up to 20 minutes. The audio callback
+does not allocate, log, perform model work, or access the network. Captured audio is
+drained from the page buffer and converted to mono 16 kHz float samples after recording.
+Input devices are accepted through 48 kHz; higher hardware rates are rejected before
+capture so the documented 20-minute memory ceiling remains bounded.
+
+At 19 minutes the session publishes a warning. At 20 minutes it owns the same
+stop-transcribe-insert path used by a shortcut release, so only one caller can stop the
+microphone. If the bounded buffer reaches capacity first, its retained prefix is still
+returned for transcription and marked in metadata-only diagnostics instead of being
+discarded.
+
+If post-capture sample-rate conversion fails, the raw snapshot remains in memory behind
+an explicit retry action. Route changes and sleep events do not discard a snapshot
+waiting for recovery. If sleep, permission loss, or a route change interrupts an active
+recording, Vani stops and retains its captured prefix for an explicit transcription
+retry.
 
 ## Speech and text
 

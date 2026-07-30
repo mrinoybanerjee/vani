@@ -27,6 +27,20 @@ VANI_RUN_MODEL_TESTS=1 swift test -c release \
   --filter bundledEnglishFixtureTranscribesLocally
 ```
 
+Run the synthetic 20-minute model boundary separately:
+
+```bash
+VANI_RUN_LONG_MODEL_TESTS=1 swift test -c release \
+  --filter twentyMinuteEnglishFixtureTranscribesLocally
+```
+
+Run the full paged capture and 48 kHz conversion boundary separately:
+
+```bash
+VANI_RUN_LONG_AUDIO_TESTS=1 swift test -c release \
+  --filter twentyMinutePagedCaptureDrainsAndResamples
+```
+
 ## Results
 
 Local verification on 2026-07-19 used an Apple M4 running macOS 26.5.2. With the
@@ -37,6 +51,18 @@ interactive latency percentile. Fifteen seconds after launching the installed ap
 with its model warm, CPU time remained unchanged over a 10-second observation and
 `ps` reported 0.0% CPU with 531,296 KiB RSS.
 
+On 2026-07-30, the committed release-mode 20-minute boundary test on the same M4
+returned nonempty text in 10.882 seconds of test wall time, including model preparation.
+A separate engine-focused run completed in 8.217 seconds with 1,005.8 MiB peak
+test-process RSS. A 10-minute engine-focused run completed in 4.675 seconds with
+840.3 MiB peak RSS. Repeated audio is not a quality benchmark; these runs validate
+bounded long-input execution and inform the memory guidance.
+
+The committed 20-minute paged capture test copied 48 kHz tap-sized buffers, preserved
+the bounded prefix, and converted it to 16 kHz in 0.251 seconds of test time. A measured
+`swift test --skip-build` invocation reported 861,995,008 bytes (about 822 MiB) maximum
+RSS for the test command. This stress case excludes the speech model.
+
 | Metric | Target | Current published result |
 | --- | ---: | --- |
 | Cached-model fixture | Faster than real time | 1.391 s for 5.855 s audio |
@@ -46,5 +72,7 @@ with its model warm, CPU time remained unchanged over a 10-second observation an
 | Sequential reliability | 500 cycles | Passing in automated test |
 | Idle CPU | Near zero | 0.0% over a 10 s release-build observation |
 | Warm-model memory | Reported separately | 531,296 KiB RSS (about 519 MiB) |
+| 20-minute model boundary | Completes locally | 10.882 s test wall; 1,005.8 MiB measured peak RSS |
+| 20-minute capture boundary | Bounded and transcribable | 0.251 s test; about 822 MiB command RSS |
 
 Unmeasured rows are release evidence gaps, not implied passes.

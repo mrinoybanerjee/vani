@@ -1,5 +1,6 @@
 public enum InsertionFeedback: Sendable, Equatable {
   case verified
+  case verifiedCaptureTruncated
   case unconfirmed
 }
 
@@ -12,6 +13,7 @@ public struct SessionSnapshot: Sendable, Equatable {
   public let hasRecoverableTranscript: Bool
   public let recoverableTranscript: String?
   public let insertionFeedback: InsertionFeedback?
+  public let isRecordingLimitApproaching: Bool
 
   public init(
     phase: SessionPhase,
@@ -21,7 +23,8 @@ public struct SessionSnapshot: Sendable, Equatable {
     hasLastTranscript: Bool = false,
     hasRecoverableTranscript: Bool = false,
     recoverableTranscript: String? = nil,
-    insertionFeedback: InsertionFeedback? = nil
+    insertionFeedback: InsertionFeedback? = nil,
+    isRecordingLimitApproaching: Bool = false
   ) {
     self.phase = phase
     self.failure = failure
@@ -31,6 +34,7 @@ public struct SessionSnapshot: Sendable, Equatable {
     self.hasRecoverableTranscript = hasRecoverableTranscript
     self.recoverableTranscript = recoverableTranscript
     self.insertionFeedback = insertionFeedback
+    self.isRecordingLimitApproaching = isRecordingLimitApproaching
   }
 
   public static let initial = SessionSnapshot(phase: .setup)

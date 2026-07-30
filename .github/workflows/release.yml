@@ -47,6 +47,8 @@ jobs:
         run: |
           ./scripts/lint.sh
           ./scripts/test.sh
+          VANI_RUN_LONG_AUDIO_TESTS=1 swift test -c release \
+            --filter twentyMinutePagedCaptureDrainsAndResamples
           swift build -c release --arch arm64 -Xswiftc -warnings-as-errors
 
       - name: Publish source beta

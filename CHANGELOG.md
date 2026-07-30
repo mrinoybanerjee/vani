@@ -2,6 +2,29 @@
 
 All notable changes follow semantic versioning.
 
+## 0.1.3 - 2026-07-30
+
+### Changed
+
+- Support memory-only dictations up to 20 minutes with a one-minute warning and
+  automatic transcription at the limit
+- Reserve long-recording capacity in bounded pages away from the real-time audio
+  callback
+
+### Fixed
+
+- Preserve and transcribe captured speech when the recording buffer reaches its limit
+  instead of discarding the usable audio
+- Retain captured audio before duration validation so an unexpected over-limit result
+  can be retried without recording again
+- Keep raw captured audio available when final sample-rate conversion fails, and retry
+  conversion without recording again
+- Preserve pending recovery audio across inactive microphone route and sleep events
+- Stop and retain active audio when sleep, permission, or microphone-route events
+  interrupt a recording, so the captured portion can be transcribed after retry
+- Reject input devices configured above 48 kHz before recording to keep the 20-minute
+  memory bound predictable
+
 ## 0.1.2 - 2026-07-30
 
 ### Changed

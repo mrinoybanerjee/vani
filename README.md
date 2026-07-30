@@ -28,6 +28,8 @@ Apple notarization.
 - One-time English Parakeet TDT v2 model download
 - Exact model-revision manifest with per-file SHA-256 verification
 - Local microphone capture and Core ML transcription
+- Dictations up to 20 minutes, with a one-minute warning and automatic transcription
+  at the limit
 - Process-bound paste delivery with app-scoped Accessibility verification
 - Native Accessibility refusal for password and secure text fields
 - Clipboard-preserving recovery when focus, insertion, or the clipboard changes
@@ -44,12 +46,16 @@ Apple notarization.
 ## Run Locally
 
 Requirements: Apple Silicon, macOS 14+, Swift 6, 3 GB of free disk space, and about
-1 GB of free memory for the warm speech model. Install Apple's command-line developer
-tools first if `xcode-select -p` fails:
+1 GB of free memory for normal dictation. Allow roughly 1.5 GB of free memory when
+using the full 20-minute recording limit. Install Apple's command-line developer tools
+first if `xcode-select -p` fails:
 
 ```bash
 xcode-select --install
 ```
+
+Vani supports input devices configured at up to 48 kHz. If a professional audio
+interface uses a higher rate, select 48 kHz in Audio MIDI Setup before recording.
 
 Then clone, check the Mac, and install:
 
@@ -87,9 +93,11 @@ permissions again after each rebuild. Contributors should follow
 
 ## Engineering
 
-Vani is a small Swift 6 modular monolith. The real-time audio callback writes into a
-preallocated bounded buffer; model work, text cleanup, insertion, storage, and UI
-remain outside that callback. Dependencies are exact-pinned in `Package.resolved`.
+Vani is a small Swift 6 modular monolith. The real-time audio callback writes into
+bounded, preallocated memory pages; additional pages are reserved away from the audio
+thread only while a long recording is active. Model work, text cleanup, insertion,
+storage, and UI remain outside that callback. Dependencies are exact-pinned in
+`Package.resolved`.
 
 - [Architecture](docs/ARCHITECTURE.md)
 - [Project provenance](docs/PROVENANCE.md)

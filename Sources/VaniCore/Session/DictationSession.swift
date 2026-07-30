@@ -30,6 +30,10 @@ public actor DictationSession {
   private var insertionFeedback: InsertionFeedback?
   private var observer: Observer?
   private var snapshotGeneration: UInt64 = 0
+  private var recordingLimitTask: Task<Void, Never>?
+  private var recordingLimitGeneration: UInt64 = 0
+  private var isRecordingLimitApproaching = false
+  private var didUnexpectedlyTruncateCurrentAudio = false
 
   public init(
     audioCapture: any AudioCapturing,
@@ -136,8 +140,10 @@ public actor DictationSession {
     await recovery.clear()
     failure = nil
     insertionFeedback = nil
+    didUnexpectedlyTruncateCurrentAudio = false
 
     do {
+      let captureStartedAt = ContinuousClock().now
       try await audioCapture.start()
       guard machine.phase == .ready else {
         await audioCapture.cancel()
@@ -145,9 +151,12 @@ public actor DictationSession {
         return
       }
       try await transition(.captureStarted)
+      guard machine.phase == .listening else { return }
       if shouldStopAfterCaptureStarts {
         shouldStopAfterCaptureStarts = false
         await finishDictation()
+      } else {
+        startRecordingLimitTimer(startedAt: captureStartedAt)
       }
     } catch {
       guard machine.phase != .disabled else { return }
@@ -169,14 +178,22 @@ public actor DictationSession {
     await finishDictation()
   }
 
-  private func finishDictation() async {
+  private func finishDictation(automaticallyStopped: Bool = false) async {
+    cancelRecordingLimitTimer()
     do {
       try await transition(.captureStopped)
+      if automaticallyStopped {
+        await diagnostics.record(
+          DiagnosticEvent(
+            category: .capture,
+            code: "capture_limit_auto_stop",
+            phase: machine.phase
+          )
+        )
+      }
       let audio = try await audioCapture.stop()
       guard machine.phase == .transcribing else { return }
-      try audioPolicy.validate(audio)
-      await recovery.retainAudio(audio, target: currentTarget)
-      guard machine.phase == .transcribing else { return }
+      guard try await retainAndValidate(audio) else { return }
       try await transcribeAndInsert(audio)
     } catch {
       guard machine.phase != .disabled else { return }
@@ -206,10 +223,25 @@ public actor DictationSession {
       }
       do {
         try await transition(.retryTranscription)
+        await recordCaptureTruncationIfNeeded(audio)
         try await transcribeAndInsert(audio)
       } catch {
         guard machine.phase != .disabled else { return }
         await fail(map(error, fallback: .transcriptionFailed))
+      }
+
+    case .retryAudioFinalization:
+      do {
+        try await transition(.retryTranscription)
+        guard let audio = try await audioCapture.recoverPendingAudio() else {
+          throw VaniFailure.internalInvariant
+        }
+        guard machine.phase == .transcribing else { return }
+        guard try await retainAndValidate(audio) else { return }
+        try await transcribeAndInsert(audio)
+      } catch {
+        guard machine.phase != .disabled else { return }
+        await fail(map(error, fallback: .audioFinalizationFailed))
       }
 
     case .retryInsertion:
@@ -291,8 +323,13 @@ public actor DictationSession {
   }
 
   public func discardRecovery() async {
+    let shouldDiscardPendingAudio = failure == .audioFinalizationFailed
     await recovery.clear()
+    if shouldDiscardPendingAudio {
+      await audioCapture.cancel()
+    }
     failure = nil
+    didUnexpectedlyTruncateCurrentAudio = false
     guard machine.phase == .recoverableError else {
       await publishSnapshot()
       return
@@ -307,7 +344,13 @@ public actor DictationSession {
 
   public func permissionWasRevoked(_ permissionFailure: VaniFailure) async {
     switch machine.phase {
-    case .setup, .preparing, .ready, .listening:
+    case .listening:
+      await preserveInterruptedDictation(
+        diagnosticCode: "capture_interrupted_\(permissionFailure.code)"
+      )
+
+    case .setup, .preparing, .ready:
+      cancelRecordingLimitTimer()
       await audioCapture.cancel()
       failure = permissionFailure
       do {
@@ -348,9 +391,13 @@ public actor DictationSession {
   }
 
   public func audioRouteDidChange() async {
-    await audioCapture.cancel()
+    cancelRecordingLimitTimer()
     if machine.phase == .listening {
-      failure = .audioDeviceUnavailable
+      await preserveInterruptedDictation(diagnosticCode: "capture_interrupted_audio_route")
+      return
+    }
+    if isStartingCapture {
+      await audioCapture.cancel()
     }
     do {
       try await transition(.audioRouteChanged)
@@ -360,9 +407,13 @@ public actor DictationSession {
   }
 
   public func systemWillSleep() async {
-    await audioCapture.cancel()
+    cancelRecordingLimitTimer()
     if machine.phase == .listening {
-      failure = .operationCancelled
+      await preserveInterruptedDictation(diagnosticCode: "capture_interrupted_sleep")
+      return
+    }
+    if isStartingCapture {
+      await audioCapture.cancel()
     }
     do {
       try await transition(.systemWillSleep)
@@ -390,11 +441,13 @@ public actor DictationSession {
 
   public func terminate() async {
     preparationGeneration &+= 1
+    cancelRecordingLimitTimer()
     await audioCapture.cancel()
     await recovery.clear()
     currentTarget = nil
     failure = nil
     modelProgress = nil
+    didUnexpectedlyTruncateCurrentAudio = false
     do {
       try await transition(.terminate)
     } catch {
@@ -504,10 +557,16 @@ public actor DictationSession {
     switch result {
     case .verified:
       diagnosticCode = "verified"
-      insertionFeedback = .verified
+      insertionFeedback =
+        didUnexpectedlyTruncateCurrentAudio
+        ? .verifiedCaptureTruncated
+        : .verified
     case .verifiedClipboardPreserved:
       diagnosticCode = "verified_clipboard_preserved"
-      insertionFeedback = .verified
+      insertionFeedback =
+        didUnexpectedlyTruncateCurrentAudio
+        ? .verifiedCaptureTruncated
+        : .verified
     case .unverifiedClipboardPreserved:
       diagnosticCode = "unverified_clipboard_preserved"
       insertionFeedback = .unconfirmed
@@ -620,8 +679,136 @@ public actor DictationSession {
       hasLastTranscript: lastTranscript != nil,
       hasRecoverableTranscript: payload?.transcript != nil,
       recoverableTranscript: payload?.transcript,
-      insertionFeedback: insertionFeedback
+      insertionFeedback: insertionFeedback,
+      isRecordingLimitApproaching: isRecordingLimitApproaching
     )
+  }
+
+  private func startRecordingLimitTimer(startedAt: ContinuousClock.Instant) {
+    cancelRecordingLimitTimer()
+    recordingLimitGeneration &+= 1
+    let generation = recordingLimitGeneration
+    let maximumDuration = max(0, audioPolicy.maximumDuration)
+    let warningLeadTime = min(60, maximumDuration / 2)
+    let warningDelay = max(0, maximumDuration - warningLeadTime)
+    let warningDeadline = startedAt.advanced(by: .seconds(warningDelay))
+    let stopDeadline = startedAt.advanced(by: .seconds(maximumDuration))
+    let clock = ContinuousClock()
+
+    recordingLimitTask = Task { [weak self] in
+      do {
+        if warningDelay > 0 {
+          try await clock.sleep(until: warningDeadline)
+        }
+        guard !Task.isCancelled else { return }
+        await self?.recordingLimitWarningReached(generation: generation)
+
+        if warningLeadTime > 0 {
+          try await clock.sleep(until: stopDeadline)
+        }
+        guard !Task.isCancelled else { return }
+        await self?.recordingLimitReached(generation: generation)
+      } catch {
+        return
+      }
+    }
+  }
+
+  private func recordingLimitWarningReached(generation: UInt64) async {
+    guard
+      generation == recordingLimitGeneration,
+      machine.phase == .listening
+    else {
+      return
+    }
+    isRecordingLimitApproaching = true
+    VaniLog.event(category: .capture, code: "capture_limit_warning")
+    await diagnostics.record(
+      DiagnosticEvent(
+        category: .capture,
+        code: "capture_limit_warning",
+        phase: machine.phase
+      )
+    )
+    await publishSnapshot()
+  }
+
+  private func recordingLimitReached(generation: UInt64) async {
+    guard
+      generation == recordingLimitGeneration,
+      machine.phase == .listening
+    else {
+      return
+    }
+    recordingLimitTask = nil
+    isRecordingLimitApproaching = false
+    VaniLog.event(category: .capture, code: "capture_limit_auto_stop")
+    await finishDictation(automaticallyStopped: true)
+  }
+
+  private func cancelRecordingLimitTimer() {
+    recordingLimitGeneration &+= 1
+    recordingLimitTask?.cancel()
+    recordingLimitTask = nil
+    isRecordingLimitApproaching = false
+  }
+
+  private func captureWasUnexpectedlyTruncated(_ audio: CapturedAudio) -> Bool {
+    guard audio.wasTruncated else { return false }
+    let tolerance = min(
+      1,
+      max(0.05, audioPolicy.maximumDuration * 0.001)
+    )
+    return audio.duration < audioPolicy.maximumDuration - tolerance
+  }
+
+  private func retainAndValidate(_ audio: CapturedAudio) async throws -> Bool {
+    await recovery.retainAudio(audio, target: currentTarget)
+    guard machine.phase == .transcribing else { return false }
+    await recordCaptureTruncationIfNeeded(audio)
+    try audioPolicy.validate(audio)
+    return machine.phase == .transcribing
+  }
+
+  private func preserveInterruptedDictation(diagnosticCode: String) async {
+    cancelRecordingLimitTimer()
+    do {
+      try await transition(.captureStopped)
+      let audio = try await audioCapture.stop()
+      guard machine.phase == .transcribing else { return }
+      await recovery.retainAudio(audio, target: currentTarget)
+      guard machine.phase == .transcribing else { return }
+      await recordCaptureTruncationIfNeeded(audio)
+      await diagnostics.record(
+        DiagnosticEvent(
+          category: .capture,
+          code: diagnosticCode,
+          phase: machine.phase
+        )
+      )
+      await fail(.recordingInterrupted)
+    } catch {
+      guard machine.phase != .disabled else { return }
+      await fail(map(error, fallback: .audioCaptureFailed))
+    }
+  }
+
+  private func recordCaptureTruncationIfNeeded(_ audio: CapturedAudio) async {
+    didUnexpectedlyTruncateCurrentAudio = captureWasUnexpectedlyTruncated(audio)
+    if audio.wasTruncated {
+      let code =
+        didUnexpectedlyTruncateCurrentAudio
+        ? "capture_truncated_early"
+        : "capture_limit_reached"
+      VaniLog.event(category: .capture, code: code)
+      await diagnostics.record(
+        DiagnosticEvent(
+          category: .capture,
+          code: code,
+          phase: machine.phase
+        )
+      )
+    }
   }
 
   private func map(_ error: Error, fallback: VaniFailure) -> VaniFailure {
@@ -637,7 +824,8 @@ public actor DictationSession {
     case .microphonePermissionDenied, .accessibilityPermissionDenied,
       .inputMonitoringPermissionDenied:
       .permission
-    case .audioDeviceUnavailable, .audioCaptureFailed, .recordingTooShort,
+    case .audioDeviceUnavailable, .unsupportedInputSampleRate, .audioCaptureFailed,
+      .audioFinalizationFailed, .recordingInterrupted, .recordingTooShort,
       .recordingTooLong, .noSpeechDetected:
       .capture
     case .modelUnavailable, .modelDownloadFailed, .modelIntegrityFailed, .modelLoadFailed: .model
@@ -646,7 +834,7 @@ public actor DictationSession {
       .clipboardChanged:
       .insertion
     case .historyCorrupt: .storage
-    case .unsupportedHardware, .operationCancelled, .internalInvariant: .lifecycle
+    case .unsupportedHardware, .internalInvariant: .lifecycle
     }
   }
 }
