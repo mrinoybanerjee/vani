@@ -2,6 +2,17 @@
 
 All notable changes follow semantic versioning.
 
+## Unreleased
+
+### Changed
+
+- Add a copy-paste update path and explain how free stable local signing keeps macOS
+  privacy permissions attached across source rebuilds
+- Document a targeted, non-destructive recovery flow for stale Vani permission records
+  after an ad-hoc update
+- Make setup-doctor and installer warnings explain the permission impact of ad-hoc
+  signing and link directly to prevention and recovery instructions
+
 ## 0.1.3 - 2026-07-30
 
 ### Changed

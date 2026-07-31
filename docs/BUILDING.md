@@ -59,9 +59,10 @@ key. Public downloads still require an Apple Developer ID signature and notariza
 
 ### Stable local signing
 
-This optional setup is recommended for contributors who rebuild Vani regularly. It
-creates a private key in the login keychain. Never export or commit that private key.
-Apple documents the underlying flow in
+Complete this free one-time setup before the first install if you expect to update or
+rebuild Vani regularly. It does not require an Apple Developer Program membership. It
+creates a private key in the login keychain, so repeat it separately on each Mac and
+never export or commit that private key. Apple documents the underlying flow in
 [Create self-signed certificates in Keychain Access](https://support.apple.com/guide/keychain-access/create-self-signed-certificates-kyca8916/mac).
 
 1. Open Keychain Access with Spotlight.
@@ -81,6 +82,8 @@ The identity should appear exactly as `Vani Local Development`. The first build 
 ask to access its private key; choose `Always Allow` for `/usr/bin/codesign`. Reinstall
 Vani and grant its three permissions once after changing identities. The certificate
 is local development infrastructure, not a substitute for Developer ID distribution.
+If permissions no longer stay enabled after an ad-hoc update, follow
+[Permissions stopped working after an update](TROUBLESHOOTING.md#permissions-stopped-working-after-an-update).
 
 ## Model integration test
 
