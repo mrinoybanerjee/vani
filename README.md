@@ -4,7 +4,7 @@
 
 # Vani
 
-Private, native voice typing for Apple Silicon Macs.
+A private, local, and free Wispr Flow alternative for Apple Silicon Macs.
 
 Hold a shortcut, speak English, and release. Vani transcribes on your Mac and
 inserts the result into the app you were using. There is no account, telemetry,
