@@ -82,14 +82,37 @@ links, email addresses, and snippet expansions unchanged. Spoken command words a
 necessarily interpreted as commands while the setting is on; turn it off when you need
 those words literally.
 
-If a permission does not update, quit and reopen the exact `/Applications/Vani.app`
-bundle after granting it. See [Troubleshooting](docs/TROUBLESHOOTING.md) for focused
-recovery steps.
+## Updating Vani
 
-The installer uses a stable `Vani Local Development` signing identity when one exists;
-otherwise it uses an ad-hoc signature. Ad-hoc builds work, but macOS can request
-permissions again after each rebuild. Contributors should follow
-[Stable local signing](docs/BUILDING.md#stable-local-signing).
+Update an existing clone directly from `main`:
+
+```bash
+cd ~/vani
+git status --short
+```
+
+If that command prints nothing, continue:
+
+```bash
+git switch main
+git pull --ff-only origin main
+./scripts/install-local.sh
+```
+
+If it prints any files, stop and review those local changes before pulling. The
+installer replaces `/Applications/Vani.app` atomically and keeps the downloaded model,
+settings, snippets, dictionary, and optional history.
+
+### Keep permissions across updates
+
+macOS attaches Microphone, Accessibility, and Input Monitoring permissions to the
+app's signing identity. Without the free local `Vani Local Development` identity,
+each source rebuild is ad-hoc signed and macOS can treat it as a different app. Create
+the identity once by following [Stable local signing](docs/BUILDING.md#stable-local-signing)
+before updating regularly. No paid Apple Developer membership is required.
+
+If permissions disappeared after an update, or their switches will not stay enabled,
+follow [Permissions stopped working after an update](docs/TROUBLESHOOTING.md#permissions-stopped-working-after-an-update).
 
 ## Engineering
 

@@ -100,6 +100,7 @@ printf '%s\n' \
 
 if ! codesign -dv --verbose=4 "$DESTINATION_APP" 2>&1 \
     | grep -F 'Authority=Vani Local Development' >/dev/null; then
-    printf '\nNote: this app is ad-hoc signed. It works locally, but rebuilding can require fresh macOS permission grants.\n'
-    printf 'See docs/BUILDING.md#stable-local-signing for the optional stable identity.\n'
+    printf '\nNote: this app is ad-hoc signed. macOS may treat the next rebuilt version as a different app and reset its privacy permissions.\n'
+    printf 'Prevent this with the free setup in docs/BUILDING.md#stable-local-signing.\n'
+    printf 'If permission switches will not stay enabled, follow docs/TROUBLESHOOTING.md#permissions-stopped-working-after-an-update.\n'
 fi

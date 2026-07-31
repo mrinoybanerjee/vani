@@ -17,7 +17,7 @@ open /Applications/Vani.app
 Do not launch `.build` executables directly for final permission testing. macOS grants
 privacy access to the exact signed application identity that requested it.
 
-## A permission still shows Allow
+## Permissions stopped working after an update
 
 Vani needs three separate entries under System Settings > Privacy & Security:
 
@@ -25,19 +25,51 @@ Vani needs three separate entries under System Settings > Privacy & Security:
 - Accessibility
 - Input Monitoring
 
-Quit Vani, enable the exact `/Applications/Vani.app` entry in each pane, then reopen
-the app. If an old or duplicate Vani row exists, remove that row and add the installed
-app again. As a last resort, reset only Vani's records and grant them again:
+macOS attaches these permissions to the app's signing identity. If the setup doctor
+reported that `Vani Local Development` was missing, the installer used an ad-hoc
+signature. An updated ad-hoc executable can look like a different app to macOS even
+though the name and bundle identifier are unchanged. This can leave a visible Vani
+switch that turns off again or never changes to Allowed.
+
+### Prevent it on future updates
+
+Create the free `Vani Local Development` identity by following
+[Stable local signing](BUILDING.md#stable-local-signing). Reinstall Vani after the
+doctor reports `[ok] Stable local signing identity found`. Permissions should then
+survive normal rebuilds made with that identity.
+
+### Repair the current installation
+
+1. Create the stable identity above. Do not continue while `./scripts/doctor.sh` still
+   reports that it is missing.
+2. Install without opening Vani, reset only Vani's permission records, and then launch
+   the exact installed app. Apple documents this targeted reset mechanism in
+   [Resetting access to protected resources in macOS](https://developer.apple.com/documentation/xcode/resetting-access-to-protected-resources-in-macos):
 
 ```bash
+cd ~/vani
+git switch main
+git pull --ff-only origin main
+./scripts/doctor.sh
+VANI_SKIP_OPEN=1 ./scripts/install-local.sh
 tccutil reset Microphone com.mrinoy.vani
 tccutil reset Accessibility com.mrinoy.vani
 tccutil reset ListenEvent com.mrinoy.vani
 open /Applications/Vani.app
 ```
 
+3. Use Vani's Allow buttons, then enable the exact `/Applications/Vani.app` entry in
+   all three Privacy & Security panes. If an old or duplicate Vani row remains, remove
+   it and add `/Applications/Vani.app` with the `+` button.
+4. Quit and reopen Vani after granting Input Monitoring.
+
+These commands do not remove the speech model, settings, snippets, dictionary, or
+history. Do not run `sudo tccutil reset All`; that would reset permissions for unrelated
+apps. If a targeted reset reports an error, include that exact output in a bug report.
+
+Normal launches with the same stable identity do not require permissions to be reset.
 A new bundle identifier, signing identity, ad-hoc executable, or reset privacy database
-requires fresh grants. Normal launches with the same stable identity do not.
+requires fresh grants.
 
 ## Left Fn does not start recording
 

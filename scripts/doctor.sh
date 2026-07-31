@@ -91,7 +91,7 @@ if security find-identity -v -p codesigning 2>/dev/null \
     | grep -F "\"$LOCAL_SIGNING_IDENTITY\"" >/dev/null; then
     ok "Stable local signing identity found"
 else
-    warn "No '$LOCAL_SIGNING_IDENTITY' identity was found. Installation will work, but rebuilt ad-hoc apps can require fresh permissions. See docs/BUILDING.md."
+    warn "No '$LOCAL_SIGNING_IDENTITY' identity was found. This build will be ad-hoc signed, so macOS may treat the next rebuild as a different app and reset its privacy permissions. See docs/BUILDING.md#stable-local-signing."
 fi
 
 if [[ -d "$MODEL_DIRECTORY" ]]; then
