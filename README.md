@@ -76,11 +76,11 @@ The first source build can take several minutes. After Vani opens in the menu ba
 
 Snippets and Smart Formatting are available in Settings. Smart Formatting is off by
 default; enabling it recognizes `comma`, `period` or `full stop`, `question mark`,
-`exclamation mark` or `exclamation point`, `colon`, `semicolon`, `new line`, and
-`new paragraph`. It removes only standalone `um`, `uh`, and `erm` fillers and leaves
-links, email addresses, and snippet expansions unchanged. Spoken command words are
-necessarily interpreted as commands while the setting is on; turn it off when you need
-those words literally.
+`exclamation mark` or `exclamation point`, `colon`, `semicolon`, `new line` or
+`next line`, and `new paragraph` or `next paragraph`. It removes only standalone `um`,
+`uh`, and `erm` fillers and leaves links, email addresses, and snippet expansions
+unchanged. Spoken command words are necessarily interpreted as commands while the
+setting is on; turn it off when you need those words literally.
 
 ## Updating Vani
 

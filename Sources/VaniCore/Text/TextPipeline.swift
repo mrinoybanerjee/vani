@@ -22,7 +22,9 @@ public struct TextPipeline: Sendable {
     for replacement in protected.replacements {
       text = restoreSnippet(replacement, in: text)
     }
-    return text.trimmingCharacters(in: .whitespacesAndNewlines)
+    let boundaryCharacters: CharacterSet =
+      smartFormattingEnabled ? .whitespaces : .whitespacesAndNewlines
+    return text.trimmingCharacters(in: boundaryCharacters)
   }
 
   private func restoreSnippet(_ replacement: ProtectedSnippet, in text: String) -> String {
@@ -136,7 +138,9 @@ public struct TextPipeline: Sendable {
 
     let structuralCommands: [(phrase: String, replacement: String)] = [
       ("new paragraph", "\n\n"),
+      ("next paragraph", "\n\n"),
       ("new line", "\n"),
+      ("next line", "\n"),
     ]
     result = replaceSpokenCommands(
       structuralCommands,
@@ -160,7 +164,9 @@ public struct TextPipeline: Sendable {
       leadingArtifactPattern: #"[,.;:!?…]"#
     )
 
-    result = capitalizeSentenceStarts(in: cleanSpacing(in: result))
+    result = capitalizeSentenceStarts(
+      in: cleanSpacing(in: result, preserveBoundaryNewlines: true)
+    )
     for replacement in protected.replacements {
       result = result.replacingOccurrences(of: replacement.token, with: replacement.value)
     }
@@ -287,8 +293,15 @@ public struct TextPipeline: Sendable {
     return text.substring(with: text.rangeOfComposedCharacterSequence(at: offset)).first
   }
 
-  private func cleanSpacing(in text: String) -> String {
-    text
+  private func cleanSpacing(
+    in text: String,
+    preserveBoundaryNewlines: Bool = false
+  ) -> String {
+    let boundaryCharacters: CharacterSet =
+      preserveBoundaryNewlines ? .whitespaces : .whitespacesAndNewlines
+
+    return
+      text
       .replacingOccurrences(of: #"[ \t]+"#, with: " ", options: .regularExpression)
       .replacingOccurrences(
         of: #"[ \t]+([,.;:!?])"#,
@@ -297,7 +310,7 @@ public struct TextPipeline: Sendable {
       )
       .replacingOccurrences(of: #"[ \t]*\n[ \t]*"#, with: "\n", options: .regularExpression)
       .replacingOccurrences(of: #"\n{3,}"#, with: "\n\n", options: .regularExpression)
-      .trimmingCharacters(in: .whitespacesAndNewlines)
+      .trimmingCharacters(in: boundaryCharacters)
   }
 
   private func capitalizeSentenceStarts(in text: String) -> String {
