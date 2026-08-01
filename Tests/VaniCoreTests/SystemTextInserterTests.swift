@@ -473,6 +473,37 @@ func delayedObservableInsertionRestoresTheOriginalClipboard() async throws {
 }
 
 @Test @MainActor
+func standaloneStructuralNewlineIsVerifiedAndRestoresTheOriginalClipboard() async throws {
+  let focus = InsertionFocusProvider()
+  let environment = InsertionEnvironment(reads: [
+    insertionRead(
+      value: "first line",
+      range: NSRange(location: 10, length: 0),
+      count: 10
+    ),
+    insertionRead(
+      value: "first line\n",
+      range: NSRange(location: 11, length: 0),
+      count: 11,
+      insertedText: "\n"
+    ),
+  ])
+  let pasteboard = NSPasteboard.withUniqueName()
+  defer { pasteboard.releaseGlobally() }
+  pasteboard.setString("original", forType: .string)
+
+  let result = try await makeInserter(
+    focus: focus,
+    environment: environment,
+    pasteboard: pasteboard
+  ).insert("\n", into: focus.target)
+
+  #expect(result == .verified)
+  #expect(environment.postCount == 1)
+  #expect(pasteboard.string(forType: .string) == "original")
+}
+
+@Test @MainActor
 func observableVerificationTimeoutPreservesTranscript() async throws {
   let focus = InsertionFocusProvider()
   let unchanged = insertionRead(
