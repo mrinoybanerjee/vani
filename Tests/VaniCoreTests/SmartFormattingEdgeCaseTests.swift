@@ -62,7 +62,12 @@ func smartFormattingAbsorbsEveryRecognizerArtifactAroundPunctuationCommands() {
 
 @Test
 func smartFormattingHandlesEveryStructuralCommandArtifactCombination() {
-  let commands = [("new line", "\n"), ("new paragraph", "\n\n")]
+  let commands = [
+    ("new line", "\n"),
+    ("next line", "\n"),
+    ("new paragraph", "\n\n"),
+    ("next paragraph", "\n\n"),
+  ]
   let disposableLeadingArtifacts = [",", ";", ":"]
   let sentenceEndArtifacts = [".", "!", "?", "...", "…"]
   let trailingArtifacts = [",", ".", ";", ":", "!", "?", "...", "…"]
@@ -200,7 +205,7 @@ func smartFormattingCapitalizesInsideSentenceQuotesAndBrackets() {
 @Test
 func smartFormattingOffLeavesCommandsFillersAndModelPunctuationLiteral() {
   let input =
-    "um, iPhone comma period question mark exclamation mark colon semicolon new line new paragraph."
+    "um, iPhone comma period question mark exclamation mark colon semicolon new line next line new paragraph next paragraph."
 
   #expect(
     edgeCasePipeline.process(
@@ -295,8 +300,8 @@ func smartFormattingHandlesALongTranscriptWithoutLosingStructure() {
   )
 
   #expect(output.hasPrefix("Alpha, beta.\n\nAlpha, beta."))
-  #expect(output.hasSuffix("Alpha, beta."))
-  #expect(output.components(separatedBy: "\n\n").count == 2_000)
+  #expect(output.hasSuffix("Alpha, beta.\n\n"))
+  #expect(output.dropLast(2).components(separatedBy: "\n\n").count == 2_000)
   #expect(!output.contains("comma"))
   #expect(!output.contains("period"))
   #expect(!output.contains("new paragraph"))

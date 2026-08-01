@@ -4,6 +4,8 @@ All notable changes follow semantic versioning.
 
 ## Unreleased
 
+## 0.1.4 - 2026-07-31
+
 ### Changed
 
 - Add a copy-paste update path and explain how free stable local signing keeps macOS
@@ -12,6 +14,13 @@ All notable changes follow semantic versioning.
   after an ad-hoc update
 - Make setup-doctor and installer warnings explain the permission impact of ad-hoc
   signing and link directly to prevention and recovery instructions
+
+### Fixed
+
+- Treat `next line` and `next paragraph` as Smart Formatting aliases for the existing
+  `new line` and `new paragraph` structural commands
+- Preserve structural newlines when a command is spoken alone or at the beginning or
+  end of a dictation
 
 ## 0.1.3 - 2026-07-30
 

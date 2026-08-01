@@ -904,6 +904,25 @@ func dictationSessionAppliesConfiguredSnippetsAndSmartFormatting() async throws 
 }
 
 @Test @MainActor
+func dictationSessionInsertsAStandaloneStructuralCommand() async throws {
+  let insertion = MockTextInserter(results: [.success(.verified)])
+  let session = DictationSession(
+    audioCapture: MockAudioCapture(),
+    speechRecognizer: MockSpeechRecognizer(results: [.success(speechResult("next line"))]),
+    textInserter: insertion,
+    focusProvider: MockFocusProvider(),
+    diagnostics: DiagnosticStore(),
+    settings: VaniSettings(smartFormattingEnabled: true)
+  )
+
+  #expect(await session.prepareModels(allowDownload: false))
+  await session.beginDictation()
+  await session.endDictation()
+
+  #expect(insertion.insertedTexts == ["\n"])
+}
+
+@Test @MainActor
 func failedLastTranscriptPasteRemainsRecoverableAndRetryable() async throws {
   let insertion = MockTextInserter(results: [
     .success(.verified),

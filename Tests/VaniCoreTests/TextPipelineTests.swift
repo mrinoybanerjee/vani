@@ -344,6 +344,41 @@ func smartFormattingHandlesConservativeFillersPunctuationAndStructure() {
 }
 
 @Test
+func smartFormattingSupportsNextStructuralCommandAliases() {
+  #expect(
+    textPipeline.process(
+      "first thought next line second thought next paragraph third thought",
+      dictionary: [],
+      smartFormattingEnabled: true
+    ) == "First thought\nSecond thought\n\nThird thought"
+  )
+}
+
+@Test
+func smartFormattingPreservesStandaloneAndBoundaryStructuralCommands() {
+  let cases = [
+    ("new line", "\n"),
+    ("next line", "\n"),
+    ("new paragraph", "\n\n"),
+    ("next paragraph", "\n\n"),
+    ("next line hello", "\nHello"),
+    ("hello next line", "Hello\n"),
+    ("next paragraph hello", "\n\nHello"),
+    ("hello next paragraph", "Hello\n\n"),
+  ]
+
+  for (input, expected) in cases {
+    #expect(
+      textPipeline.process(
+        input,
+        dictionary: [],
+        smartFormattingEnabled: true
+      ) == expected
+    )
+  }
+}
+
+@Test
 func smartFormattingAbsorbsRecognizerPunctuationAroundCommands() {
   #expect(
     textPipeline.process(
