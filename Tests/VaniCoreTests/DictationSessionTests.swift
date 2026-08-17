@@ -76,6 +76,7 @@ private actor MockSpeechRecognizer: SpeechRecognizing {
   private let transcribeDelay: Duration?
   private(set) var prepareCount = 0
   private(set) var transcribeCount = 0
+  private(set) var contexts: [SpeechRecognitionContext] = []
 
   init(
     results: [Result<SpeechResult, VaniFailure>],
@@ -128,6 +129,14 @@ private actor MockSpeechRecognizer: SpeechRecognizing {
     return try results.removeFirst().get()
   }
 
+  func transcribe(
+    _ audio: CapturedAudio,
+    context: SpeechRecognitionContext
+  ) async throws -> SpeechResult {
+    contexts.append(context)
+    return try await transcribe(audio)
+  }
+
   func waitUntilTranscriptionStarts() async -> Bool {
     await waitUntilTranscriptionCount(1)
   }
@@ -139,6 +148,57 @@ private actor MockSpeechRecognizer: SpeechRecognizing {
     }
     return false
   }
+}
+
+@Test @MainActor
+func dictationSessionUsesEnabledPersonalizationAndRetainsCorrectionCandidate() async throws {
+  let audio = MockAudioCapture()
+  let speech = MockSpeechRecognizer(results: [.success(speechResult("Vanny says hello"))])
+  let focus = MockFocusProvider()
+  focus.target = TextTarget(
+    processIdentifier: 42,
+    bundleIdentifier: "personalized.app"
+  )
+  let insertion = MockTextInserter(results: [.success(.verified)])
+  let settings = VaniSettings(
+    personalizationEnabled: true
+  )
+  let learnedCorrections = [
+    LearnedCorrection(
+      spoken: "Vanny",
+      replacement: "Vani",
+      applicationBundleIdentifier: "personalized.app",
+      confirmationCount: 2
+    )
+  ]
+  let session = DictationSession(
+    audioCapture: audio,
+    speechRecognizer: speech,
+    textInserter: insertion,
+    focusProvider: focus,
+    diagnostics: DiagnosticStore(),
+    settings: settings,
+    learnedCorrections: learnedCorrections
+  )
+
+  #expect(await session.prepareModels(allowDownload: false))
+  await session.beginDictation()
+  await session.endDictation()
+
+  #expect(insertion.insertedTexts == ["Vani says hello"])
+  let contexts = await speech.contexts
+  #expect(contexts.count == 1)
+  #expect(
+    contexts[0].personalizedTerms == [
+      SpeechPersonalizationTerm(canonical: "Vani", aliases: ["Vanny"])
+    ])
+  #expect(
+    await session.correctionCandidate()?.finalTranscript == "Vani says hello"
+  )
+  #expect(await session.correctionCandidate()?.rawTranscript == "Vanny says hello")
+  #expect(
+    await session.correctionCandidate()?.applicationBundleIdentifier == "personalized.app"
+  )
 }
 
 @MainActor

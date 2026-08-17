@@ -29,8 +29,8 @@ struct SettingsView: View {
       TabView {
         GeneralSettingsView()
           .tabItem { Label("General", systemImage: "slider.horizontal.3") }
-        DictionarySettingsView()
-          .tabItem { Label("Dictionary", systemImage: "character.book.closed") }
+        VocabularySettingsView()
+          .tabItem { Label("Vocabulary", systemImage: "character.book.closed") }
         SnippetSettingsView()
           .tabItem { Label("Snippets", systemImage: "text.badge.plus") }
         HistorySettingsView()
@@ -39,7 +39,149 @@ struct SettingsView: View {
           .tabItem { Label("Diagnostics", systemImage: "stethoscope") }
       }
     }
-    .frame(width: 560, height: 450)
+    .frame(width: 600, height: 500)
+  }
+}
+
+private struct VocabularySettingsView: View {
+  private enum Section: String, CaseIterable, Identifiable {
+    case dictionary = "Dictionary"
+    case learning = "Learning"
+
+    var id: Self { self }
+  }
+
+  @State private var section = Section.dictionary
+
+  var body: some View {
+    VStack(spacing: 0) {
+      Picker("Vocabulary section", selection: $section) {
+        ForEach(Section.allCases) { section in
+          Text(section.rawValue).tag(section)
+        }
+      }
+      .pickerStyle(.segmented)
+      .labelsHidden()
+      .padding(.horizontal, 20)
+      .padding(.top, 16)
+
+      switch section {
+      case .dictionary:
+        DictionarySettingsView()
+      case .learning:
+        PersonalizationSettingsView()
+      }
+    }
+  }
+}
+
+private struct PersonalizationSettingsView: View {
+  @EnvironmentObject private var coordinator: AppCoordinator
+  @State private var confirmsReset = false
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 12) {
+      Toggle(
+        "Learn from corrections",
+        isOn: Binding(
+          get: { coordinator.settings.personalizationEnabled },
+          set: { coordinator.setPersonalizationEnabled($0) }
+        )
+      )
+
+      Text("Saved corrections stay on this Mac. Vani never stores correction audio.")
+        .font(.caption)
+        .foregroundStyle(.secondary)
+
+      GroupBox("Experimental acoustic vocabulary") {
+        HStack {
+          VStack(alignment: .leading, spacing: 3) {
+            Text(
+              coordinator.personalizationModelInstalled
+                ? "The optional experimental local model is installed."
+                : "Optional experimental local model for harder names and terminology."
+            )
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            if let progress = coordinator.personalizationModelProgress {
+              ProgressView(value: progress)
+                .frame(maxWidth: 220)
+            }
+          }
+          Spacer()
+          if !coordinator.personalizationModelInstalled {
+            Button("Download", systemImage: "arrow.down") {
+              coordinator.downloadPersonalizationModel()
+            }
+            .disabled(coordinator.personalizationModelProgress != nil)
+          }
+        }
+        .padding(4)
+      }
+
+      Divider()
+
+      if coordinator.learnedCorrections.isEmpty {
+        ContentUnavailableView(
+          "Nothing Learned Yet",
+          systemImage: "brain.head.profile",
+          description: Text("After dictation, choose Teach Vani and save your correction.")
+        )
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+      } else {
+        List {
+          ForEach(coordinator.learnedCorrections) { correction in
+            VStack(alignment: .leading, spacing: 4) {
+              HStack(spacing: 8) {
+                Text(correction.spoken)
+                Image(systemName: "arrow.right")
+                  .foregroundStyle(.secondary)
+                Text(correction.replacement.isEmpty ? "Remove" : correction.replacement)
+                  .fontWeight(.medium)
+                Spacer()
+                if correction.confirmationCount > 1 {
+                  Text("×\(correction.confirmationCount)")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                }
+              }
+              if let bundleIdentifier = correction.applicationBundleIdentifier {
+                Text(bundleIdentifier)
+                  .font(.caption2.monospaced())
+                  .foregroundStyle(.tertiary)
+              }
+            }
+          }
+          .onDelete { coordinator.removeLearnedCorrections(at: $0) }
+        }
+      }
+
+      HStack {
+        Text(
+          "\(coordinator.learnedCorrections.count)/\(PersonalizationEngine.maximumCorrectionCount)"
+        )
+        .font(.caption.monospacedDigit())
+        .foregroundStyle(.secondary)
+        Spacer()
+        Button("Reset Learning", role: .destructive) {
+          confirmsReset = true
+        }
+        .disabled(coordinator.learnedCorrections.isEmpty)
+      }
+    }
+    .padding(20)
+    .confirmationDialog(
+      "Delete everything Vani learned?",
+      isPresented: $confirmsReset,
+      titleVisibility: .visible
+    ) {
+      Button("Reset Learning", role: .destructive) {
+        coordinator.clearLearnedCorrections()
+      }
+      Button("Cancel", role: .cancel) {}
+    } message: {
+      Text("This cannot be undone. Your manual dictionary is not affected.")
+    }
   }
 }
 
@@ -87,6 +229,15 @@ private struct GeneralSettingsView: View {
           isOn: Binding(
             get: { coordinator.settings.smartFormattingEnabled },
             set: { coordinator.setSmartFormattingEnabled($0) }
+          ))
+      }
+
+      Section("Feedback") {
+        Toggle(
+          "Play sounds when recording starts and stops",
+          isOn: Binding(
+            get: { coordinator.settings.soundFeedbackEnabled },
+            set: { coordinator.setSoundFeedbackEnabled($0) }
           ))
       }
 

@@ -96,7 +96,7 @@ printf '%s\n' \
     '2. Allow Microphone, Accessibility, and Input Monitoring access.' \
     '3. Download the verified 443 MiB English speech model.' \
     '4. In System Settings > Keyboard, set "Press Globe key to" to "Do Nothing".' \
-    '5. Hold Left Fn, speak, then release to insert text.'
+    '5. Hold Left Fn, speak, then release to insert text. Other hold keys are available in Settings.'
 
 if ! codesign -dv --verbose=4 "$DESTINATION_APP" 2>&1 \
     | grep -F 'Authority=Vani Local Development' >/dev/null; then

@@ -8,7 +8,7 @@ enum PinnedModelDownloadError: Error, Equatable {
 }
 
 actor PinnedModelDownloader {
-  typealias Fetch = @Sendable (URL) async throws -> (URL, URLResponse)
+  typealias Fetch = @Sendable (URL, Int) async throws -> (URL, URLResponse)
 
   private let repository: String
   private let revision: String
@@ -17,13 +17,13 @@ actor PinnedModelDownloader {
   private let fileManager: FileManager
   private let retryLimit: Int
 
-  private static let downloadSession: URLSession = {
+  private static func downloadConfiguration() -> URLSessionConfiguration {
     let configuration = URLSessionConfiguration.ephemeral
     configuration.timeoutIntervalForRequest = 120
     configuration.timeoutIntervalForResource = 1_800
     configuration.waitsForConnectivity = true
-    return URLSession(configuration: configuration)
-  }()
+    return configuration
+  }
 
   init(
     repository: String,
@@ -53,6 +53,7 @@ actor PinnedModelDownloader {
 
     let parentDirectory = targetDirectory.deletingLastPathComponent()
     try fileManager.createDirectory(at: parentDirectory, withIntermediateDirectories: true)
+    try recoverInterruptedReplacement(at: targetDirectory)
     let stagingRoot = parentDirectory.appendingPathComponent(
       ".vani-model-\(UUID().uuidString)",
       isDirectory: true
@@ -105,7 +106,7 @@ actor PinnedModelDownloader {
 
     for attempt in 1...retryLimit {
       do {
-        let (temporaryURL, response) = try await fetch(sourceURL)
+        let (temporaryURL, response) = try await fetch(sourceURL, expectedBytes)
         guard let response = response as? HTTPURLResponse,
           response.statusCode == 200,
           response.url?.scheme == "https"
@@ -144,7 +145,7 @@ actor PinnedModelDownloader {
     }
 
     let backup = target.deletingLastPathComponent().appendingPathComponent(
-      ".vani-model-backup-\(UUID().uuidString)",
+      "\(backupPrefix(for: target))\(UUID().uuidString)",
       isDirectory: true
     )
     try fileManager.moveItem(at: target, to: backup)
@@ -157,6 +158,38 @@ actor PinnedModelDownloader {
       }
       throw error
     }
+  }
+
+  private func recoverInterruptedReplacement(at target: URL) throws {
+    let parent = target.deletingLastPathComponent()
+    let prefix = backupPrefix(for: target)
+    let candidates = try fileManager.contentsOfDirectory(
+      at: parent,
+      includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey],
+      options: []
+    ).filter { url in
+      guard url.lastPathComponent.hasPrefix(prefix) else { return false }
+      guard
+        let values = try? url.resourceValues(forKeys: [
+          .isDirectoryKey,
+          .isSymbolicLinkKey,
+        ])
+      else {
+        return false
+      }
+      return values.isDirectory == true && values.isSymbolicLink != true
+    }.sorted { $0.lastPathComponent < $1.lastPathComponent }
+
+    if !fileManager.fileExists(atPath: target.path), let backup = candidates.last {
+      try fileManager.moveItem(at: backup, to: target)
+    }
+    for backup in candidates where fileManager.fileExists(atPath: backup.path) {
+      try? fileManager.removeItem(at: backup)
+    }
+  }
+
+  private func backupPrefix(for target: URL) -> String {
+    ".vani-model-backup-\(target.lastPathComponent)-"
   }
 
   private func isSafeRepository(_ value: String) -> Bool {
@@ -178,7 +211,104 @@ actor PinnedModelDownloader {
     !value.isEmpty && value != "." && value != ".." && !value.contains("\\")
   }
 
-  private static func defaultFetch(_ url: URL) async throws -> (URL, URLResponse) {
-    try await downloadSession.download(from: url)
+  private static func defaultFetch(_ url: URL, expectedBytes: Int) async throws
+    -> (URL, URLResponse)
+  {
+    let delegate = ByteLimitedDownloadDelegate(maximumBytes: expectedBytes)
+    return try await delegate.download(
+      from: url,
+      configuration: downloadConfiguration()
+    )
+  }
+}
+
+private final class ByteLimitedDownloadDelegate: NSObject, URLSessionDownloadDelegate,
+  @unchecked Sendable
+{
+  private let maximumBytes: Int64
+  private let lock = NSLock()
+  private var continuation: CheckedContinuation<(URL, URLResponse), any Error>?
+  private var completed = false
+
+  init(maximumBytes: Int) {
+    self.maximumBytes = Int64(max(0, maximumBytes))
+  }
+
+  func download(
+    from url: URL,
+    configuration: URLSessionConfiguration
+  ) async throws -> (URL, URLResponse) {
+    try await withCheckedThrowingContinuation { continuation in
+      lock.withLock {
+        self.continuation = continuation
+      }
+      let session = URLSession(configuration: configuration, delegate: self, delegateQueue: nil)
+      session.downloadTask(with: url).resume()
+    }
+  }
+
+  func urlSession(
+    _ session: URLSession,
+    downloadTask: URLSessionDownloadTask,
+    didWriteData bytesWritten: Int64,
+    totalBytesWritten: Int64,
+    totalBytesExpectedToWrite: Int64
+  ) {
+    guard totalBytesWritten <= maximumBytes,
+      totalBytesExpectedToWrite == NSURLSessionTransferSizeUnknown
+        || totalBytesExpectedToWrite <= maximumBytes
+    else {
+      downloadTask.cancel()
+      finish(.failure(PinnedModelDownloadError.invalidArtifact), session: session)
+      return
+    }
+  }
+
+  func urlSession(
+    _ session: URLSession,
+    downloadTask: URLSessionDownloadTask,
+    didFinishDownloadingTo location: URL
+  ) {
+    do {
+      let attributes = try FileManager.default.attributesOfItem(atPath: location.path)
+      guard let byteCount = (attributes[.size] as? NSNumber)?.int64Value,
+        byteCount == maximumBytes,
+        let response = downloadTask.response
+      else {
+        throw PinnedModelDownloadError.invalidArtifact
+      }
+      let retainedURL = FileManager.default.temporaryDirectory.appendingPathComponent(
+        "VaniPinnedDownload-\(UUID().uuidString)"
+      )
+      try FileManager.default.moveItem(at: location, to: retainedURL)
+      finish(.success((retainedURL, response)), session: session)
+    } catch {
+      finish(.failure(error), session: session)
+    }
+  }
+
+  func urlSession(
+    _ session: URLSession,
+    task: URLSessionTask,
+    didCompleteWithError error: (any Error)?
+  ) {
+    guard let error else { return }
+    finish(.failure(error), session: session)
+  }
+
+  private func finish(
+    _ result: Result<(URL, URLResponse), any Error>,
+    session: URLSession
+  ) {
+    let continuation = lock.withLock { () -> CheckedContinuation<(URL, URLResponse), any Error>? in
+      guard !completed else { return nil }
+      completed = true
+      let continuation = self.continuation
+      self.continuation = nil
+      return continuation
+    }
+    guard let continuation else { return }
+    session.finishTasksAndInvalidate()
+    continuation.resume(with: result)
   }
 }

@@ -57,6 +57,15 @@ one-pass snippet expansion, and optional deterministic Smart Formatting. Formatt
 recognizes a small fixed English command set; it does not use an LLM, surrounding
 application context, or network access.
 
+Opt-in personalization stores only confirmed correction spans in a separate versioned,
+bounded, atomic local profile. The profile actor serializes teach, delete, and reset
+transactions and quarantines unsafe data. Deterministic learned corrections run before
+the manual dictionary, while manual dictionary and snippet collisions are excluded.
+After two confirmations, up to 50 ranked terms can be passed to an optional experimental pinned CTC
+110M model for conservative acoustic rescoring. Any auxiliary-model failure returns the
+successful base TDT transcript. FluidAudio 0.15.5's rescoring path is disabled in Debug
+builds because that dependency enables content-bearing debug logs there.
+
 ## Insertion contract
 
 Vani records the focused process before capture and refuses insertion if the foreground
@@ -80,6 +89,10 @@ Settings are Codable values stored in `UserDefaults`. Optional history uses an
 atomic local JSON file, is bounded, and quarantines corrupt data. Recovery audio and
 the latest failed or successful transcript are memory-only. Diagnostics are bounded
 and metadata only.
+
+The personalization profile uses `personalization.json` in Application Support with a
+1 MiB pre-read ceiling, schema version, private permissions, atomic writes, and corrupt
+file quarantine. It is independent of transcript history and contains no audio.
 
 ## Dependency boundary
 

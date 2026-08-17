@@ -101,6 +101,14 @@ VANI_RUN_LONG_MODEL_TESTS=1 swift test -c release \
   --filter twentyMinuteEnglishFixtureTranscribesLocally
 ```
 
+The optional acoustic-personalization integration must run as a Release test because
+FluidAudio 0.15.5 enables transcript-bearing rescorer logs in Debug builds:
+
+```bash
+VANI_RUN_PERSONALIZATION_MODEL_TESTS=1 swift test -c release \
+  --filter bundledEnglishFixtureExercisesAcousticPersonalization
+```
+
 The full paged capture and 48 kHz conversion boundary is also opt-in:
 
 ```bash
@@ -126,8 +134,11 @@ VANI_RUN_LONG_AUDIO_TESTS=1 swift test -c release \
 - Settings: `~/Library/Preferences/com.mrinoy.vani.plist`
 - Optional history: `~/Library/Application Support/Vani/history.json` and quarantined
   `history.corrupt-*.json` files, all clearable from Settings
+- Learned corrections: `~/Library/Application Support/Vani/personalization.json`
 - Cache: `~/Library/Caches/com.mrinoy.vani`
 - Shared speech model: `~/Library/Application Support/FluidAudio/Models/parakeet-tdt-0.6b-v2`
+- Optional vocabulary model:
+  `~/Library/Application Support/FluidAudio/Models/parakeet-ctc-110m-coreml`
 
 The speech model is about 443 MiB and is shared through FluidAudio's model directory.
 Vani checks its exact file list, byte counts, and SHA-256 hashes before loading it.
