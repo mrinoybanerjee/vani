@@ -12,8 +12,11 @@ final class AppCoordinator: ObservableObject {
   @Published private(set) var accessibilityPermission: PermissionState = .denied
   @Published private(set) var inputMonitoringPermission: PermissionState = .denied
   @Published private(set) var modelInstalled = false
+  @Published private(set) var personalizationModelInstalled = false
+  @Published private(set) var personalizationModelProgress: Double?
   @Published private(set) var diagnostics: [DiagnosticEvent] = []
   @Published private(set) var history: [TranscriptHistoryEntry] = []
+  @Published private(set) var learnedCorrections: [LearnedCorrection] = []
   @Published private(set) var hasStoredHistoryData = false
   @Published private(set) var settingsError: String?
   @Published var settings: VaniSettings = .default
@@ -21,9 +24,11 @@ final class AppCoordinator: ObservableObject {
   private let settingsStore: SettingsStore
   private let historyStore: TranscriptHistoryStore
   private let diagnosticStore: DiagnosticStore
+  private let personalizationStore: PersonalizationStore
   private let session: DictationSession
   private let hotkeyMonitor = GlobalHotkeyMonitor()
   private let overlay = OverlayController()
+  private let cuePlayer = DictationCuePlayer()
   private var notificationTokens: [NSObjectProtocol] = []
   private var qaWindow: NSWindow?
   private var captureStartTask: Task<Void, Never>?
@@ -32,6 +37,8 @@ final class AppCoordinator: ObservableObject {
   private var sessionOperationGeneration: UInt64 = 0
   private var historyRevision: UInt64 = 0
   private var settingsRevision: UInt64 = 0
+  private var personalizationRevision: UInt64 = 0
+  private var startCueWasPreplayed = false
   private var isTerminating = false
   private var started = false
 
@@ -39,9 +46,11 @@ final class AppCoordinator: ObservableObject {
     let focusProvider = SystemFocusProvider()
     let historyStore = TranscriptHistoryStore()
     let diagnosticStore = DiagnosticStore.shared
+    let personalizationStore = PersonalizationStore()
     settingsStore = SettingsStore()
     self.historyStore = historyStore
     self.diagnosticStore = diagnosticStore
+    self.personalizationStore = personalizationStore
     session = DictationSession(
       audioCapture: AVAudioEngineCapture(),
       speechRecognizer: FluidAudioSpeechRecognizer(),
@@ -86,7 +95,15 @@ final class AppCoordinator: ObservableObject {
     guard !started else { return }
     started = true
     settings = await settingsStore.load()
+    do {
+      learnedCorrections = try await personalizationStore.load()
+    } catch {
+      learnedCorrections = []
+      settingsError = "Unreadable personalization data was quarantined."
+      recordDiagnostic(category: .storage, code: "personalization_load_failed")
+    }
     await session.updateSettings(settings)
+    await session.updatePersonalization(learnedCorrections)
     await session.setObserver { [weak self] snapshot in
       self?.apply(snapshot)
     }
@@ -107,6 +124,7 @@ final class AppCoordinator: ObservableObject {
     showQAWindowIfRequested()
     await refreshPermissions()
     modelInstalled = await session.modelsAreInstalled()
+    personalizationModelInstalled = await session.personalizationModelsAreInstalled()
     if modelInstalled, microphonePermission.isGranted {
       _ = await session.prepareModels(allowDownload: false)
     }
@@ -173,6 +191,27 @@ final class AppCoordinator: ObservableObject {
       _ = await session.prepareModels(allowDownload: true)
       modelInstalled = await session.modelsAreInstalled()
       await prepareWhenPossible()
+    }
+  }
+
+  func downloadPersonalizationModel() {
+    guard personalizationModelProgress == nil else { return }
+    personalizationModelProgress = 0
+    Task {
+      do {
+        try await session.preparePersonalizationModels { [weak self] progress in
+          Task { @MainActor in
+            self?.personalizationModelProgress = min(max(progress, 0), 1)
+          }
+        }
+        personalizationModelInstalled = await session.personalizationModelsAreInstalled()
+        settingsError = nil
+      } catch {
+        personalizationModelInstalled = await session.personalizationModelsAreInstalled()
+        settingsError = "The optional personalization model could not be installed."
+        recordDiagnostic(category: .storage, code: "personalization_model_install_failed")
+      }
+      personalizationModelProgress = nil
     }
   }
 
@@ -289,6 +328,93 @@ final class AppCoordinator: ObservableObject {
   func setSmartFormattingEnabled(_ enabled: Bool) {
     settings.smartFormattingEnabled = enabled
     persistSettings()
+  }
+
+  func setSoundFeedbackEnabled(_ enabled: Bool) {
+    settings.soundFeedbackEnabled = enabled
+    persistSettings()
+  }
+
+  func setPersonalizationEnabled(_ enabled: Bool) {
+    settings.personalizationEnabled = enabled
+    persistSettings()
+  }
+
+  func correctionCandidate() async -> CorrectionCandidate? {
+    await session.correctionCandidate()
+  }
+
+  func learnCorrection(
+    original: String,
+    corrected: String,
+    applicationBundleIdentifier: String?
+  ) async -> Bool {
+    personalizationRevision &+= 1
+    let revision = personalizationRevision
+    do {
+      let result = try await personalizationStore.learn(
+        original: original,
+        corrected: corrected,
+        applicationBundleIdentifier: applicationBundleIdentifier
+      )
+      guard !result.learned.isEmpty else {
+        if revision == personalizationRevision {
+          settingsError = "That edit did not contain a reusable correction."
+        }
+        return false
+      }
+      guard revision == personalizationRevision else { return false }
+      learnedCorrections = result.corrections
+      settings.personalizationEnabled = true
+      persistSettings()
+      await session.updatePersonalization(learnedCorrections)
+      return true
+    } catch {
+      if revision == personalizationRevision {
+        settingsError = "Vani could not save that correction."
+      }
+      recordDiagnostic(category: .storage, code: "personalization_save_failed")
+      return false
+    }
+  }
+
+  func removeLearnedCorrections(at offsets: IndexSet) {
+    let ids = Set(
+      offsets.compactMap { index in
+        learnedCorrections.indices.contains(index) ? learnedCorrections[index].id : nil
+      })
+    guard !ids.isEmpty else { return }
+    personalizationRevision &+= 1
+    let revision = personalizationRevision
+    Task {
+      do {
+        let updated = try await personalizationStore.remove(ids: ids)
+        guard revision == personalizationRevision else { return }
+        learnedCorrections = updated
+        await session.updatePersonalization(updated)
+      } catch {
+        guard revision == personalizationRevision else { return }
+        settingsError = "Vani could not delete that learned correction."
+        recordDiagnostic(category: .storage, code: "personalization_delete_failed")
+      }
+    }
+  }
+
+  func clearLearnedCorrections() {
+    personalizationRevision &+= 1
+    let revision = personalizationRevision
+    Task {
+      do {
+        try await personalizationStore.clear()
+        guard revision == personalizationRevision else { return }
+        learnedCorrections = []
+        await session.updatePersonalization([])
+      } catch {
+        guard revision == personalizationRevision else { return }
+        settingsError = "Vani could not reset its learned corrections."
+        recordDiagnostic(category: .storage, code: "personalization_clear_failed")
+      }
+    }
   }
 
   func setLaunchAtLogin(_ enabled: Bool) {
@@ -457,7 +583,22 @@ final class AppCoordinator: ObservableObject {
     let generation = captureStartGeneration
     captureStartTask = Task { [weak self] in
       guard let self else { return }
+      if settings.soundFeedbackEnabled {
+        startCueWasPreplayed = true
+        cuePlayer.play(.started)
+        try? await Task.sleep(
+          for: DictationCueWaveform.duration(for: .started) + .milliseconds(20)
+        )
+        guard !Task.isCancelled, generation == captureStartGeneration, canDictate else {
+          startCueWasPreplayed = false
+          captureStartTask = nil
+          return
+        }
+      }
       await session.beginDictation()
+      if snapshot.phase != .listening {
+        startCueWasPreplayed = false
+      }
       if generation == captureStartGeneration {
         captureStartTask = nil
       }
@@ -466,8 +607,14 @@ final class AppCoordinator: ObservableObject {
 
   private func endDictation() {
     let startTask = captureStartTask
+    captureStartGeneration &+= 1
+    let releaseGeneration = captureStartGeneration
+    startTask?.cancel()
     performSessionOperation { coordinator in
       await startTask?.value
+      if coordinator.captureStartGeneration == releaseGeneration {
+        coordinator.captureStartTask = nil
+      }
       guard !Task.isCancelled else { return }
       await coordinator.session.endDictation()
     }
@@ -492,6 +639,17 @@ final class AppCoordinator: ObservableObject {
     let previous = snapshot.phase
     snapshot = newSnapshot
     overlay.update(snapshot: newSnapshot, previousPhase: previous)
+    if let cue = DictationCueResolver.cue(
+      previousPhase: previous,
+      currentPhase: newSnapshot.phase,
+      enabled: settings.soundFeedbackEnabled
+    ) {
+      if cue == .started, startCueWasPreplayed {
+        startCueWasPreplayed = false
+      } else {
+        cuePlayer.play(cue)
+      }
+    }
     if previous == .inserting, newSnapshot.phase == .ready {
       Task { [weak self] in
         await self?.refreshHistory()
@@ -675,16 +833,32 @@ final class AppCoordinator: ObservableObject {
   }
 
   private func showQAWindowIfRequested() {
-    guard ProcessInfo.processInfo.environment["VANI_QA_WINDOW"] == "1" else { return }
+    guard let qaMode = ProcessInfo.processInfo.environment["VANI_QA_WINDOW"] else { return }
+    let showsSettings = qaMode == "settings"
+    guard qaMode == "1" || showsSettings else { return }
     let window = NSWindow(
-      contentRect: NSRect(x: 0, y: 0, width: 340, height: 360),
+      contentRect: NSRect(
+        x: 0,
+        y: 0,
+        width: showsSettings ? 600 : 340,
+        height: showsSettings ? 500 : 360
+      ),
       styleMask: [.titled, .closable, .miniaturizable],
       backing: .buffered,
       defer: false
     )
-    window.title = "Vani QA"
+    window.title = showsSettings ? "Vani Settings QA" : "Vani QA"
     window.contentViewController = NSHostingController(
-      rootView: MenuContentView().environmentObject(self)
+      rootView: AnyView(
+        Group {
+          if showsSettings {
+            SettingsView()
+          } else {
+            MenuContentView()
+          }
+        }
+        .environmentObject(self)
+      )
     )
     window.center()
     window.makeKeyAndOrderFront(nil)

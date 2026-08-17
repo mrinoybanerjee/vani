@@ -16,6 +16,7 @@ public actor DictationSession {
 
   private var machine = SessionStateMachine()
   private var settings: VaniSettings
+  private var learnedCorrections: [LearnedCorrection]
   private var failure: VaniFailure?
   private var modelProgress: Double?
   private var modelReady = false
@@ -27,6 +28,7 @@ public actor DictationSession {
   private var isPastingLastTranscript = false
   private var currentTarget: TextTarget?
   private var lastTranscript: String?
+  private var lastCorrectionCandidate: CorrectionCandidate?
   private var insertionFeedback: InsertionFeedback?
   private var observer: Observer?
   private var snapshotGeneration: UInt64 = 0
@@ -46,6 +48,7 @@ public actor DictationSession {
     audioPolicy: AudioPolicy = .default,
     textPipeline: TextPipeline = TextPipeline(),
     settings: VaniSettings = .default,
+    learnedCorrections: [LearnedCorrection] = [],
     transientFailureDuration: Duration = .milliseconds(1_000)
   ) {
     self.audioCapture = audioCapture
@@ -58,6 +61,7 @@ public actor DictationSession {
     self.audioPolicy = audioPolicy
     self.textPipeline = textPipeline
     self.settings = settings
+    self.learnedCorrections = PersonalizationEngine.normalizedProfile(learnedCorrections)
     self.transientFailureDuration = transientFailureDuration
   }
 
@@ -74,8 +78,26 @@ public actor DictationSession {
     await speechRecognizer.modelsAreInstalled()
   }
 
+  public func personalizationModelsAreInstalled() async -> Bool {
+    await speechRecognizer.personalizationModelsAreInstalled()
+  }
+
+  public func preparePersonalizationModels(
+    progress: @escaping @Sendable (Double) -> Void
+  ) async throws {
+    try await speechRecognizer.preparePersonalizationModels(progress: progress)
+  }
+
   public func updateSettings(_ settings: VaniSettings) {
     self.settings = settings
+  }
+
+  public func updatePersonalization(_ corrections: [LearnedCorrection]) {
+    learnedCorrections = PersonalizationEngine.normalizedProfile(corrections)
+  }
+
+  public func correctionCandidate() -> CorrectionCandidate? {
+    lastCorrectionCandidate
   }
 
   @discardableResult
@@ -181,6 +203,7 @@ public actor DictationSession {
   private func finishDictation(automaticallyStopped: Bool = false) async {
     cancelRecordingLimitTimer()
     do {
+      let audio = try await audioCapture.stop()
       try await transition(.captureStopped)
       if automaticallyStopped {
         await diagnostics.record(
@@ -191,7 +214,6 @@ public actor DictationSession {
           )
         )
       }
-      let audio = try await audioCapture.stop()
       guard machine.phase == .transcribing else { return }
       guard try await retainAndValidate(audio) else { return }
       try await transcribeAndInsert(audio)
@@ -507,21 +529,44 @@ public actor DictationSession {
 
   private func transcribeAndInsert(_ audio: CapturedAudio) async throws {
     let startedAt = Date()
+    let settingsSnapshot = settings
+    let correctionsSnapshot = learnedCorrections
+    let targetBundleIdentifier = currentTarget?.bundleIdentifier
     let result: SpeechResult
     do {
       let signpost = VaniSignpost.beginTranscription()
       defer { VaniSignpost.endTranscription(signpost) }
-      result = try await speechRecognizer.transcribe(audio)
+      let personalizedTerms =
+        settingsSnapshot.personalizationEnabled
+        ? PersonalizationEngine().activeAcousticTerms(
+          corrections: correctionsSnapshot,
+          applicationBundleIdentifier: targetBundleIdentifier,
+          manualDictionary: settingsSnapshot.dictionary,
+          snippets: settingsSnapshot.snippets
+        )
+        : []
+      result = try await speechRecognizer.transcribe(
+        audio,
+        context: SpeechRecognitionContext(personalizedTerms: personalizedTerms)
+      )
     }
     guard machine.phase == .transcribing else { return }
     let text = textPipeline.process(
       result.text,
-      dictionary: settings.dictionary,
-      snippets: settings.snippets,
-      smartFormattingEnabled: settings.smartFormattingEnabled
+      dictionary: settingsSnapshot.dictionary,
+      snippets: settingsSnapshot.snippets,
+      smartFormattingEnabled: settingsSnapshot.smartFormattingEnabled,
+      learnedCorrections: settingsSnapshot.personalizationEnabled ? correctionsSnapshot : [],
+      applicationBundleIdentifier: targetBundleIdentifier
     )
     guard !text.isEmpty else { throw VaniFailure.emptyTranscript }
     lastTranscript = text
+    lastCorrectionCandidate = CorrectionCandidate(
+      rawTranscript: result.rawText ?? result.text,
+      recognizedTranscript: result.text,
+      finalTranscript: text,
+      applicationBundleIdentifier: targetBundleIdentifier
+    )
 
     await diagnostics.record(
       DiagnosticEvent(
@@ -604,16 +649,8 @@ public actor DictationSession {
   }
 
   private func fail(_ failure: VaniFailure) async {
+    let failedPhase = machine.phase
     self.failure = failure
-    VaniLog.failure(failure, phase: machine.phase)
-    await diagnostics.record(
-      DiagnosticEvent(
-        category: diagnosticCategory(for: failure),
-        code: failure.code,
-        phase: machine.phase
-      )
-    )
-
     do {
       try machine.transition(.failed)
     } catch {
@@ -621,6 +658,14 @@ public actor DictationSession {
         self.failure = .internalInvariant
       }
     }
+    VaniLog.failure(failure, phase: failedPhase)
+    await diagnostics.record(
+      DiagnosticEvent(
+        category: diagnosticCategory(for: failure),
+        code: failure.code,
+        phase: failedPhase
+      )
+    )
     await publishSnapshot()
 
     guard failure.dismissesAutomatically else { return }

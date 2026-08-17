@@ -97,10 +97,12 @@ final class GlobalHotkeyMonitor {
       [weak self] event in
       let keyCode = Int64(event.keyCode)
       let functionModifierIsSet = event.modifierFlags.contains(.function)
+      let commandModifierIsSet = event.modifierFlags.contains(.command)
       Task { @MainActor [weak self] in
         self?.handleModifierEvent(
           keyCode: keyCode,
-          functionModifierIsSet: functionModifierIsSet
+          functionModifierIsSet: functionModifierIsSet,
+          commandModifierIsSet: commandModifierIsSet
         )
       }
     }
@@ -108,10 +110,12 @@ final class GlobalHotkeyMonitor {
       [weak self] event in
       let keyCode = Int64(event.keyCode)
       let functionModifierIsSet = event.modifierFlags.contains(.function)
+      let commandModifierIsSet = event.modifierFlags.contains(.command)
       Task { @MainActor [weak self] in
         self?.handleModifierEvent(
           keyCode: keyCode,
-          functionModifierIsSet: functionModifierIsSet
+          functionModifierIsSet: functionModifierIsSet,
+          commandModifierIsSet: commandModifierIsSet
         )
       }
       return event
@@ -120,7 +124,8 @@ final class GlobalHotkeyMonitor {
 
   private func handleModifierEvent(
     keyCode: Int64,
-    functionModifierIsSet: Bool
+    functionModifierIsSet: Bool,
+    commandModifierIsSet: Bool
   ) {
     let keyStateIsPressed = CGEventSource.keyState(
       .combinedSessionState,
@@ -130,7 +135,8 @@ final class GlobalHotkeyMonitor {
       typeRawValue: CGEventType.flagsChanged.rawValue,
       keyCode: keyCode,
       keyStateIsPressed: keyStateIsPressed,
-      functionModifierIsSet: functionModifierIsSet
+      functionModifierIsSet: functionModifierIsSet,
+      commandModifierIsSet: commandModifierIsSet
     )
   }
 
@@ -138,12 +144,27 @@ final class GlobalHotkeyMonitor {
     typeRawValue: UInt32,
     keyCode: Int64,
     keyStateIsPressed: Bool,
-    functionModifierIsSet: Bool
+    functionModifierIsSet: Bool,
+    commandModifierIsSet: Bool
   ) {
     guard let type = CGEventType(rawValue: typeRawValue) else { return }
     if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
       if let eventTap {
         CGEvent.tapEnable(tap: eventTap, enable: true)
+      }
+      return
+    }
+    if type == .flagsChanged,
+      shortcut.yieldsToCommandChord(
+        keyCode: keyCode,
+        keyStateIsPressed: keyStateIsPressed,
+        commandModifierIsSet: commandModifierIsSet
+      )
+    {
+      if isPressed {
+        isPressed = false
+        VaniLog.event(category: .capture, code: "shortcut_yielded_to_command_chord")
+        onRelease?()
       }
       return
     }
@@ -205,6 +226,7 @@ final class GlobalHotkeyMonitor {
       return Unmanaged.passUnretained(event)
     }
 
+    let commandModifierIsSet = event.flags.contains(.maskCommand)
     Task { @MainActor in
       let keyStateIsPressed = CGEventSource.keyState(
         .combinedSessionState,
@@ -217,7 +239,8 @@ final class GlobalHotkeyMonitor {
         typeRawValue: typeRawValue,
         keyCode: keyCode,
         keyStateIsPressed: keyStateIsPressed,
-        functionModifierIsSet: functionModifierIsSet
+        functionModifierIsSet: functionModifierIsSet,
+        commandModifierIsSet: commandModifierIsSet
       )
     }
     return Unmanaged.passUnretained(event)

@@ -8,8 +8,10 @@ import Testing
 func defaultSettingsUseLeftFunctionShortcut() {
   #expect(VaniSettings.default.shortcut == .function)
   #expect(HoldShortcut.function.label == "Left Fn")
+  #expect(HoldShortcut.leftControl.label == "Left Control")
   #expect(VaniSettings.default.snippets.isEmpty)
   #expect(!VaniSettings.default.smartFormattingEnabled)
+  #expect(VaniSettings.default.soundFeedbackEnabled)
 }
 
 @Test
@@ -36,6 +38,43 @@ func functionShortcutUsesEventModifierState() {
   #expect(HoldShortcut.function.matchesModifierEvent(keyCode: 0))
   #expect(HoldShortcut.rightOption.matchesModifierEvent(keyCode: 61))
   #expect(!HoldShortcut.rightOption.matchesModifierEvent(keyCode: 58))
+  #expect(HoldShortcut.leftControl.matchesModifierEvent(keyCode: 59))
+  #expect(!HoldShortcut.leftControl.matchesModifierEvent(keyCode: 62))
+  #expect(
+    HoldShortcut.leftControl.yieldsToCommandChord(
+      keyCode: 54,
+      keyStateIsPressed: true,
+      commandModifierIsSet: true
+    )
+  )
+  #expect(
+    HoldShortcut.leftControl.yieldsToCommandChord(
+      keyCode: 55,
+      keyStateIsPressed: true,
+      commandModifierIsSet: true
+    )
+  )
+  #expect(
+    HoldShortcut.leftControl.yieldsToCommandChord(
+      keyCode: 59,
+      keyStateIsPressed: true,
+      commandModifierIsSet: true
+    )
+  )
+  #expect(
+    !HoldShortcut.leftControl.yieldsToCommandChord(
+      keyCode: 54,
+      keyStateIsPressed: false,
+      commandModifierIsSet: false
+    )
+  )
+  #expect(
+    !HoldShortcut.rightOption.yieldsToCommandChord(
+      keyCode: 54,
+      keyStateIsPressed: true,
+      commandModifierIsSet: true
+    )
+  )
 }
 
 @Test
@@ -85,12 +124,13 @@ func settingsRoundTrip() async throws {
   let suite = "VaniCoreTests.\(UUID().uuidString)"
   let store = SettingsStore(suiteName: suite)
   let settings = VaniSettings(
-    shortcut: .function,
+    shortcut: .leftControl,
     historyEnabled: true,
     historyLimit: 42,
     dictionary: [DictionaryEntry(spoken: "voice", replacement: "Vani")],
     snippets: [SnippetEntry(trigger: "sign off", expansion: "Thanks,\nMrinoy")],
-    smartFormattingEnabled: true
+    smartFormattingEnabled: true,
+    soundFeedbackEnabled: false
   )
 
   try await store.save(settings)
@@ -128,6 +168,7 @@ func settingsFromEarlierVersionsKeepTheirSavedValues() async throws {
   #expect(loaded.dictionary.map(\.replacement) == ["Vani"])
   #expect(loaded.snippets.isEmpty)
   #expect(!loaded.smartFormattingEnabled)
+  #expect(loaded.soundFeedbackEnabled)
   await store.clearSuiteForTesting()
 }
 

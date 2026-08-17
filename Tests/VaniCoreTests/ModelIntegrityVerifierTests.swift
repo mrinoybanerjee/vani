@@ -52,6 +52,32 @@ func modelIntegrityRejectsSymlinkedArtifact() throws {
   }
 }
 
+@Test
+func personalizationManifestIsExactAndPinned() {
+  #expect(
+    ModelIntegrityVerifier.parakeetCtc110MRevision
+      == "accdafd8cf8a2ff1cabe3c11e54416b405d409aa"
+  )
+  #expect(ModelIntegrityVerifier.parakeetCtc110M.artifacts.count == 12)
+  #expect(
+    ModelIntegrityVerifier.parakeetCtc110M.artifacts.reduce(0) { $0 + $1.byteCount }
+      == 102_802_455
+  )
+  #expect(
+    Set(ModelIntegrityVerifier.parakeetCtc110M.artifacts.map(\.path)).count
+      == ModelIntegrityVerifier.parakeetCtc110M.artifacts.count
+  )
+}
+
+@Test
+func acousticPersonalizationHonorsTheBuildPrivacyGate() {
+  #if DEBUG
+    #expect(!FluidAudioSpeechRecognizer.acousticPersonalizationAvailableInCurrentBuild)
+  #else
+    #expect(FluidAudioSpeechRecognizer.acousticPersonalizationAvailableInCurrentBuild)
+  #endif
+}
+
 private struct ModelIntegrityFixture {
   let directory: URL
   let artifactURL: URL

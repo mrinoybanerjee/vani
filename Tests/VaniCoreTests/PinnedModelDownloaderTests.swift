@@ -31,7 +31,8 @@ func pinnedModelDownloaderInstallsOnlyVerifiedFiles() async throws {
     revision: testRevision,
     verifier: ModelIntegrityVerifier(artifacts: artifacts),
     retryLimit: 1,
-    fetch: { url in
+    fetch: { url, expectedBytes in
+      #expect(expectedBytes == 5)
       guard url.path.contains("/owner/model/resolve/\(testRevision)/") else {
         throw PinnedModelDownloadError.invalidSource
       }
@@ -64,7 +65,7 @@ func pinnedModelDownloaderRejectsUnsafePathsBeforeFetching() async {
       artifacts: [ModelArtifact(path: "../escape", byteCount: 1, sha256: "00")]
     ),
     retryLimit: 1,
-    fetch: { _ in throw PinnedModelDownloadError.invalidResponse }
+    fetch: { _, _ in throw PinnedModelDownloadError.invalidResponse }
   )
 
   await #expect(throws: PinnedModelDownloadError.invalidSource) {
@@ -94,7 +95,8 @@ func failedPinnedModelDownloadLeavesExistingDirectoryUntouched() async throws {
       ]
     ),
     retryLimit: 1,
-    fetch: { url in
+    fetch: { url, expectedBytes in
+      #expect(expectedBytes == 5)
       let temporaryURL = temporaryFileURL()
       try Data("bad".utf8).write(to: temporaryURL)
       let response = try #require(
@@ -108,6 +110,46 @@ func failedPinnedModelDownloadLeavesExistingDirectoryUntouched() async throws {
     try await downloader.install(at: target) { _ in }
   }
   #expect(try Data(contentsOf: marker) == Data("keep".utf8))
+}
+
+@Test
+func interruptedPinnedModelReplacementIsRecoveredBeforeDownloading() async throws {
+  let root = temporaryDirectory()
+  defer { try? FileManager.default.removeItem(at: root) }
+  try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+  let target = root.appendingPathComponent("model", isDirectory: true)
+  let backup = root.appendingPathComponent(
+    ".vani-model-backup-model-00000000-0000-0000-0000-000000000000",
+    isDirectory: true
+  )
+  try FileManager.default.createDirectory(at: backup, withIntermediateDirectories: true)
+  let marker = backup.appendingPathComponent("existing.txt")
+  try Data("recovered".utf8).write(to: marker)
+
+  let downloader = PinnedModelDownloader(
+    repository: "owner/model",
+    revision: testRevision,
+    verifier: ModelIntegrityVerifier(
+      artifacts: [
+        ModelArtifact(
+          path: "model.bin",
+          byteCount: 5,
+          sha256: "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+        )
+      ]
+    ),
+    retryLimit: 1,
+    fetch: { _, _ in throw PinnedModelDownloadError.invalidResponse }
+  )
+
+  await #expect(throws: PinnedModelDownloadError.invalidResponse) {
+    try await downloader.install(at: target) { _ in }
+  }
+  #expect(
+    try Data(contentsOf: target.appendingPathComponent("existing.txt"))
+      == Data("recovered".utf8)
+  )
+  #expect(!FileManager.default.fileExists(atPath: backup.path))
 }
 
 private func temporaryDirectory() -> URL {

@@ -24,7 +24,8 @@ Apple notarization.
 
 ## What Works
 
-- Hold Left Fn to dictate by default; Right Option and Right Command are available
+- Hold Left Fn to dictate by default; Left Control, Right Option, and Right Command are available
+- Short local sound cues confirm when recording actually starts and stops
 - One-time English Parakeet TDT v2 model download
 - Exact model-revision manifest with per-file SHA-256 verification
 - Local microphone capture and Core ML transcription
@@ -40,6 +41,8 @@ Apple notarization.
   sentence casing, and line breaks
 - Optional bounded history, disabled by default
 - Personal phrase dictionary and launch-at-login setting
+- Opt-in local learning from corrections, with transparent delete and reset controls
+- Optional experimental acoustic vocabulary boosting for repeatedly corrected terms
 - Metadata-only diagnostics with no transcript or audio content
 - Public-repository Swift CodeQL analysis and weekly dependency updates
 
@@ -72,7 +75,8 @@ The first source build can take several minutes. After Vani opens in the menu ba
 2. Download the verified 443 MiB English model once. It is the only required network
    download after the source dependencies are resolved.
 3. In System Settings > Keyboard, set "Press Globe key to" to "Do Nothing."
-4. Hold Left Fn, speak, then release to insert text.
+4. Hold Left Fn, speak, then release to insert text. Choose Left Control, Right Option,
+   or Right Command in Settings if you prefer, and turn sound feedback off there if needed.
 
 Snippets and Smart Formatting are available in Settings. Smart Formatting is off by
 default; enabling it recognizes `comma`, `period` or `full stop`, `question mark`,
@@ -81,6 +85,11 @@ default; enabling it recognizes `comma`, `period` or `full stop`, `question mark
 `uh`, and `erm` fillers and leaves links, email addresses, and snippet expansions
 unchanged. Spoken command words are necessarily interpreted as commands while the
 setting is on; turn it off when you need those words literally.
+
+Learning is also off by default. After dictation, **Teach** lets you correct the last
+transcript. Vani stores only the changed phrases on this Mac, never correction audio.
+After a term is confirmed twice, the optional experimental 98 MiB vocabulary model can use acoustic
+evidence for harder names and terminology. The model is not required for dictation.
 
 ## Updating Vani
 

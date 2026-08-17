@@ -2,7 +2,33 @@
 
 All notable changes follow semantic versioning.
 
-## Unreleased
+## 0.2.0 - 2026-08-16
+
+### Added
+
+- Add opt-in **Teach Vani** correction learning with a transparent local profile,
+  per-entry deletion, and full reset
+- Add optional experimental acoustic vocabulary boosting through a pinned Parakeet CTC
+  110M model after a term is confirmed twice
+- Add correction-diff, profile-storage, concurrency, model-integrity, false-positive,
+  Debug privacy-gate, and real Release-model integration coverage
+- Add Left Control as a hold-to-dictate shortcut option
+- Add short, locally generated start and stop recording sounds with a Settings toggle
+
+### Changed
+
+- Store learned corrections in a versioned, bounded, private, atomic Application
+  Support file rather than transcript history or preferences
+- Bound model downloads during transfer before verifying exact size and SHA-256 content
+
+### Fixed
+
+- Keep optional vocabulary failures from breaking a successful base transcription
+- Disable FluidAudio acoustic rescoring in Debug builds, where version 0.15.5 enables
+  transcript-bearing dependency logs
+- Cancel a delayed cue-backed recording start when the hold key is released
+- Let Command-Control Last Transcript chords take precedence over the Left Control hold key
+- Prevent learned corrections from composing and expanding a snippet trigger
 
 ## 0.1.4 - 2026-07-31
 

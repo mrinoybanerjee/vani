@@ -7,9 +7,33 @@ public struct TextPipeline: Sendable {
     _ rawText: String,
     dictionary: [DictionaryEntry],
     snippets: [SnippetEntry] = [],
-    smartFormattingEnabled: Bool = false
+    smartFormattingEnabled: Bool = false,
+    learnedCorrections: [LearnedCorrection] = [],
+    applicationBundleIdentifier: String? = nil
   ) -> String {
     var text = cleanSpacing(in: normalizeInlineWhitespace(rawText))
+    let beforePersonalization = text
+    let personalized = cleanSpacing(
+      in: PersonalizationEngine().apply(
+        text,
+        corrections: learnedCorrections,
+        manualDictionary: dictionary,
+        snippets: snippets,
+        applicationBundleIdentifier: applicationBundleIdentifier
+      )
+    )
+    if learnedCorrections.isEmpty || snippets.isEmpty {
+      text = personalized
+    } else {
+      let originalSnippetTriggerCounts = snippetTriggerCounts(snippets, in: text)
+      let personalizedSnippetTriggerCounts = snippetTriggerCounts(snippets, in: personalized)
+      let introducedSnippetTrigger = personalizedSnippetTriggerCounts.contains {
+        trigger, count in
+        count > originalSnippetTriggerCounts[trigger, default: 0]
+      }
+      text = introducedSnippetTrigger ? beforePersonalization : personalized
+    }
+    text = cleanSpacing(in: text)
     text = applyDictionary(dictionary, to: text)
 
     let protected = protectSnippets(snippets, in: text)
@@ -130,6 +154,40 @@ public struct TextPipeline: Sendable {
       mutable.replaceCharacters(in: match.range, with: replacement.token)
     }
     return (String(mutable), replacements)
+  }
+
+  private func snippetTriggerCounts(
+    _ snippets: [SnippetEntry],
+    in text: String
+  ) -> [String: Int] {
+    guard !snippets.isEmpty, !text.isEmpty else { return [:] }
+    var seen = Set<String>()
+    let triggers = snippets.compactMap { entry -> String? in
+      guard entry.isValid else { return nil }
+      let trigger = entry.normalizedTrigger
+      return seen.insert(trigger.lowercased()).inserted ? trigger : nil
+    }.sorted { lhs, rhs in
+      if lhs.count != rhs.count { return lhs.count > rhs.count }
+      return lhs.localizedStandardCompare(rhs) == .orderedAscending
+    }
+    guard !triggers.isEmpty else { return [:] }
+    let alternatives = triggers.map { NSRegularExpression.escapedPattern(for: $0) }
+      .joined(separator: "|")
+    guard
+      let expression = try? NSRegularExpression(
+        pattern: #"(?<![\p{L}\p{N}])(?:"# + alternatives + #")(?![\p{L}\p{N}])"#,
+        options: .caseInsensitive
+      )
+    else { return [:] }
+    let source = text as NSString
+    var counts: [String: Int] = [:]
+    for match in expression.matches(
+      in: text,
+      range: NSRange(location: 0, length: source.length)
+    ) {
+      counts[source.substring(with: match.range).lowercased(), default: 0] += 1
+    }
+    return counts
   }
 
   private func applySmartFormatting(to text: String) -> String {
