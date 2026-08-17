@@ -10,10 +10,6 @@ Hold a shortcut, speak English, and release. Vani transcribes on your Mac and
 inserts the result into the app you were using. There is no account, telemetry,
 cloud transcription, or generative rewriting.
 
-<p align="center">
-  <img src="Resources/Screenshots/vani-ready-dark.jpg" width="340" alt="Vani menu showing the Ready state and Left Fn shortcut">
-</p>
-
 ## Status
 
 Vani is a functional source beta for macOS 14 or newer on Apple Silicon. The core
