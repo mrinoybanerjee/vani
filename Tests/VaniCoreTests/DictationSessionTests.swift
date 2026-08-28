@@ -74,6 +74,9 @@ private actor MockSpeechRecognizer: SpeechRecognizing {
   private let prepareDelay: Duration?
   private let prepareFailure: VaniFailure?
   private let transcribeDelay: Duration?
+  private let pausesTranscription: Bool
+  private var transcriptionContinuation: CheckedContinuation<Void, Never>?
+  private var transcriptionReleased = false
   private(set) var prepareCount = 0
   private(set) var transcribeCount = 0
   private(set) var contexts: [SpeechRecognitionContext] = []
@@ -84,7 +87,8 @@ private actor MockSpeechRecognizer: SpeechRecognizing {
     modelCheckDelay: Duration? = nil,
     prepareDelay: Duration? = nil,
     prepareFailure: VaniFailure? = nil,
-    transcribeDelay: Duration? = nil
+    transcribeDelay: Duration? = nil,
+    pausesTranscription: Bool = false
   ) {
     self.results = results
     self.modelsInstalled = modelsInstalled
@@ -92,6 +96,7 @@ private actor MockSpeechRecognizer: SpeechRecognizing {
     self.prepareDelay = prepareDelay
     self.prepareFailure = prepareFailure
     self.transcribeDelay = transcribeDelay
+    self.pausesTranscription = pausesTranscription
   }
 
   func modelsAreInstalled() async -> Bool {
@@ -122,6 +127,11 @@ private actor MockSpeechRecognizer: SpeechRecognizing {
 
   func transcribe(_ audio: CapturedAudio) async throws -> SpeechResult {
     transcribeCount += 1
+    if pausesTranscription, !transcriptionReleased {
+      await withCheckedContinuation { continuation in
+        transcriptionContinuation = continuation
+      }
+    }
     if let transcribeDelay {
       try await Task.sleep(for: transcribeDelay)
     }
@@ -139,6 +149,12 @@ private actor MockSpeechRecognizer: SpeechRecognizing {
 
   func waitUntilTranscriptionStarts() async -> Bool {
     await waitUntilTranscriptionCount(1)
+  }
+
+  func resumeTranscription() {
+    transcriptionReleased = true
+    transcriptionContinuation?.resume()
+    transcriptionContinuation = nil
   }
 
   func waitUntilTranscriptionCount(_ count: Int) async -> Bool {
@@ -724,7 +740,7 @@ func terminationCancelsCaptureAndDisablesTheSession() async {
 func terminationDuringTranscriptionCannotInsertOrPublishALateFailure() async {
   let speech = MockSpeechRecognizer(
     results: [.success(speechResult("too late"))],
-    transcribeDelay: .milliseconds(50)
+    pausesTranscription: true
   )
   let insertion = MockTextInserter(results: [.success(.verified)])
   let session = DictationSession(
@@ -741,6 +757,7 @@ func terminationDuringTranscriptionCannotInsertOrPublishALateFailure() async {
   #expect(await speech.waitUntilTranscriptionStarts())
 
   await session.terminate()
+  await speech.resumeTranscription()
   await completion.value
 
   let snapshot = await session.snapshot()
