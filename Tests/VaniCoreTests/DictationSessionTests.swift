@@ -73,6 +73,9 @@ private actor MockSpeechRecognizer: SpeechRecognizing {
   private let modelCheckDelay: Duration?
   private let prepareDelay: Duration?
   private let prepareFailure: VaniFailure?
+  private let pausesPreparation: Bool
+  private var preparationContinuation: CheckedContinuation<Void, Never>?
+  private var preparationReleased = false
   private let transcribeDelay: Duration?
   private let pausesTranscription: Bool
   private var transcriptionContinuation: CheckedContinuation<Void, Never>?
@@ -87,6 +90,7 @@ private actor MockSpeechRecognizer: SpeechRecognizing {
     modelCheckDelay: Duration? = nil,
     prepareDelay: Duration? = nil,
     prepareFailure: VaniFailure? = nil,
+    pausesPreparation: Bool = false,
     transcribeDelay: Duration? = nil,
     pausesTranscription: Bool = false
   ) {
@@ -95,6 +99,7 @@ private actor MockSpeechRecognizer: SpeechRecognizing {
     self.modelCheckDelay = modelCheckDelay
     self.prepareDelay = prepareDelay
     self.prepareFailure = prepareFailure
+    self.pausesPreparation = pausesPreparation
     self.transcribeDelay = transcribeDelay
     self.pausesTranscription = pausesTranscription
   }
@@ -108,6 +113,11 @@ private actor MockSpeechRecognizer: SpeechRecognizing {
 
   func prepare(progress: @escaping @Sendable (Double) -> Void) async throws {
     prepareCount += 1
+    if pausesPreparation, !preparationReleased {
+      await withCheckedContinuation { continuation in
+        preparationContinuation = continuation
+      }
+    }
     if let prepareDelay {
       try await Task.sleep(for: prepareDelay)
     }
@@ -123,6 +133,12 @@ private actor MockSpeechRecognizer: SpeechRecognizing {
       try? await Task.sleep(for: .milliseconds(1))
     }
     return false
+  }
+
+  func resumePreparation() {
+    preparationReleased = true
+    preparationContinuation?.resume()
+    preparationContinuation = nil
   }
 
   func transcribe(_ audio: CapturedAudio) async throws -> SpeechResult {
@@ -1278,7 +1294,7 @@ func concurrentPreparationRequestsOnlyLoadOneModel() async throws {
 
 @Test @MainActor
 func permissionRevocationDuringPreparationReturnsToSetupWithoutInternalFailure() async throws {
-  let speech = MockSpeechRecognizer(results: [], prepareDelay: .milliseconds(25))
+  let speech = MockSpeechRecognizer(results: [], pausesPreparation: true)
   let session = DictationSession(
     audioCapture: MockAudioCapture(),
     speechRecognizer: speech,
@@ -1291,6 +1307,7 @@ func permissionRevocationDuringPreparationReturnsToSetupWithoutInternalFailure()
   #expect(await speech.waitUntilPreparationStarts())
   #expect(await session.snapshot().phase == .preparing)
   await session.permissionWasRevoked(.microphonePermissionDenied)
+  await speech.resumePreparation()
   _ = await preparation
 
   var snapshot = await session.snapshot()
