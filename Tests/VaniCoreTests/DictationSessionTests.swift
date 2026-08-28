@@ -318,18 +318,19 @@ func dictationSessionCompletesTheVerifiedHappyPath() async throws {
 }
 
 @Test @MainActor
-func recordingLimitWarnsThenAutomaticallyFinishesOnce() async throws {
+func recordingLimitRecordsWarningThenAutomaticallyFinishesOnce() async throws {
   let audio = MockAudioCapture(
     audio: CapturedAudio(samples: Array(repeating: 0.05, count: 1_600))
   )
   let speech = MockSpeechRecognizer(results: [.success(speechResult("long dictation"))])
   let insertion = MockTextInserter(results: [.success(.verified)])
+  let diagnostics = DiagnosticStore()
   let session = DictationSession(
     audioCapture: audio,
     speechRecognizer: speech,
     textInserter: insertion,
     focusProvider: MockFocusProvider(),
-    diagnostics: DiagnosticStore(),
+    diagnostics: diagnostics,
     audioPolicy: AudioPolicy(
       minimumDuration: 0.01,
       maximumDuration: 0.4,
@@ -339,16 +340,6 @@ func recordingLimitWarnsThenAutomaticallyFinishesOnce() async throws {
 
   #expect(await session.prepareModels(allowDownload: false))
   await session.beginDictation()
-
-  var observedWarning = false
-  for _ in 0..<1_000 {
-    if await session.snapshot().isRecordingLimitApproaching {
-      observedWarning = true
-      break
-    }
-    try await Task.sleep(for: .milliseconds(1))
-  }
-  #expect(observedWarning)
 
   var snapshot = await session.snapshot()
   for _ in 0..<1_000 {
@@ -361,6 +352,10 @@ func recordingLimitWarnsThenAutomaticallyFinishesOnce() async throws {
   #expect(await audio.stopCount == 1)
   #expect(await speech.transcribeCount == 1)
   #expect(insertion.insertedTexts == ["long dictation"])
+  let limitEventCodes = await diagnostics.snapshot().compactMap { event in
+    event.code.hasPrefix("capture_limit_") ? event.code : nil
+  }
+  #expect(limitEventCodes == ["capture_limit_warning", "capture_limit_auto_stop"])
 
   await session.endDictation()
   #expect(await audio.stopCount == 1)
