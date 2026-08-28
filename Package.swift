@@ -33,6 +33,10 @@ let package = Package(
       dependencies: ["VaniCore"],
       resources: [.copy("Fixtures")]
     ),
+    .testTarget(
+      name: "VaniAppTests",
+      dependencies: ["Vani"]
+    ),
   ],
   swiftLanguageModes: [.v6]
 )

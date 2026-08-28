@@ -73,7 +73,13 @@ private actor MockSpeechRecognizer: SpeechRecognizing {
   private let modelCheckDelay: Duration?
   private let prepareDelay: Duration?
   private let prepareFailure: VaniFailure?
+  private let pausesPreparation: Bool
+  private var preparationContinuation: CheckedContinuation<Void, Never>?
+  private var preparationReleased = false
   private let transcribeDelay: Duration?
+  private let pausesTranscription: Bool
+  private var transcriptionContinuation: CheckedContinuation<Void, Never>?
+  private var transcriptionReleased = false
   private(set) var prepareCount = 0
   private(set) var transcribeCount = 0
   private(set) var contexts: [SpeechRecognitionContext] = []
@@ -84,14 +90,18 @@ private actor MockSpeechRecognizer: SpeechRecognizing {
     modelCheckDelay: Duration? = nil,
     prepareDelay: Duration? = nil,
     prepareFailure: VaniFailure? = nil,
-    transcribeDelay: Duration? = nil
+    pausesPreparation: Bool = false,
+    transcribeDelay: Duration? = nil,
+    pausesTranscription: Bool = false
   ) {
     self.results = results
     self.modelsInstalled = modelsInstalled
     self.modelCheckDelay = modelCheckDelay
     self.prepareDelay = prepareDelay
     self.prepareFailure = prepareFailure
+    self.pausesPreparation = pausesPreparation
     self.transcribeDelay = transcribeDelay
+    self.pausesTranscription = pausesTranscription
   }
 
   func modelsAreInstalled() async -> Bool {
@@ -103,6 +113,11 @@ private actor MockSpeechRecognizer: SpeechRecognizing {
 
   func prepare(progress: @escaping @Sendable (Double) -> Void) async throws {
     prepareCount += 1
+    if pausesPreparation, !preparationReleased {
+      await withCheckedContinuation { continuation in
+        preparationContinuation = continuation
+      }
+    }
     if let prepareDelay {
       try await Task.sleep(for: prepareDelay)
     }
@@ -120,8 +135,19 @@ private actor MockSpeechRecognizer: SpeechRecognizing {
     return false
   }
 
+  func resumePreparation() {
+    preparationReleased = true
+    preparationContinuation?.resume()
+    preparationContinuation = nil
+  }
+
   func transcribe(_ audio: CapturedAudio) async throws -> SpeechResult {
     transcribeCount += 1
+    if pausesTranscription, !transcriptionReleased {
+      await withCheckedContinuation { continuation in
+        transcriptionContinuation = continuation
+      }
+    }
     if let transcribeDelay {
       try await Task.sleep(for: transcribeDelay)
     }
@@ -139,6 +165,12 @@ private actor MockSpeechRecognizer: SpeechRecognizing {
 
   func waitUntilTranscriptionStarts() async -> Bool {
     await waitUntilTranscriptionCount(1)
+  }
+
+  func resumeTranscription() {
+    transcriptionReleased = true
+    transcriptionContinuation?.resume()
+    transcriptionContinuation = nil
   }
 
   func waitUntilTranscriptionCount(_ count: Int) async -> Bool {
@@ -286,37 +318,30 @@ func dictationSessionCompletesTheVerifiedHappyPath() async throws {
 }
 
 @Test @MainActor
-func recordingLimitWarnsThenAutomaticallyFinishesOnce() async throws {
+func recordingLimitRecordsWarningThenAutomaticallyFinishesOnce() async throws {
   let audio = MockAudioCapture(
     audio: CapturedAudio(samples: Array(repeating: 0.05, count: 1_600))
   )
   let speech = MockSpeechRecognizer(results: [.success(speechResult("long dictation"))])
   let insertion = MockTextInserter(results: [.success(.verified)])
+  let diagnostics = DiagnosticStore()
+  var observedSnapshots: [SessionSnapshot] = []
   let session = DictationSession(
     audioCapture: audio,
     speechRecognizer: speech,
     textInserter: insertion,
     focusProvider: MockFocusProvider(),
-    diagnostics: DiagnosticStore(),
+    diagnostics: diagnostics,
     audioPolicy: AudioPolicy(
       minimumDuration: 0.01,
       maximumDuration: 0.4,
       minimumRootMeanSquare: 0.0015
     )
   )
+  await session.setObserver { observedSnapshots.append($0) }
 
   #expect(await session.prepareModels(allowDownload: false))
   await session.beginDictation()
-
-  var observedWarning = false
-  for _ in 0..<1_000 {
-    if await session.snapshot().isRecordingLimitApproaching {
-      observedWarning = true
-      break
-    }
-    try await Task.sleep(for: .milliseconds(1))
-  }
-  #expect(observedWarning)
 
   var snapshot = await session.snapshot()
   for _ in 0..<1_000 {
@@ -329,6 +354,21 @@ func recordingLimitWarnsThenAutomaticallyFinishesOnce() async throws {
   #expect(await audio.stopCount == 1)
   #expect(await speech.transcribeCount == 1)
   #expect(insertion.insertedTexts == ["long dictation"])
+  let limitEventCodes = await diagnostics.snapshot().compactMap { event in
+    event.code.hasPrefix("capture_limit_") ? event.code : nil
+  }
+  #expect(limitEventCodes == ["capture_limit_warning", "capture_limit_auto_stop"])
+  let warningIndex = try #require(
+    observedSnapshots.firstIndex {
+      $0.phase == .listening && $0.isRecordingLimitApproaching
+    }
+  )
+  let readyIndex = try #require(
+    observedSnapshots.lastIndex {
+      $0.phase == .ready && !$0.isRecordingLimitApproaching
+    }
+  )
+  #expect(warningIndex < readyIndex)
 
   await session.endDictation()
   #expect(await audio.stopCount == 1)
@@ -724,7 +764,7 @@ func terminationCancelsCaptureAndDisablesTheSession() async {
 func terminationDuringTranscriptionCannotInsertOrPublishALateFailure() async {
   let speech = MockSpeechRecognizer(
     results: [.success(speechResult("too late"))],
-    transcribeDelay: .milliseconds(50)
+    pausesTranscription: true
   )
   let insertion = MockTextInserter(results: [.success(.verified)])
   let session = DictationSession(
@@ -741,6 +781,7 @@ func terminationDuringTranscriptionCannotInsertOrPublishALateFailure() async {
   #expect(await speech.waitUntilTranscriptionStarts())
 
   await session.terminate()
+  await speech.resumeTranscription()
   await completion.value
 
   let snapshot = await session.snapshot()
@@ -1261,7 +1302,7 @@ func concurrentPreparationRequestsOnlyLoadOneModel() async throws {
 
 @Test @MainActor
 func permissionRevocationDuringPreparationReturnsToSetupWithoutInternalFailure() async throws {
-  let speech = MockSpeechRecognizer(results: [], prepareDelay: .milliseconds(25))
+  let speech = MockSpeechRecognizer(results: [], pausesPreparation: true)
   let session = DictationSession(
     audioCapture: MockAudioCapture(),
     speechRecognizer: speech,
@@ -1274,6 +1315,7 @@ func permissionRevocationDuringPreparationReturnsToSetupWithoutInternalFailure()
   #expect(await speech.waitUntilPreparationStarts())
   #expect(await session.snapshot().phase == .preparing)
   await session.permissionWasRevoked(.microphonePermissionDenied)
+  await speech.resumePreparation()
   _ = await preparation
 
   var snapshot = await session.snapshot()

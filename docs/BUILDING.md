@@ -127,6 +127,7 @@ VANI_RUN_LONG_AUDIO_TESTS=1 swift test -c release \
 | `INSTALL_ROOT` | Local destination, default `/Applications` |
 | `VANI_SKIP_OPEN=1` | Install without launching, for isolated automation |
 | `VANI_QA_WINDOW=1` | Show the menu content in a window for UI automation |
+| `VANI_QA_WINDOW=teach` | Show a correction editor with fixture text for UI automation |
 
 ## Local data
 

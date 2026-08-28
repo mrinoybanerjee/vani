@@ -4,13 +4,15 @@ Vani is a Swift 6 package with two production targets.
 
 ```text
 Vani (SwiftUI/AppKit, @MainActor)
-  -> DictationSession actor
-     -> AVAudioEngineCapture actor
-     -> FluidAudioSpeechRecognizer actor
-     -> TextPipeline value type
-     -> SystemTextInserter (@MainActor)
-     -> TranscriptRecovery actor
-     -> TranscriptHistoryStore actor
+  -> AppCoordinator
+     -> TeachWindowController (focusable correction window)
+     -> DictationSession actor
+        -> AVAudioEngineCapture actor
+        -> FluidAudioSpeechRecognizer actor
+        -> TextPipeline value type
+        -> SystemTextInserter (@MainActor)
+        -> TranscriptRecovery actor
+        -> TranscriptHistoryStore actor
 ```
 
 ## State ownership
@@ -18,6 +20,10 @@ Vani (SwiftUI/AppKit, @MainActor)
 `DictationSession` is the only owner of the operational phase. Its explicit state
 machine rejects duplicate and out-of-order events. UI receives immutable
 `SessionSnapshot` values and cannot mutate the state directly.
+
+`AppCoordinator` owns the standalone Teach Vani window. Reopening Teach brings the
+existing window forward so an unfinished correction is preserved, and application
+activation restores keyboard focus to its editor.
 
 The app moves through `setup`, `preparing`, `ready`, `listening`, `transcribing`,
 `inserting`, and `recoverableError`. Permission loss, sleep, audio-route changes,

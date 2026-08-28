@@ -2,6 +2,22 @@
 
 All notable changes follow semantic versioning.
 
+## 0.2.1 - 2026-08-28
+
+### Changed
+
+- Keep the Teach Vani editor visible and preserve an unfinished correction when Teach is
+  selected again
+- Let the correction window expand for larger accessibility text and wrapped content
+
+### Fixed
+
+- Make the Teach Vani correction field accept keyboard input and restore focus whenever
+  Vani becomes active
+- Keep the Teach UI automation fixture isolated from the real learned-corrections profile
+- Prevent repeated Save clicks from counting one correction more than once
+- Make timing-sensitive session coverage deterministic under parallel test execution
+
 ## 0.2.0 - 2026-08-16
 
 ### Added

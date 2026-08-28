@@ -67,7 +67,9 @@ then phrase length; at most 50 terms are supplied to acoustic rescoring.
 
 ## Correction flow
 
-1. After a successful dictation, **Teach Vani** opens the in-memory last transcript.
+1. After a successful dictation, **Teach Vani** opens the in-memory last transcript in
+   a focused correction window. Reopening Teach brings the same window forward without
+   discarding an unfinished edit.
 2. The user edits it and saves.
 3. A bounded word diff extracts changed spans. Unchanged text is not stored.
 4. Vani shows the learned corrections in Settings, where each can be deleted or all
