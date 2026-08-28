@@ -325,6 +325,7 @@ func recordingLimitRecordsWarningThenAutomaticallyFinishesOnce() async throws {
   let speech = MockSpeechRecognizer(results: [.success(speechResult("long dictation"))])
   let insertion = MockTextInserter(results: [.success(.verified)])
   let diagnostics = DiagnosticStore()
+  var observedSnapshots: [SessionSnapshot] = []
   let session = DictationSession(
     audioCapture: audio,
     speechRecognizer: speech,
@@ -337,6 +338,7 @@ func recordingLimitRecordsWarningThenAutomaticallyFinishesOnce() async throws {
       minimumRootMeanSquare: 0.0015
     )
   )
+  await session.setObserver { observedSnapshots.append($0) }
 
   #expect(await session.prepareModels(allowDownload: false))
   await session.beginDictation()
@@ -356,6 +358,17 @@ func recordingLimitRecordsWarningThenAutomaticallyFinishesOnce() async throws {
     event.code.hasPrefix("capture_limit_") ? event.code : nil
   }
   #expect(limitEventCodes == ["capture_limit_warning", "capture_limit_auto_stop"])
+  let warningIndex = try #require(
+    observedSnapshots.firstIndex {
+      $0.phase == .listening && $0.isRecordingLimitApproaching
+    }
+  )
+  let readyIndex = try #require(
+    observedSnapshots.lastIndex {
+      $0.phase == .ready && !$0.isRecordingLimitApproaching
+    }
+  )
+  #expect(warningIndex < readyIndex)
 
   await session.endDictation()
   #expect(await audio.stopCount == 1)
