@@ -16,7 +16,7 @@ All notable changes follow semantic versioning.
   Vani becomes active
 - Keep the Teach UI automation fixture isolated from the real learned-corrections profile
 - Prevent repeated Save clicks from counting one correction more than once
-- Make shutdown-time transcription cancellation coverage deterministic under parallel tests
+- Make timing-sensitive session coverage deterministic under parallel test execution
 
 ## 0.2.0 - 2026-08-16
 
