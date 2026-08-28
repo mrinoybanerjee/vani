@@ -82,8 +82,10 @@ default; enabling it recognizes `comma`, `period` or `full stop`, `question mark
 unchanged. Spoken command words are necessarily interpreted as commands while the
 setting is on; turn it off when you need those words literally.
 
-Learning is also off by default. After dictation, **Teach** lets you correct the last
-transcript. Vani stores only the changed phrases on this Mac, never correction audio.
+Learning is also off by default. After dictation, **Teach** opens a focused window for
+correcting the last transcript. If that window is already open, Vani brings it forward
+without discarding an unfinished edit. Vani stores only the changed phrases on this
+Mac, never correction audio.
 After a term is confirmed twice, the optional experimental 98 MiB vocabulary model can use acoustic
 evidence for harder names and terminology. The model is not required for dictation.
 
@@ -128,6 +130,8 @@ storage, and UI remain outside that callback. Dependencies are exact-pinned in
 `Package.resolved`.
 
 - [Architecture](docs/ARCHITECTURE.md)
+- [Product design](docs/PRODUCT_DESIGN.md)
+- [Local personalization](docs/PERSONALIZATION.md)
 - [Project provenance](docs/PROVENANCE.md)
 - [Privacy contract](PRIVACY.md)
 - [Security model](docs/SECURITY_MODEL.md)

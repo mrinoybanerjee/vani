@@ -18,11 +18,13 @@ someone who wants private English voice typing without an account or cloud servi
 ## Experience direction
 
 - Native system typography, materials, colors, controls, and accessibility behavior
-- Compact menu-bar popover and one settings window
+- Compact menu-bar popover, one settings window, and a focused correction window shown
+  only when the user chooses Teach
 - Non-activating upper-right overlay with listening, processing, success, and error
   states, positioned below the menu bar so it does not cover common text composers
 - Restrained 120 to 180 ms state transitions with Reduce Motion support
-- No onboarding carousel, dashboard, editor, decorative cards, or hidden background work
+- No onboarding carousel, dashboard, persistent document editor, decorative cards, or
+  hidden background work
 
 ## Reliability baseline
 
