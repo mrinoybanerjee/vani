@@ -29,6 +29,7 @@ final class AppCoordinator: ObservableObject {
   private let hotkeyMonitor = GlobalHotkeyMonitor()
   private let overlay = OverlayController()
   private let cuePlayer = DictationCuePlayer()
+  private let teachWindowController = TeachWindowController()
   private var notificationTokens: [NSObjectProtocol] = []
   private var qaWindow: NSWindow?
   private var captureStartTask: Task<Void, Never>?
@@ -121,7 +122,6 @@ final class AppCoordinator: ObservableObject {
       self?.copyLastTranscript()
     }
     installSystemObservers()
-    showQAWindowIfRequested()
     await refreshPermissions()
     modelInstalled = await session.modelsAreInstalled()
     personalizationModelInstalled = await session.personalizationModelsAreInstalled()
@@ -130,6 +130,7 @@ final class AppCoordinator: ObservableObject {
     }
     configureHotkey()
     await refreshHistory()
+    AppDelegate.coordinatorDidBecomeReady()
   }
 
   func requestMicrophonePermission() {
@@ -342,6 +343,14 @@ final class AppCoordinator: ObservableObject {
 
   func correctionCandidate() async -> CorrectionCandidate? {
     await session.correctionCandidate()
+  }
+
+  func prepareToShowTeachWindow() {
+    teachWindowController.requestActivation()
+  }
+
+  func showTeachWindow(for candidate: CorrectionCandidate) {
+    teachWindowController.present(candidate: candidate, coordinator: self)
   }
 
   func learnCorrection(
@@ -832,10 +841,20 @@ final class AppCoordinator: ObservableObject {
     NSWorkspace.shared.open(url)
   }
 
-  private func showQAWindowIfRequested() {
-    guard let qaMode = ProcessInfo.processInfo.environment["VANI_QA_WINDOW"] else { return }
-    let showsSettings = qaMode == "settings"
-    guard qaMode == "1" || showsSettings else { return }
+  func showQAWindowIfRequested() {
+    guard
+      let qaMode = QAWindowMode(
+        environmentValue: ProcessInfo.processInfo.environment["VANI_QA_WINDOW"]
+      )
+    else { return }
+    if qaMode == .teach {
+      teachWindowController.present(
+        candidate: TeachQAWindowFixture.candidate,
+        save: TeachQAWindowFixture.save
+      )
+      return
+    }
+    let showsSettings = qaMode == .settings
     let window = NSWindow(
       contentRect: NSRect(
         x: 0,

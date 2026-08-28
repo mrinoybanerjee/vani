@@ -177,7 +177,6 @@ private struct PreparationView: View {
 
 private struct ReadyView: View {
   @EnvironmentObject private var coordinator: AppCoordinator
-  @State private var correctionCandidate: CorrectionCandidate?
 
   var body: some View {
     VStack(alignment: .leading, spacing: 12) {
@@ -222,8 +221,10 @@ private struct ReadyView: View {
 
           if coordinator.settings.personalizationEnabled {
             Button("Teach", systemImage: "brain.head.profile") {
+              coordinator.prepareToShowTeachWindow()
               Task {
-                correctionCandidate = await coordinator.correctionCandidate()
+                guard let candidate = await coordinator.correctionCandidate() else { return }
+                coordinator.showTeachWindow(for: candidate)
               }
             }
             .help("Correct the last transcript and teach Vani")
@@ -232,19 +233,6 @@ private struct ReadyView: View {
           Spacer()
         }
         .controlSize(.small)
-      }
-    }
-    .sheet(
-      isPresented: Binding(
-        get: { correctionCandidate != nil },
-        set: { if !$0 { correctionCandidate = nil } }
-      )
-    ) {
-      if let correctionCandidate {
-        TeachVaniView(candidate: correctionCandidate) {
-          self.correctionCandidate = nil
-        }
-        .environmentObject(coordinator)
       }
     }
   }
@@ -269,61 +257,6 @@ private struct ReadyView: View {
 
   private var phaseColor: Color {
     coordinator.snapshot.phase == .listening ? .red : .teal
-  }
-}
-
-private struct TeachVaniView: View {
-  @EnvironmentObject private var coordinator: AppCoordinator
-  let candidate: CorrectionCandidate
-  let dismiss: () -> Void
-  @State private var corrected: String
-
-  init(candidate: CorrectionCandidate, dismiss: @escaping () -> Void) {
-    self.candidate = candidate
-    self.dismiss = dismiss
-    _corrected = State(initialValue: candidate.transcript)
-  }
-
-  var body: some View {
-    VStack(alignment: .leading, spacing: 12) {
-      Text("Teach Vani")
-        .font(.headline)
-      Text("Fix only what Vani got wrong. The correction is saved locally for future dictation.")
-        .font(.caption)
-        .foregroundStyle(.secondary)
-      TextEditor(text: $corrected)
-        .font(.body)
-        .frame(minHeight: 150)
-        .overlay {
-          RoundedRectangle(cornerRadius: 6)
-            .strokeBorder(.quaternary, lineWidth: 1)
-        }
-      HStack {
-        Text("This does not change text already inserted in another app.")
-          .font(.caption2)
-          .foregroundStyle(.tertiary)
-        Spacer()
-        Button("Cancel", action: dismiss)
-        Button("Save Learning") {
-          Task {
-            if await coordinator.learnCorrection(
-              original: candidate.transcript,
-              corrected: corrected,
-              applicationBundleIdentifier: candidate.applicationBundleIdentifier
-            ) {
-              dismiss()
-            }
-          }
-        }
-        .buttonStyle(.borderedProminent)
-        .disabled(
-          corrected.trimmingCharacters(in: .whitespacesAndNewlines)
-            == candidate.transcript.trimmingCharacters(in: .whitespacesAndNewlines)
-        )
-      }
-    }
-    .padding(20)
-    .frame(width: 520)
   }
 }
 
