@@ -157,6 +157,7 @@ public struct PersonalizationEngine: Sendable {
         $0.normalizedSpoken.lowercased() == spokenKey
           && $0.replacement.lowercased() == replacementKey
       }) {
+        profile[index].replacement = candidate.replacement
         profile[index].confirmationCount = min(profile[index].confirmationCount + 1, 10_000)
         profile[index].lastConfirmedAt = now
         if profile[index].applicationBundleIdentifier != candidate.applicationBundleIdentifier {

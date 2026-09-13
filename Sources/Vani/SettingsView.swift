@@ -18,15 +18,6 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
     case .diagnostics: "stethoscope"
     }
   }
-  var detail: String {
-    switch self {
-    case .general: "Make Vani feel like second nature."
-    case .vocabulary: "Your names, your words, your way."
-    case .snippets: "Say a little. Write a lot."
-    case .history: "A local record of what you said."
-    case .diagnostics: "A closer look when you need one."
-    }
-  }
 }
 
 struct SettingsView: View {
@@ -60,10 +51,8 @@ struct SettingsView: View {
       }.frame(width: 180).background(VaniTheme.sidebar)
       Divider()
       VStack(alignment: .leading, spacing: 0) {
-        VStack(alignment: .leading, spacing: 8) {
-          Text(selection.rawValue).font(.system(size: 28, weight: .regular, design: .serif))
-          Text(selection.detail).font(.system(size: 13)).foregroundStyle(.secondary)
-        }.padding(.horizontal, 28).padding(.top, 28).padding(.bottom, 12)
+        Text(selection.rawValue).font(.system(size: 28, weight: .regular, design: .serif))
+          .padding(.horizontal, 28).padding(.top, 28).padding(.bottom, 12)
         if let error = coordinator.settingsError {
           HStack(spacing: 8) {
             Label(error, systemImage: "exclamationmark.circle").font(.caption)
@@ -102,7 +91,7 @@ struct SettingsView: View {
 
 }
 
-private struct VocabularySettingsView: View {
+struct VocabularySettingsView: View {
   private enum Section: String, CaseIterable, Identifiable {
     case dictionary = "Dictionary"
     case learning = "Learning"
@@ -111,6 +100,8 @@ private struct VocabularySettingsView: View {
   }
 
   @State private var section = Section.dictionary
+  @State private var spoken = ""
+  @State private var replacement = ""
 
   var body: some View {
     VStack(spacing: 0) {
@@ -126,7 +117,7 @@ private struct VocabularySettingsView: View {
 
       switch section {
       case .dictionary:
-        DictionarySettingsView()
+        DictionarySettingsView(spoken: $spoken, replacement: $replacement)
       case .learning:
         PersonalizationSettingsView()
       }
@@ -300,8 +291,8 @@ private struct GeneralSettingsView: View {
 
 private struct DictionarySettingsView: View {
   @EnvironmentObject private var coordinator: AppCoordinator
-  @State private var spoken = ""
-  @State private var replacement = ""
+  @Binding var spoken: String
+  @Binding var replacement: String
 
   var body: some View {
     VStack(spacing: 12) {

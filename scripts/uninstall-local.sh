@@ -52,12 +52,25 @@ remove_path() {
     fi
 }
 
+wait_for_vani_exit() {
+    local attempt
+    for attempt in {1..20}; do
+        if ! pgrep -x Vani >/dev/null 2>&1; then
+            return 0
+        fi
+        sleep 0.25
+    done
+    return 1
+}
+
 if ((DRY_RUN)); then
     printf '[dry-run] quit Vani\n'
 else
     osascript -e 'tell application id "com.mrinoy.vani" to quit' >/dev/null 2>&1 || true
-    sleep 1
-    pkill -x Vani >/dev/null 2>&1 || true
+    if ! wait_for_vani_exit; then
+        echo "error: Vani is still running. Stop any meeting, save unfinished notes, quit Vani, then retry uninstalling. No files or permissions were removed." >&2
+        exit 1
+    fi
 fi
 
 remove_path "$APP_PATH"

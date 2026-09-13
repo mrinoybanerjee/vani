@@ -126,6 +126,25 @@ func appSpecificConflictsChooseOneRuleAndNeverCascade() {
 }
 
 @Test
+func latestConfirmedCasingUpdatesAnExistingCorrectionWithoutDuplicatingIt() {
+  let engine = PersonalizationEngine()
+  let first = engine.learn(
+    original: "Vanny", corrected: "Vani", applicationBundleIdentifier: "test.app", existing: [])
+  let second = engine.learn(
+    original: "Vanny", corrected: "VANI", applicationBundleIdentifier: "test.app",
+    existing: first.corrections)
+
+  #expect(second.corrections.count == 1)
+  #expect(second.corrections.first?.id == first.corrections.first?.id)
+  #expect(second.corrections.first?.confirmationCount == 2)
+  #expect(second.learned.first?.replacement == "VANI")
+  #expect(
+    engine.apply(
+      "Vanny works", corrections: second.corrections, manualDictionary: [],
+      applicationBundleIdentifier: "test.app") == "VANI works")
+}
+
+@Test
 func appSpecificCorrectionsNeverApplyOutsideTheirApp() {
   let correction = LearnedCorrection(
     spoken: "vanny",

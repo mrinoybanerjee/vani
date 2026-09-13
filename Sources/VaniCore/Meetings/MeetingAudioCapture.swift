@@ -150,29 +150,33 @@ final class MeetingStreamOutput: NSObject, SCStreamOutput, SCStreamDelegate, @un
           "The two-hour recording limit was reached. Stop this meeting and start a new one to continue."
         )
       }
-      var buffer = pending[source] ?? Pending()
-      if !buffer.samples.isEmpty
-        && (abs(buffer.rate - rate) > 0.5
-          || abs(offset - (buffer.offset + Double(buffer.samples.count) / buffer.rate)) > 0.5)
-      {
-        try flush(source)
-        buffer = Pending()
-      }
-      if buffer.samples.isEmpty {
-        buffer.rate = rate
-        buffer.offset = offset
-      }
-      guard buffer.samples.count + samples.count <= Int(rate * 25) else {
-        throw MeetingError.capture(
-          "Meeting audio could not be buffered safely. The saved audio is recoverable.")
-      }
-      buffer.samples.append(contentsOf: samples)
-      pending[source] = buffer
-      if Double(buffer.samples.count) / rate >= 20 { try flush(source) }
+      try append(samples, rate: rate, offset: offset, source: source)
     } catch {
       failed = true
       onFailure(error.localizedDescription)
     }
+  }
+
+  func append(_ samples: [Float], rate: Double, offset: TimeInterval, source: MeetingAudioSource)
+    throws
+  {
+    if let buffer = pending[source], !buffer.samples.isEmpty,
+      abs(buffer.rate - rate) > 0.5
+        || abs(offset - (buffer.offset + Double(buffer.samples.count) / buffer.rate)) > 0.5
+    {
+      try flush(source)
+    }
+    if pending[source]?.samples.isEmpty != false {
+      pending[source] = Pending(rate: rate, offset: offset)
+    }
+    guard (pending[source]?.samples.count ?? 0) + samples.count <= Int(rate * 25) else {
+      throw MeetingError.capture(
+        "Meeting audio could not be buffered safely. The saved audio is recoverable.")
+    }
+    // Mutate through Dictionary's modifying subscript. Copying Pending first
+    // shares its Array with the dictionary and copies the accumulated audio on every callback.
+    pending[source, default: Pending()].samples.append(contentsOf: samples)
+    if Double(pending[source]?.samples.count ?? 0) / rate >= 20 { try flush(source) }
   }
 
   func finish() throws {

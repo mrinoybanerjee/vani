@@ -47,6 +47,7 @@ struct MeetingView: View {
   @State private var tab = "My notes"
   @State private var confirmingCapture = false
   @State private var confirmingAudioRemoval = false
+  @State private var confirmingDiscard = false
 
   var body: some View {
     HSplitView {
@@ -97,6 +98,14 @@ struct MeetingView: View {
       Button("Keep audio", role: .cancel) {}
     } message: {
       Text("Your notes, transcript and summary will remain. Audio removal cannot be undone.")
+    }
+    .confirmationDialog("Discard unsaved meeting changes?", isPresented: $confirmingDiscard) {
+      Button("Discard Unsaved Changes", role: .destructive) { model.discardChanges() }
+      Button("Keep Editing", role: .cancel) {}
+    } message: {
+      Text(
+        "Export a copy first to keep your unsaved edits. Saved meeting data and captured audio will remain."
+      )
     }
   }
 
@@ -214,7 +223,7 @@ struct MeetingView: View {
         default:
           ZStack(alignment: .topLeading) {
             if model.draft?.notes.isEmpty == true {
-              Text("Your thoughts, alongside the conversation…")
+              Text("Add notes…")
                 .foregroundStyle(.secondary).padding(.horizontal, 5).allowsHitTesting(false)
             }
             TextEditor(
@@ -293,11 +302,7 @@ struct MeetingView: View {
     VStack(alignment: .leading, spacing: 20) {
       Image(systemName: "waveform").font(.system(size: 30, weight: .light)).foregroundStyle(
         VaniTheme.accent)
-      Text("Be in the conversation.").font(.system(size: 34, design: .serif))
-      Text(
-        "Capture your meeting. Keep your own notes.\nLeave with a transcript, decisions and next steps."
-      )
-      .font(.system(size: 15)).lineSpacing(6).foregroundStyle(.secondary)
+      Text("Meetings").font(.system(size: 34, design: .serif))
       Button("Start a meeting", systemImage: "mic") { confirmingCapture = true }
         .buttonStyle(.borderedProminent).controlSize(.large).disabled(!model.loaded || model.busy)
       Text("Microphone + Mac audio · Everything stays local")
@@ -310,6 +315,9 @@ struct MeetingView: View {
       if let error = model.error {
         Label(error, systemImage: "exclamationmark.circle").foregroundStyle(.red)
           .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+        if model.dirty && !model.busy {
+          Button("Discard Changes…") { confirmingDiscard = true }.disabled(model.saving)
+        }
         if !model.loaded { Button("Retry opening meetings") { Task { await model.load() } } }
         if model.transcriptionFailed && !model.busy {
           Button("Recover transcript") { Task { await model.recoverTranscript() } }

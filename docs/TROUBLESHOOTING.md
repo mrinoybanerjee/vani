@@ -116,6 +116,10 @@ already ready for another recording.
 
 ## Reporting a problem
 
+If saving a learned correction reports a storage error, keep the correction window open
+and retry after restoring disk access. A failed attempt to preserve an unreadable profile
+does not replace the original file with an empty profile.
+
 For meeting problems, keep the saved audio until transcript recovery succeeds. Use
 **Meeting actions → Recover transcript** to retry pending chunks. If summaries fail,
 start the local Ollama service with `qwen3:4b` installed and choose **Generate summary**.
