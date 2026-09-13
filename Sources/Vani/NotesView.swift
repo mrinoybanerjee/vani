@@ -221,14 +221,11 @@ struct NotesView: View {
       VStack(alignment: .leading, spacing: 20) {
         Image(systemName: "text.alignleft")
           .font(.system(size: 28, weight: .light)).foregroundStyle(VaniTheme.accent)
-        Text("Room to think.")
+        Text("Select or create a note")
           .font(.system(size: 34, weight: .regular, design: .serif))
-        Text("A thought, a draft, a little clarity.\nWrite it down or let your voice do the work.")
-          .font(.system(size: 15)).lineSpacing(6).foregroundStyle(.secondary)
         Button("Create a note", systemImage: "plus") { createNote() }
           .buttonStyle(.borderedProminent).controlSize(.large)
           .disabled(!model.loaded || model.busy)
-        Text("Private. Local. Yours.").font(.caption).foregroundStyle(.secondary)
       }
       .padding(40).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
     }

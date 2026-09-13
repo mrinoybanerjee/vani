@@ -110,7 +110,7 @@ final class AppCoordinator: ObservableObject {
       learnedCorrections = try await personalizationStore.load()
     } catch {
       learnedCorrections = []
-      settingsError = "Unreadable personalization data was quarantined."
+      settingsError = "Personalization could not be loaded."
       recordDiagnostic(category: .storage, code: "personalization_load_failed")
     }
     await session.updateSettings(settings)

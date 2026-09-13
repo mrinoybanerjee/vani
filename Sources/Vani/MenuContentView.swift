@@ -27,7 +27,7 @@ struct MenuContentView: View {
       Spacer()
       Label(
         statusLabel,
-        systemImage: coordinator.snapshot.phase == .ready ? "checkmark.circle" : "circle.dotted"
+        systemImage: coordinator.canDictate ? "checkmark.circle" : "circle.dotted"
       )
       .font(.caption)
       .foregroundStyle(.secondary)
@@ -52,7 +52,7 @@ struct MenuContentView: View {
       SetupView()
     case .ready where coordinator.meetingOwnsSpeech:
       VStack(alignment: .leading, spacing: 12) {
-        Text("In the conversation.").font(.system(size: 25, design: .serif))
+        Text("Meeting in progress").font(.system(size: 25, design: .serif))
         Text("Meeting audio is being captured or transcribed. Dictation returns when it finishes.")
           .font(.caption).foregroundStyle(.secondary)
         Button("Open meeting", systemImage: "waveform") { coordinator.showMeetings() }
@@ -97,6 +97,7 @@ struct MenuContentView: View {
   }
 
   private var statusLabel: String {
+    if coordinator.meetingOwnsSpeech { return "Meeting in progress" }
     if coordinator.snapshot.phase == .ready, coordinator.setupIncomplete {
       return "Setup"
     }
@@ -118,9 +119,7 @@ private struct SetupView: View {
 
   var body: some View {
     VStack(alignment: .leading, spacing: 16) {
-      Text("Make room for your voice.").font(.system(size: 23, design: .serif))
-      Text("A few permissions, then everything runs on this Mac.")
-        .font(.caption).foregroundStyle(.secondary)
+      Text("Set up Vani").font(.system(size: 23, design: .serif))
       PermissionRow(
         title: "Microphone",
         detail: "Hear you while you dictate",
@@ -206,17 +205,15 @@ private struct ReadyView: View {
   var body: some View {
     VStack(alignment: .leading, spacing: 12) {
       VStack(alignment: .leading, spacing: 18) {
-        Text(phaseTitle)
-          .font(.system(size: 28, weight: .regular, design: .serif))
         if coordinator.snapshot.phase == .ready {
-          Text("Your voice, wherever you write.")
-            .font(.system(size: 13)).foregroundStyle(.secondary)
           HStack(spacing: 10) {
             ShortcutKey(label: coordinator.settings.shortcut.label)
             Text("Hold to speak · Release to insert")
               .font(.caption).foregroundStyle(.secondary)
           }
         } else {
+          Text(phaseTitle)
+            .font(.system(size: 28, weight: .regular, design: .serif))
           HStack(spacing: 10) {
             Image(systemName: phaseIcon).foregroundStyle(phaseColor)
             Text(
@@ -271,7 +268,6 @@ private struct ReadyView: View {
 
   private var phaseTitle: String {
     switch coordinator.snapshot.phase {
-    case .ready: "A little less typing."
     case .listening: "Listening"
     case .transcribing: "Transcribing"
     case .inserting: "Inserting text"

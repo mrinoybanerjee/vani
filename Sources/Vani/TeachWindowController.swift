@@ -194,7 +194,7 @@ struct TeachVaniView: View {
 
   var body: some View {
     VStack(alignment: .leading, spacing: 16) {
-      Text("A little more like you.")
+      Text("Correct dictation")
         .font(.system(size: 26, weight: .regular, design: .serif))
       Text("Fix only what Vani got wrong. The correction is saved locally for future dictation.")
         .font(.subheadline)
