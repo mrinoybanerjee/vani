@@ -93,7 +93,8 @@ evidence for harder names and terminology. The model is not required for dictati
 Choose **Notes** in the menu to open your local notebook, or **Save as Note** after
 a dictation to keep its text. Notes are separate from optional transcript history.
 Use **Save** or Command-S; switching notes, closing the window, and quitting also
-save edits. A failed save keeps your draft open. Unsaved edits can be lost if the
+save edits. A failed save keeps your draft open. You can export a copy and confirm
+**Discard Changes** if saving cannot recover. Unsaved edits can be lost if the
 process crashes. Export writes a plain-text copy to a location you choose.
 
 Deleted notes remain in **Recently Deleted** until restored. The notebook keeps up

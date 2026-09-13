@@ -111,6 +111,11 @@ final class NotesModel: ObservableObject {
   }
 
   func report(_ failure: Error) { error = failure.localizedDescription }
+
+  func discardChanges() {
+    guard !busy else { return }
+    draft = notes.first { $0.id == draft?.id }
+  }
 }
 
 @MainActor
@@ -154,6 +159,7 @@ final class NotesWindowController: NSObject, NSWindowDelegate {
 
 private struct NotesView: View {
   @ObservedObject var model: NotesModel
+  @State private var confirmingDiscard = false
 
   var body: some View {
     VStack(spacing: 0) {
@@ -203,6 +209,10 @@ private struct NotesView: View {
       HStack {
         if let error = model.error {
           Text(error).foregroundStyle(.red).textSelection(.enabled)
+          if model.dirty {
+            Button("Discard Changes…") { confirmingDiscard = true }
+              .disabled(model.busy)
+          }
           if !model.loaded {
             Button("Retry") { Task { await model.load() } }
             Button("Restore Previous Copy") { Task { await model.restoreBackup() } }
@@ -215,6 +225,13 @@ private struct NotesView: View {
       }.font(.caption).padding(12)
     }
     .background(Color(nsColor: .windowBackgroundColor))
+    .confirmationDialog("Discard unsaved changes?", isPresented: $confirmingDiscard) {
+      Button("Discard Unsaved Changes", role: .destructive) { model.discardChanges() }
+      Button("Keep Editing", role: .cancel) {}
+    } message: {
+      Text(
+        "Only the unsaved edits will be discarded. Export a copy first if you want to keep them.")
+    }
   }
 
   @ViewBuilder private var editor: some View {

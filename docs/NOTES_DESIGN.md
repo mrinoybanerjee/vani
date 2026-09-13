@@ -12,6 +12,9 @@ and Restore. Notes are explicitly persisted independently of dictation history.
 Closing or switching notes saves the current edit first; a failed save retains
 the editor and prevents that transition. Save status stays visible. Unsaved
 edits can be lost in a process crash; this first release does not claim autosave.
+After a failed save, the user may export a copy and explicitly confirm discarding
+unsaved changes. This prevents an unrecoverable disk error from trapping the user
+in the application; it never discards automatically.
 
 ```
 Menu action -> NotesWindowController -> NotesModel -> NoteStore actor

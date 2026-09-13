@@ -54,6 +54,23 @@ struct NotesTests {
     #expect(model.draft?.text == "Saved while opening")
   }
 
+  @Test func explicitDiscardAfterFailureRestoresSavedTextWithoutWriting() async throws {
+    let (directory, model) = fixture()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    await model.create(text: "Previously saved")
+    model.draft?.text = "Unsaved edit"
+    let file = directory.appendingPathComponent("notes.json")
+    try Data("corrupt".utf8).write(to: file)
+    #expect(await model.save() == false)
+    #expect(model.draft?.text == "Unsaved edit")
+    model.discardChanges()
+    #expect(model.draft?.text == "Previously saved")
+    #expect(!model.dirty)
+    #expect(model.error != nil)
+    #expect(await model.save())
+    #expect(try String(contentsOf: file, encoding: .utf8) == "corrupt")
+  }
+
   @Test func closingSavesEditsBeforeHidingTheWindow() async throws {
     let (directory, model) = fixture()
     defer { try? FileManager.default.removeItem(at: directory) }
