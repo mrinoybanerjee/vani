@@ -3,45 +3,6 @@ import SwiftUI
 import UniformTypeIdentifiers
 import VaniCore
 
-@MainActor
-final class MeetingWindowController: NSObject, NSWindowDelegate {
-  let model: MeetingModel
-  private(set) var window: NSWindow?
-  private var closing = false
-  init(model: MeetingModel) { self.model = model }
-
-  func present() {
-    if window == nil {
-      let window = NSWindow(
-        contentRect: NSRect(x: 0, y: 0, width: 1060, height: 720),
-        styleMask: [.titled, .closable, .resizable, .miniaturizable], backing: .buffered,
-        defer: false)
-      window.title = "Vani Meetings"
-      window.contentMinSize = NSSize(width: 780, height: 520)
-      window.isReleasedWhenClosed = false
-      window.delegate = self
-      window.contentViewController = NSHostingController(rootView: MeetingView(model: model))
-      window.setContentSize(NSSize(width: 1060, height: 720))
-      window.center()
-      self.window = window
-    }
-    NSApplication.shared.activate()
-    window?.makeKeyAndOrderFront(nil)
-    Task { await model.load() }
-  }
-
-  func windowShouldClose(_ sender: NSWindow) -> Bool {
-    guard !closing else { return false }
-    guard model.dirty || model.saving else { return true }
-    closing = true
-    Task {
-      if await model.prepareToClose() { sender.close() }
-      closing = false
-    }
-    return false
-  }
-}
-
 struct MeetingView: View {
   @ObservedObject var model: MeetingModel
   @State private var tab = "My notes"
@@ -50,110 +11,62 @@ struct MeetingView: View {
   @State private var confirmingDiscard = false
 
   var body: some View {
-    HSplitView {
-      library
-      VStack(alignment: .leading, spacing: 0) {
-        toolbar
-        Divider()
-        if model.draft != nil { detail } else { welcome }
-        status
-      }.frame(minWidth: 480, maxWidth: .infinity, maxHeight: .infinity)
-        .background(VaniTheme.paper)
-    }
-    .tint(VaniTheme.accent).background(VaniTheme.paper)
-    .task(id: model.draft?.notes) {
-      do {
-        try await Task.sleep(for: .milliseconds(600))
-        while model.saving { try await Task.sleep(for: .milliseconds(10)) }
-        if !Task.isCancelled { await model.save() }
-      } catch {}
-    }
-    .task(id: model.draft?.title) {
-      do {
-        try await Task.sleep(for: .milliseconds(600))
-        while model.saving { try await Task.sleep(for: .milliseconds(10)) }
-        if !Task.isCancelled { await model.save() }
-      } catch {}
-    }
-    .confirmationDialog(
-      "Start a meeting recording?", isPresented: $confirmingCapture, titleVisibility: .visible
-    ) {
-      Button("Start recording") {
-        Task {
-          await model.start()
-          tab = "My notes"
-        }
+    VStack(alignment: .leading, spacing: 0) {
+      toolbar
+      Divider()
+      if model.draft != nil { detail } else { welcome }
+      status
+    }.frame(maxWidth: .infinity, maxHeight: .infinity)
+      .tint(VaniTheme.accent).background(VaniTheme.paper)
+      .onChange(of: model.draft?.id) {
+        tab = model.draft?.summary.isEmpty == false ? "Summary" : "My notes"
       }
-      Button("Cancel", role: .cancel) {}
-    } message: {
-      Text(
-        "Vani records your microphone and other Mac audio. Let participants know before starting. Use headphones to reduce echo. Audio, transcription and summaries stay on this Mac."
-      )
-    }
-    .confirmationDialog(
-      "Remove this meeting’s saved audio?", isPresented: $confirmingAudioRemoval,
-      titleVisibility: .visible
-    ) {
-      Button("Remove audio", role: .destructive) { Task { await model.clearAudio() } }
-      Button("Keep audio", role: .cancel) {}
-    } message: {
-      Text("Your notes, transcript and summary will remain. Audio removal cannot be undone.")
-    }
-    .confirmationDialog("Discard unsaved meeting changes?", isPresented: $confirmingDiscard) {
-      Button("Discard Unsaved Changes", role: .destructive) { model.discardChanges() }
-      Button("Keep Editing", role: .cancel) {}
-    } message: {
-      Text(
-        "Export a copy first to keep your unsaved edits. Saved meeting data and captured audio will remain."
-      )
-    }
-  }
-
-  private var library: some View {
-    VStack(alignment: .leading, spacing: 18) {
-      VaniWordmark().padding(.top, 24)
-      Text("MEETINGS").font(.system(size: 10, weight: .semibold)).tracking(1.2).foregroundStyle(
-        .secondary)
-      HStack {
-        Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-        TextField("Search meetings", text: $model.search).textFieldStyle(.plain).accessibilityLabel(
-          "Search meetings")
-      }.padding(10).background(VaniTheme.paper, in: RoundedRectangle(cornerRadius: 8))
-      ScrollView {
-        LazyVStack(alignment: .leading, spacing: 6) {
-          ForEach(model.visibleMeetings) { meeting in
-            Button {
-              Task {
-                await model.select(meeting)
-                tab = meeting.summary.isEmpty ? "My notes" : "Summary"
-              }
-            } label: {
-              VStack(alignment: .leading, spacing: 8) {
-                Text(meeting.title).font(.system(size: 14, weight: .semibold)).lineLimit(2)
-                Text(meeting.createdAt, format: .dateTime.month(.abbreviated).day().hour().minute())
-                  .font(.caption).foregroundStyle(.secondary)
-                if meeting.endedAt == nil && model.phase == .idle {
-                  Label("Interrupted · recover", systemImage: "arrow.clockwise")
-                    .font(.caption).foregroundStyle(.secondary)
-                }
-              }.frame(maxWidth: .infinity, alignment: .leading).padding(12)
-                .background(
-                  model.draft?.id == meeting.id ? VaniTheme.paper : .clear,
-                  in: RoundedRectangle(cornerRadius: 9))
-            }.buttonStyle(.plain).disabled(model.busy || model.saving)
-          }
-          if model.visibleMeetings.isEmpty {
-            Text(
-              model.search.isEmpty ? "Your conversations will appear here." : "No matching meetings"
-            )
-            .font(.caption).foregroundStyle(.secondary).padding(.top, 12)
+      .task(id: model.draft?.notes) {
+        do {
+          try await Task.sleep(for: .milliseconds(600))
+          while model.saving { try await Task.sleep(for: .milliseconds(10)) }
+          if !Task.isCancelled { await model.save() }
+        } catch {}
+      }
+      .task(id: model.draft?.title) {
+        do {
+          try await Task.sleep(for: .milliseconds(600))
+          while model.saving { try await Task.sleep(for: .milliseconds(10)) }
+          if !Task.isCancelled { await model.save() }
+        } catch {}
+      }
+      .confirmationDialog(
+        "Start a meeting recording?", isPresented: $confirmingCapture, titleVisibility: .visible
+      ) {
+        Button("Start recording") {
+          Task {
+            await model.start()
+            tab = "My notes"
           }
         }
+        Button("Cancel", role: .cancel) {}
+      } message: {
+        Text(
+          "Vani records your microphone and other Mac audio. Let participants know before starting. Use headphones to reduce echo. Audio, transcription and summaries stay on this Mac."
+        )
       }
-      Label("Stored on this Mac", systemImage: "internaldrive")
-        .font(.caption).foregroundStyle(.secondary).padding(.bottom, 20)
-    }.padding(.horizontal, 20).frame(minWidth: 240, idealWidth: 260, maxWidth: 300)
-      .background(VaniTheme.sidebar)
+      .confirmationDialog(
+        "Remove this meeting’s saved audio?", isPresented: $confirmingAudioRemoval,
+        titleVisibility: .visible
+      ) {
+        Button("Remove audio", role: .destructive) { Task { await model.clearAudio() } }
+        Button("Keep audio", role: .cancel) {}
+      } message: {
+        Text("Your notes, transcript and summary will remain. Audio removal cannot be undone.")
+      }
+      .confirmationDialog("Discard unsaved meeting changes?", isPresented: $confirmingDiscard) {
+        Button("Discard Unsaved Changes", role: .destructive) { model.discardChanges() }
+        Button("Keep Editing", role: .cancel) {}
+      } message: {
+        Text(
+          "Export a copy first to keep your unsaved edits. Saved meeting data and captured audio will remain."
+        )
+      }
   }
 
   private var toolbar: some View {
@@ -203,19 +116,11 @@ struct MeetingView: View {
       )
       .textFieldStyle(.plain).font(.system(size: 28, weight: .medium, design: .serif))
       .accessibilityLabel("Meeting title")
-      HStack(spacing: 18) {
+      Picker("Meeting section", selection: $tab) {
         ForEach(["My notes", "Transcript", "Summary"], id: \.self) { name in
-          Button {
-            tab = name
-          } label: {
-            VStack(spacing: 8) {
-              Text(name).font(.system(size: 13, weight: tab == name ? .semibold : .regular))
-              Rectangle().fill(tab == name ? VaniTheme.accent : .clear).frame(height: 2)
-            }
-          }.buttonStyle(.plain).accessibilityAddTraits(tab == name ? .isSelected : [])
+          Text(name).tag(name)
         }
-        Spacer()
-      }
+      }.pickerStyle(.segmented).labelsHidden()
       Group {
         switch tab {
         case "Transcript": transcript
@@ -359,4 +264,53 @@ struct MeetingView: View {
       }
     }
   }
+}
+
+struct MeetingLibraryView: View {
+  @ObservedObject var model: MeetingModel
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 18) {
+      HStack {
+        Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+        TextField("Search meetings", text: $model.search).textFieldStyle(.plain).accessibilityLabel(
+          "Search meetings")
+      }.padding(10).background(VaniTheme.paper, in: RoundedRectangle(cornerRadius: 8))
+      ScrollView {
+        LazyVStack(alignment: .leading, spacing: 6) {
+          ForEach(model.visibleMeetings) { meeting in
+            Button {
+              Task {
+                await model.select(meeting)
+              }
+            } label: {
+              VStack(alignment: .leading, spacing: 8) {
+                Text(meeting.title).font(.system(size: 14, weight: .semibold)).lineLimit(2)
+                Text(meeting.createdAt, format: .dateTime.month(.abbreviated).day().hour().minute())
+                  .font(.caption).foregroundStyle(.secondary)
+                if meeting.endedAt == nil && model.phase == .idle {
+                  Label("Interrupted · recover", systemImage: "arrow.clockwise")
+                    .font(.caption).foregroundStyle(.secondary)
+                }
+              }.frame(maxWidth: .infinity, alignment: .leading).padding(12)
+                .background(
+                  model.draft?.id == meeting.id ? VaniTheme.paper : .clear,
+                  in: RoundedRectangle(cornerRadius: 9))
+            }.buttonStyle(.plain).disabled(model.busy || model.saving)
+              .accessibilityAddTraits(model.draft?.id == meeting.id ? .isSelected : [])
+          }
+          if model.visibleMeetings.isEmpty {
+            Text(
+              model.search.isEmpty ? "No meetings yet" : "No matching meetings"
+            )
+            .font(.caption).foregroundStyle(.secondary).padding(.top, 12)
+          }
+        }
+      }
+      Label("Stored on this Mac", systemImage: "internaldrive")
+        .font(.caption).foregroundStyle(.secondary).padding(.bottom, 20)
+    }.padding(.horizontal, 20).padding(.top, 20)
+      .background(VaniTheme.sidebar)
+  }
+
 }

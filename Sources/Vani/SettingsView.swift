@@ -9,15 +9,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
   case diagnostics = "Diagnostics"
 
   var id: Self { self }
-  var icon: String {
-    switch self {
-    case .general: "slider.horizontal.3"
-    case .vocabulary: "character.book.closed"
-    case .snippets: "text.badge.plus"
-    case .history: "clock"
-    case .diagnostics: "stethoscope"
-    }
-  }
+
 }
 
 struct SettingsView: View {
@@ -25,59 +17,39 @@ struct SettingsView: View {
   @State private var selection = SettingsSection.general
 
   var body: some View {
-    HStack(spacing: 0) {
-      VStack(alignment: .leading, spacing: 0) {
-        VaniWordmark().padding(24)
-        Text("SETTINGS").font(.system(size: 10, weight: .semibold))
-          .tracking(1.2).foregroundStyle(.secondary).padding(.horizontal, 24).padding(.bottom, 12)
+    VStack(alignment: .leading, spacing: 0) {
+      Text("Settings").font(.system(size: 28, weight: .regular, design: .serif))
+        .padding(.horizontal, 28).padding(.top, 28).padding(.bottom, 20)
+      Picker("Settings section", selection: $selection) {
         ForEach(SettingsSection.allCases) { section in
+          Text(section.rawValue).tag(section)
+        }
+      }
+      .pickerStyle(.segmented).labelsHidden()
+      .padding(.horizontal, 28).padding(.bottom, 12)
+      if let error = coordinator.settingsError {
+        HStack(spacing: 8) {
+          Label(error, systemImage: "exclamationmark.circle").font(.caption)
+            .foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
+          Spacer()
           Button {
-            selection = section
+            coordinator.dismissSettingsError()
           } label: {
-            Label(section.rawValue, systemImage: section.icon)
-              .font(.system(size: 13, weight: selection == section ? .semibold : .regular))
-              .frame(maxWidth: .infinity, alignment: .leading).padding(12)
-              .background(
-                selection == section ? VaniTheme.paper : .clear,
-                in: RoundedRectangle(cornerRadius: 8)
-              )
-              .contentShape(Rectangle())
-          }.buttonStyle(.plain).padding(.horizontal, 12).padding(.vertical, 2)
-            .accessibilityAddTraits(selection == section ? .isSelected : [])
-        }
-        Spacer()
-        Label("On this Mac", systemImage: "lock")
-          .font(.caption).foregroundStyle(.secondary).padding(24)
-      }.frame(width: 180).background(VaniTheme.sidebar)
-      Divider()
-      VStack(alignment: .leading, spacing: 0) {
-        Text(selection.rawValue).font(.system(size: 28, weight: .regular, design: .serif))
-          .padding(.horizontal, 28).padding(.top, 28).padding(.bottom, 12)
-        if let error = coordinator.settingsError {
-          HStack(spacing: 8) {
-            Label(error, systemImage: "exclamationmark.circle").font(.caption)
-              .foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
-            Spacer()
-            Button {
-              coordinator.dismissSettingsError()
-            } label: {
-              Image(systemName: "xmark.circle")
-            }
-            .buttonStyle(.plain).accessibilityLabel("Dismiss error")
-          }.padding(.horizontal, 28).padding(.vertical, 8)
-        }
-        ZStack {
-          retained(GeneralSettingsView(), for: .general)
-          retained(VocabularySettingsView(), for: .vocabulary)
-          retained(SnippetSettingsView(), for: .snippets)
-          retained(HistorySettingsView(), for: .history)
-          retained(DiagnosticsSettingsView(), for: .diagnostics)
-        }.frame(maxWidth: .infinity, maxHeight: .infinity)
+            Image(systemName: "xmark.circle")
+          }
+          .buttonStyle(.plain).accessibilityLabel("Dismiss error")
+        }.padding(.horizontal, 28).padding(.vertical, 8)
+      }
+      ZStack {
+        retained(GeneralSettingsView(), for: .general)
+        retained(VocabularySettingsView(), for: .vocabulary)
+        retained(SnippetSettingsView(), for: .snippets)
+        retained(HistorySettingsView(), for: .history)
+        retained(DiagnosticsSettingsView(), for: .diagnostics)
+      }.frame(maxWidth: .infinity, maxHeight: .infinity)
 
-      }.frame(maxWidth: .infinity, maxHeight: .infinity).background(VaniTheme.paper)
-    }
-    .tint(VaniTheme.accent)
-    .frame(width: 760, height: 580)
+    }.frame(maxWidth: .infinity, maxHeight: .infinity).background(VaniTheme.paper)
+      .tint(VaniTheme.accent)
   }
 
   private func retained<Content: View>(_ content: Content, for section: SettingsSection)

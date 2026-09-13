@@ -73,14 +73,9 @@ struct MenuContentView: View {
         .buttonStyle(.plain)
         .font(.caption)
         .frame(height: 28)
-      SettingsLink {
-        Label("Settings", systemImage: "gearshape")
-          .font(.caption)
-          .padding(.horizontal, 4)
-          .frame(height: 28)
-      }
-      .buttonStyle(.plain)
-      .help("Settings")
+      Button("Settings", systemImage: "gearshape") { coordinator.showSettings() }
+        .buttonStyle(.plain).font(.caption).frame(height: 28)
+        .help("Settings")
 
       Spacer()
 

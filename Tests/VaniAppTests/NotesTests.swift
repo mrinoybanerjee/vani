@@ -5,8 +5,27 @@ import VaniCore
 
 @testable import Vani
 
+actor NotesUITestRecognizer: SpeechRecognizing {
+  func modelsAreInstalled() -> Bool { false }
+  func prepare(progress: @escaping @Sendable (Double) -> Void) {}
+  func transcribe(_ audio: CapturedAudio) throws -> SpeechResult {
+    throw MeetingError.capture("Recording is disabled in this UI fixture")
+  }
+}
+
 @Suite(.serialized) @MainActor
 struct NotesTests {
+  func makeNotesWorkspace(model: NotesModel, directory: URL) async -> WorkspaceWindowController {
+    let meetings = MeetingModel(
+      store: MeetingStore(directory: directory.appendingPathComponent("Meetings")),
+      recognizer: NotesUITestRecognizer(), reserveSpeech: { false }, releaseSpeech: {})
+    let workspace = WorkspaceModel(notes: model, meetings: meetings)
+    #expect(await workspace.select(.notes))
+    let controller = WorkspaceWindowController(model: workspace)
+    controller.present(coordinator: AppCoordinator(startAutomatically: false))
+    return controller
+  }
+
   private func fixture() -> (URL, NotesModel) {
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     return (directory, NotesModel(store: NoteStore(directory: directory)))
@@ -75,8 +94,7 @@ struct NotesTests {
     let (directory, model) = fixture()
     defer { try? FileManager.default.removeItem(at: directory) }
     await model.create(text: "Original")
-    let controller = NotesWindowController(model: model)
-    controller.present()
+    let controller = await makeNotesWorkspace(model: model, directory: directory)
     let window = try #require(controller.window)
     defer { window.close() }
     model.draft?.text = "Saved on close"
@@ -120,11 +138,10 @@ struct NotesTests {
     let (directory, model) = fixture()
     defer { try? FileManager.default.removeItem(at: directory) }
     await model.create(text: "Native note")
-    let controller = NotesWindowController(model: model)
-    controller.present()
+    let controller = await makeNotesWorkspace(model: model, directory: directory)
     let window = try #require(controller.window)
     defer { window.close() }
-    controller.present()
+    controller.present(coordinator: AppCoordinator(startAutomatically: false))
     #expect(controller.window === window)
     #expect(window.canBecomeKey)
     #expect(window.styleMask.contains(.resizable))

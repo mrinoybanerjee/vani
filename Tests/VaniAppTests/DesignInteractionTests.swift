@@ -11,8 +11,7 @@ extension NotesTests {
     defer { try? FileManager.default.removeItem(at: directory) }
     let model = NotesModel(store: NoteStore(directory: directory))
     await model.load()
-    let controller = NotesWindowController(model: model)
-    controller.present(load: false)
+    let controller = await makeNotesWorkspace(model: model, directory: directory)
     let window = try #require(controller.window)
     defer { window.close() }
     window.contentView?.layoutSubtreeIfNeeded()
@@ -70,14 +69,13 @@ extension NotesTests {
     model.draft?.text =
       "The best tools make a little room for us to think.\n\nKeep the experience simple. Make the next step obvious. Let every word have a purpose.\n\nA few things to explore\n\n• A calmer start to the day\n• Less switching, more focus\n• A place for ideas to grow"
     await model.save()
-    let controller = NotesWindowController(model: model)
-    controller.present(load: false)
+    let controller = await makeNotesWorkspace(model: model, directory: directory)
     let window = try #require(controller.window)
     defer { window.close() }
     try await capture(window, name: "notebook", path: path)
-    window.setContentSize(NSSize(width: 720, height: 480))
+    window.setContentSize(NSSize(width: 820, height: 560))
     try await capture(window, name: "notebook-compact", path: path)
-    window.setContentSize(NSSize(width: 980, height: 680))
+    window.setContentSize(NSSize(width: 1060, height: 720))
     await model.select(nil)
     try await capture(window, name: "notebook-empty", path: path)
     await model.select(model.notes.first)
@@ -86,17 +84,10 @@ extension NotesTests {
     await model.save()
     try await capture(window, name: "notebook-error", path: path)
 
+    model.discardChanges()
+    #expect(await controller.model.select(.settings))
+    try await capture(window, name: "settings", path: path)
     let coordinator = AppCoordinator(startAutomatically: false)
-    let settings = NSWindow(
-      contentRect: NSRect(x: 0, y: 0, width: 760, height: 580),
-      styleMask: [.titled], backing: .buffered, defer: false)
-    settings.isReleasedWhenClosed = false
-    settings.contentViewController = NSHostingController(
-      rootView: SettingsView().environmentObject(coordinator))
-    settings.setContentSize(NSSize(width: 760, height: 580))
-    settings.orderFront(nil)
-    defer { settings.close() }
-    try await capture(settings, name: "settings", path: path)
     let menu = NSWindow(
       contentRect: NSRect(x: 0, y: 0, width: 360, height: 450),
       styleMask: [.titled], backing: .buffered, defer: false)
@@ -129,24 +120,43 @@ extension NotesTests {
       "Summary\nA focused first experience, with one clear next step.\n\nDecisions\nKeep the current keyboard shortcut. [0:20]\n  Source: “Keep the current keyboard shortcut.”\n\nAction items\nShare the prototype on Friday. [0:20]\n  Source: “I will share the prototype on Friday.”"
     try await store.save(meeting)
     let model = MeetingModel(
-      store: store, recognizer: FluidAudioSpeechRecognizer(), reserveSpeech: { false },
+      store: store, recognizer: NotesUITestRecognizer(), reserveSpeech: { false },
       releaseSpeech: {})
     await model.load()
-    let controller = MeetingWindowController(model: model)
-    controller.present()
+    let workspace = WorkspaceModel(
+      notes: NotesModel(store: NoteStore(directory: directory.appendingPathComponent("Notes"))),
+      meetings: model)
+    let controller = WorkspaceWindowController(model: workspace)
+    controller.present(coordinator: AppCoordinator(startAutomatically: false))
     let window = try #require(controller.window)
     defer { window.close() }
     try await capture(window, name: "meetings-empty", path: path)
     await model.select(meeting)
+    let content = try #require(window.contentView)
+    func meetingPicker(in view: NSView) -> NSSegmentedControl? {
+      if let picker = view as? NSSegmentedControl,
+        picker.segmentCount == 3, picker.label(forSegment: 0) == "My notes"
+      {
+        return picker
+      }
+      return view.subviews.lazy.compactMap { meetingPicker(in: $0) }.first
+    }
+    for _ in 0..<50 {
+      if meetingPicker(in: content) != nil { break }
+      try await Task.sleep(for: .milliseconds(10))
+    }
+    let notesTab = try #require(meetingPicker(in: content))
+    notesTab.selectedSegment = 0
+    notesTab.sendAction(notesTab.action, to: notesTab.target)
     try await capture(window, name: "meeting-notes", path: path)
-    window.setContentSize(NSSize(width: 780, height: 520))
+    window.setContentSize(NSSize(width: 820, height: 560))
     try await capture(window, name: "meeting-compact", path: path)
     window.setContentSize(NSSize(width: 1060, height: 720))
     func editor(in view: NSView) -> NSTextView? {
+      guard !view.isHiddenOrHasHiddenAncestor else { return nil }
       if let text = view as? NSTextView, text.isEditable, !text.isFieldEditor { return text }
       return view.subviews.lazy.compactMap { editor(in: $0) }.first
     }
-    let content = try #require(window.contentView)
     let nativeEditor = try #require(editor(in: content))
     window.makeFirstResponder(nativeEditor)
     nativeEditor.selectAll(nil)
