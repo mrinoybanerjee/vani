@@ -8,7 +8,8 @@ A private, local, and free Wispr Flow alternative for Apple Silicon Macs.
 
 Hold a shortcut, speak English, and release. Vani transcribes on your Mac and
 inserts the result into the app you were using. There is no account, telemetry,
-cloud transcription, or generative rewriting.
+or cloud transcription. Dictation uses deterministic cleanup; optional meeting
+summaries use a separate local model.
 
 ## Status
 
@@ -71,7 +72,7 @@ The first source build can take several minutes. After Vani opens in the menu ba
 
 1. Allow Microphone, Accessibility, and Input Monitoring when Vani requests them.
 2. Download the verified 443 MiB English model once. It is the only required network
-   download after the source dependencies are resolved.
+   download for dictation after the source dependencies are resolved.
 3. In System Settings > Keyboard, set "Press Globe key to" to "Do Nothing."
 4. Hold Left Fn, speak, then release to insert text. Choose Left Control, Right Option,
    or Right Command in Settings if you prefer, and turn sound feedback off there if needed.
@@ -145,7 +146,7 @@ git pull --ff-only origin main
 
 If it prints any files, stop and review those local changes before pulling. The
 installer replaces `/Applications/Vani.app` atomically and keeps the downloaded model,
-settings, snippets, dictionary, optional history, and saved notes.
+settings, snippets, dictionary, optional history, saved notes, and meetings.
 
 ### Keep permissions across updates
 
@@ -168,7 +169,10 @@ storage, and UI remain outside that callback. Dependencies are exact-pinned in
 
 - [Architecture](docs/ARCHITECTURE.md)
 - [Product design](docs/PRODUCT_DESIGN.md)
+- [Visual system](DESIGN.md)
+- [Redesign research and acceptance boundaries](docs/REDESIGN_2026-09-12.md)
 - [Local Notes design and storage](docs/NOTES_DESIGN.md)
+- [Meeting capture, summaries and recovery](docs/MEETINGS_DESIGN.md)
 - [Competitive discovery and future direction](docs/COMPETITIVE_DISCOVERY.md)
 - [September audit and release evidence](docs/AUDIT_2026-09-12.md)
 - [Local personalization](docs/PERSONALIZATION.md)

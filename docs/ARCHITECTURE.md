@@ -1,7 +1,7 @@
 # Architecture
 
 Vani is a Swift 6 package with two production targets. This diagram shows the
-dictation and correction branch; the optional Notes branch is described below.
+dictation and correction branch; the optional Notes and Meetings branches are described below.
 
 ```text
 Vani (SwiftUI/AppKit, @MainActor)
@@ -116,9 +116,11 @@ audio capture, inference, network activity, or dependency on transcript history.
 ## Dependency boundary
 
 FluidAudio is the only external package. Its exact source revision and transitive
-graph are locked by SwiftPM. Model artifacts are pinned independently by revision
+graph are locked by SwiftPM. Speech model artifacts are pinned independently by revision
 and SHA-256 manifest. Apple frameworks provide audio, UI, Accessibility, global
-keyboard events, login items, logging, and code signing integration.
+keyboard events, login items, logging, and code signing integration. Meeting summaries
+use a separately installed Ollama runtime and its `qwen3:4b` model tag; those are not
+bundled or covered by Vani's speech-model manifest.
 
 ## Meeting boundary
 
