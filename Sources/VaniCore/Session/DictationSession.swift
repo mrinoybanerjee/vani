@@ -203,8 +203,12 @@ public actor DictationSession {
   private func finishDictation(automaticallyStopped: Bool = false) async {
     cancelRecordingLimitTimer()
     do {
+      // Reserve finalization before suspending, but publish the stopped cue only
+      // after the microphone has stopped so the cue is not recorded.
+      try machine.transition(.captureStopped)
       let audio = try await audioCapture.stop()
-      try await transition(.captureStopped)
+      guard machine.phase == .transcribing else { return }
+      await publishTransition(.captureStopped)
       if automaticallyStopped {
         await diagnostics.record(
           DiagnosticEvent(
@@ -294,6 +298,8 @@ public actor DictationSession {
       DiagnosticEvent(category: .recovery, code: "transcript_copied", phase: machine.phase)
     )
   }
+
+  public func transcriptForNote() -> String? { lastTranscript }
 
   public func copyLastTranscript() async throws {
     guard let lastTranscript else {
@@ -685,6 +691,10 @@ public actor DictationSession {
 
   private func transition(_ event: SessionEvent) async throws {
     try machine.transition(event)
+    await publishTransition(event)
+  }
+
+  private func publishTransition(_ event: SessionEvent) async {
     VaniLog.phase(machine.phase)
     await diagnostics.record(
       DiagnosticEvent(

@@ -159,11 +159,7 @@ public struct PersonalizationEngine: Sendable {
       }) {
         profile[index].confirmationCount = min(profile[index].confirmationCount + 1, 10_000)
         profile[index].lastConfirmedAt = now
-        if profile[index].applicationBundleIdentifier == nil {
-          profile[index].applicationBundleIdentifier = candidate.applicationBundleIdentifier
-        } else if profile[index].applicationBundleIdentifier
-          != candidate.applicationBundleIdentifier
-        {
+        if profile[index].applicationBundleIdentifier != candidate.applicationBundleIdentifier {
           profile[index].applicationBundleIdentifier = nil
         }
         learned.append(profile[index])

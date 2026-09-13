@@ -70,6 +70,43 @@ struct TeachWindowControllerTests {
   }
 
   @Test
+  func productionTeachEditorExpandsWithItsWindow() async throws {
+    let controller = TeachWindowController(activateApplication: {})
+    controller.present(candidate: TeachQAWindowFixture.candidate, save: { _ in true })
+    defer { controller.dismiss() }
+    let editorAppeared = await waitUntil {
+      controller.window?.contentView.flatMap(findTextView) != nil
+    }
+    #expect(editorAppeared)
+    let window = try #require(controller.window)
+    let editor = try #require(window.contentView.flatMap(findTextView))
+    let initialWidth = editor.frame.width
+    window.setContentSize(NSSize(width: 780, height: 540))
+    let editorExpanded = await waitUntil { editor.frame.width > initialWidth + 100 }
+    #expect(editorExpanded)
+    #expect(editor.frame.height > 150)
+
+    if let directory = ProcessInfo.processInfo.environment["VANI_UI_SNAPSHOT_DIR"] {
+      window.setContentSize(NSSize(width: 560, height: 360))
+      let editorContracted = await waitUntil { editor.frame.width < 560 }
+      #expect(editorContracted)
+      let content = try #require(window.contentView)
+      for appearance in [NSAppearance.Name.aqua, .darkAqua] {
+        window.appearance = NSAppearance(named: appearance)
+        await Task.yield()
+        content.layoutSubtreeIfNeeded()
+        content.displayIfNeeded()
+        let bitmap = try #require(content.bitmapImageRepForCachingDisplay(in: content.bounds))
+        content.cacheDisplay(in: content.bounds, to: bitmap)
+        let data = try #require(bitmap.representation(using: .png, properties: [:]))
+        let folder = URL(fileURLWithPath: directory, isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try data.write(to: folder.appendingPathComponent("teach-\(appearance.rawValue).png"))
+      }
+    }
+  }
+
+  @Test
   func textEditorBindingReceivesNativeInput() async {
     let model = EditorModel()
     let controller = TeachWindowController(activateApplication: {})
@@ -167,12 +204,16 @@ struct TeachWindowControllerTests {
     )
     #expect(savedText == "Vani learns locally")
     #expect(dismissed == false)
+    #expect(model.saveFailed == true)
+    #expect(model.corrected == "Vani learns locally")
+    #expect(model.canSave == true)
 
     await model.commit(
       save: { _ in true },
       dismiss: { dismissed = true }
     )
     #expect(dismissed == true)
+    #expect(model.saveFailed == false)
   }
 
   @Test

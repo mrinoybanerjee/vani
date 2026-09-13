@@ -25,6 +25,7 @@ final class TeachVaniViewModel: ObservableObject {
   let original: String
   @Published var corrected: String
   @Published private(set) var isSaving = false
+  @Published private(set) var saveFailed = false
 
   init(original: String) {
     self.original = original
@@ -43,9 +44,12 @@ final class TeachVaniViewModel: ObservableObject {
   ) async {
     guard canSave else { return }
     isSaving = true
+    saveFailed = false
     defer { isSaving = false }
     if await save(corrected) {
       dismiss()
+    } else {
+      saveFailed = true
     }
   }
 }
@@ -173,7 +177,6 @@ final class TeachWindowController: NSObject, NSWindowDelegate {
 }
 
 struct TeachVaniView: View {
-  let candidate: CorrectionCandidate
   let dismiss: () -> Void
   let save: @MainActor (String) async -> Bool
   @StateObject private var model: TeachVaniViewModel
@@ -184,7 +187,6 @@ struct TeachVaniView: View {
     dismiss: @escaping () -> Void,
     save: @escaping @MainActor (String) async -> Bool
   ) {
-    self.candidate = candidate
     self.dismiss = dismiss
     self.save = save
     _model = StateObject(wrappedValue: TeachVaniViewModel(original: candidate.transcript))
@@ -192,28 +194,48 @@ struct TeachVaniView: View {
 
   var body: some View {
     VStack(alignment: .leading, spacing: 12) {
-      Text("Teach Vani")
+      Label("Correct your transcript", systemImage: "text.badge.checkmark")
         .font(.headline)
       Text("Fix only what Vani got wrong. The correction is saved locally for future dictation.")
-        .font(.caption)
+        .font(.subheadline)
         .foregroundStyle(.secondary)
       TextEditor(text: $model.corrected)
         .font(.body)
+        .scrollContentBackground(.hidden)
+        .padding(8)
         .frame(minHeight: 150)
+        .background(.background, in: RoundedRectangle(cornerRadius: 8))
         .focused($editorFocused)
         .disabled(model.isSaving)
+        .accessibilityLabel("Corrected transcript")
         .overlay {
-          RoundedRectangle(cornerRadius: 6)
+          RoundedRectangle(cornerRadius: 8)
             .strokeBorder(.quaternary, lineWidth: 1)
             .allowsHitTesting(false)
         }
+      if model.saveFailed {
+        Label(
+          "The correction wasn’t saved. Your edit is still here; try again.",
+          systemImage: "exclamationmark.circle"
+        )
+        .font(.caption)
+        .foregroundStyle(.orange)
+        .fixedSize(horizontal: false, vertical: true)
+      }
+      Text("Text already inserted in another app stays as it is.")
+        .font(.caption)
+        .foregroundStyle(.secondary)
       HStack {
-        Text("This does not change text already inserted in another app.")
-          .font(.caption2)
-          .foregroundStyle(.tertiary)
+        if model.isSaving {
+          ProgressView().controlSize(.small)
+          Text("Saving correction…")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
         Spacer()
         Button("Cancel", action: dismiss)
           .disabled(model.isSaving)
+          .keyboardShortcut(.cancelAction)
         Button("Save Learning") {
           Task {
             await model.commit(save: save, dismiss: dismiss)
@@ -221,10 +243,12 @@ struct TeachVaniView: View {
         }
         .buttonStyle(.borderedProminent)
         .disabled(!model.canSave)
+        .keyboardShortcut("s", modifiers: .command)
       }
     }
     .padding(20)
-    .frame(width: TeachWindowMetrics.width)
+    .frame(minWidth: TeachWindowMetrics.width, maxWidth: .infinity, maxHeight: .infinity)
+    .background(Color(nsColor: .windowBackgroundColor))
     .task {
       await Task.yield()
       editorFocused = true
