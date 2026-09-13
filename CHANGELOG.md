@@ -1,6 +1,25 @@
 # Changelog
 
-## 0.4.0
+All notable changes follow semantic versioning.
+
+## 0.4.1 - 2026-09-12
+
+### Fixed
+
+- Preserve unfinished dictionary entries when switching vocabulary sections.
+- Preserve saved corrections when profile reads or quarantine operations fail, and retain the latest confirmed capitalization.
+- Stop the microphone before publishing interrupted-dictation feedback.
+- Reject malformed Accessibility ranges and preserve the transcript clipboard after an interrupted paste dispatch.
+- Make summary cancellation effective during preflight and offer explicit discard after a failed meeting save.
+- Let uninstall wait for graceful shutdown and abort safely when Vani is still running.
+
+### Changed
+
+- Remove promotional UI copy and the unused status-mark implementation.
+- Append meeting audio in place instead of repeatedly copying the accumulated buffer.
+- Validate every shell script during lint and correctly identify ad-hoc signatures during installation.
+
+## 0.4.0 - 2026-09-12
 
 - [Record a meeting](README.md#meeting-notes) with microphone and Mac audio, follow its incremental transcript, keep personal notes, recover saved audio and generate source-quoted summaries through local Ollama.
 - Keep dictation and meeting recording from overlapping, retain drafts after failed saves, and prevent delayed capture events from interrupting a newer meeting.
@@ -10,9 +29,6 @@
 ### For contributors
 
 - Keep notebook presentation, draft coordination and window lifecycle separate while preserving the existing speech and storage engines.
-
-
-All notable changes follow semantic versioning.
 
 ## 0.3.0 - 2026-09-12
 

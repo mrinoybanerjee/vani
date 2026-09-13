@@ -86,3 +86,13 @@ not an accuracy improvement across representative speakers and terms.
 | 20-minute capture boundary | Bounded and transcribable | 0.251 s test; about 822 MiB command RSS |
 
 Unmeasured rows are release evidence gaps, not implied passes.
+
+## Meeting append microbenchmark — September 12, 2026
+
+On the M4 Mac with Swift 6.1.2 (`swiftc -O`), 20,000 alternating callbacks appended
+320 float samples each across two source buffers, flushing every 320,000 samples.
+Both variants retained exactly 6,400,000 samples. Three runs measured 0.178–0.253 s
+for copy-out/append/write-back, versus 0.00121–0.00131 s for Dictionary's in-place
+modifying subscript. This isolates avoidable Array copy-on-write; it excludes PCM
+conversion, disk writes, capture, transcription and summaries. It is not a whole-app
+speedup or a competitive benchmark. Functional tests separately verify persisted samples.
