@@ -15,6 +15,8 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
 struct SettingsView: View {
   @EnvironmentObject private var coordinator: AppCoordinator
   @State private var selection = SettingsSection.general
+  @State private var vocabulary = VocabularyDraft()
+  @State private var snippet = SnippetDraft()
 
   var body: some View {
     VStack(alignment: .leading, spacing: 0) {
@@ -40,45 +42,41 @@ struct SettingsView: View {
           .buttonStyle(.plain).accessibilityLabel("Dismiss error")
         }.padding(.horizontal, 28).padding(.vertical, 8)
       }
-      ZStack {
-        retained(GeneralSettingsView(), for: .general)
-        retained(VocabularySettingsView(), for: .vocabulary)
-        retained(SnippetSettingsView(), for: .snippets)
-        retained(HistorySettingsView(), for: .history)
-        retained(DiagnosticsSettingsView(), for: .diagnostics)
+      Group {
+        switch selection {
+        case .general: GeneralSettingsView()
+        case .vocabulary: VocabularySettingsView(draft: $vocabulary)
+        case .snippets: SnippetSettingsView(draft: $snippet)
+        case .history: HistorySettingsView()
+        case .diagnostics: DiagnosticsSettingsView()
+        }
       }.frame(maxWidth: .infinity, maxHeight: .infinity)
 
     }.frame(maxWidth: .infinity, maxHeight: .infinity).background(VaniTheme.paper)
       .tint(VaniTheme.accent)
   }
 
-  private func retained<Content: View>(_ content: Content, for section: SettingsSection)
-    -> some View
-  {
-    content.opacity(selection == section ? 1 : 0)
-      .allowsHitTesting(selection == section)
-      .disabled(selection != section)
-      .accessibilityHidden(selection != section)
-  }
-
 }
 
-struct VocabularySettingsView: View {
-  private enum Section: String, CaseIterable, Identifiable {
+private struct VocabularyDraft {
+  enum Section: String, CaseIterable, Identifiable {
     case dictionary = "Dictionary"
     case learning = "Learning"
-
     var id: Self { self }
   }
 
-  @State private var section = Section.dictionary
-  @State private var spoken = ""
-  @State private var replacement = ""
+  var section = Section.dictionary
+  var spoken = ""
+  var replacement = ""
+}
+
+private struct VocabularySettingsView: View {
+  @Binding var draft: VocabularyDraft
 
   var body: some View {
     VStack(spacing: 0) {
-      Picker("Vocabulary section", selection: $section) {
-        ForEach(Section.allCases) { section in
+      Picker("Vocabulary section", selection: $draft.section) {
+        ForEach(VocabularyDraft.Section.allCases) { section in
           Text(section.rawValue).tag(section)
         }
       }
@@ -87,9 +85,9 @@ struct VocabularySettingsView: View {
       .padding(.horizontal, 20)
       .padding(.top, 16)
 
-      switch section {
+      switch draft.section {
       case .dictionary:
-        DictionarySettingsView(spoken: $spoken, replacement: $replacement)
+        DictionarySettingsView(spoken: $draft.spoken, replacement: $draft.replacement)
       case .learning:
         PersonalizationSettingsView()
       }
@@ -313,25 +311,29 @@ private struct DictionarySettingsView: View {
   }
 }
 
+private struct SnippetDraft {
+  var trigger = ""
+  var expansion = ""
+  var editingSnippetID: UUID?
+}
+
 private struct SnippetSettingsView: View {
   @EnvironmentObject private var coordinator: AppCoordinator
-  @State private var trigger = ""
-  @State private var expansion = ""
-  @State private var editingSnippetID: UUID?
+  @Binding var draft: SnippetDraft
 
   var body: some View {
     VStack(alignment: .leading, spacing: 12) {
-      TextField("Voice trigger", text: $trigger)
+      TextField("Voice trigger", text: $draft.trigger)
 
       ZStack(alignment: .topLeading) {
-        if expansion.isEmpty {
+        if draft.expansion.isEmpty {
           Text("Expanded text")
             .foregroundStyle(.tertiary)
             .padding(.horizontal, 6)
             .padding(.vertical, 7)
             .allowsHitTesting(false)
         }
-        TextEditor(text: $expansion)
+        TextEditor(text: $draft.expansion)
           .font(.body)
           .scrollContentBackground(.hidden)
           .padding(2)
@@ -345,11 +347,11 @@ private struct SnippetSettingsView: View {
       }
 
       HStack {
-        Text("\(expansion.count)/\(SnippetEntry.maximumExpansionLength)")
+        Text("\(draft.expansion.count)/\(SnippetEntry.maximumExpansionLength)")
           .font(.caption.monospacedDigit())
           .foregroundStyle(.secondary)
         Spacer()
-        if editingSnippetID != nil {
+        if draft.editingSnippetID != nil {
           Button {
             resetDraft()
           } label: {
@@ -359,8 +361,8 @@ private struct SnippetSettingsView: View {
           .accessibilityLabel("Cancel editing snippet")
         }
         Button(
-          editingSnippetID == nil ? "Add" : "Save",
-          systemImage: editingSnippetID == nil ? "plus" : "checkmark"
+          draft.editingSnippetID == nil ? "Add" : "Save",
+          systemImage: draft.editingSnippetID == nil ? "plus" : "checkmark"
         ) {
           commitDraft()
         }
@@ -399,7 +401,7 @@ private struct SnippetSettingsView: View {
             .padding(.vertical, 2)
           }
           .onDelete { offsets in
-            if let editingSnippetID,
+            if let editingSnippetID = draft.editingSnippetID,
               offsets.contains(where: {
                 coordinator.settings.snippets[$0].id == editingSnippetID
               })
@@ -415,28 +417,28 @@ private struct SnippetSettingsView: View {
   }
 
   private var draftIsValid: Bool {
-    (editingSnippetID != nil
+    (draft.editingSnippetID != nil
       || coordinator.settings.snippets.count < VaniSettings.maximumSnippetCount)
-      && SnippetEntry(trigger: trigger, expansion: expansion).isValid
+      && SnippetEntry(trigger: draft.trigger, expansion: draft.expansion).isValid
   }
 
   private func beginEditing(_ snippet: SnippetEntry) {
-    editingSnippetID = snippet.id
-    trigger = snippet.trigger
-    expansion = snippet.expansion
+    draft.editingSnippetID = snippet.id
+    draft.trigger = snippet.trigger
+    draft.expansion = snippet.expansion
     coordinator.dismissSettingsError()
   }
 
   private func commitDraft() {
     let saved: Bool
-    if let editingSnippetID {
+    if let editingSnippetID = draft.editingSnippetID {
       saved = coordinator.updateSnippet(
         id: editingSnippetID,
-        trigger: trigger,
-        expansion: expansion
+        trigger: draft.trigger,
+        expansion: draft.expansion
       )
     } else {
-      saved = coordinator.addSnippet(trigger: trigger, expansion: expansion)
+      saved = coordinator.addSnippet(trigger: draft.trigger, expansion: draft.expansion)
     }
     if saved {
       resetDraft()
@@ -444,9 +446,9 @@ private struct SnippetSettingsView: View {
   }
 
   private func resetDraft() {
-    editingSnippetID = nil
-    trigger = ""
-    expansion = ""
+    draft.editingSnippetID = nil
+    draft.trigger = ""
+    draft.expansion = ""
     coordinator.dismissSettingsError()
   }
 }

@@ -28,7 +28,9 @@ the sidebar during capture, transcription, summarization or a meeting error.
 Empty libraries identify their state and the main area provides the creation action.
 Existing storage errors retain Retry, export and explicit discard paths.
 
-All three content views retain their editor, tab and settings-draft state. Hidden
+All three content views retain their editor, tab and settings-draft state. Settings
+renders only its selected pane; its parent owns unfinished dictionary and snippet
+drafts, so inactive pane controls are absent from the accessibility tree. Hidden
 content is disabled, excluded from hit testing and hidden from accessibility so
 keyboard shortcuts operate on the visible section. The feature models remain the
 owners of files, drafts, audio and inference. Loading occurs only when requested;
