@@ -828,8 +828,11 @@ public actor DictationSession {
   private func preserveInterruptedDictation(diagnosticCode: String) async {
     cancelRecordingLimitTimer()
     do {
-      try await transition(.captureStopped)
+      // Interruption cues obey the same microphone-stop boundary as manual release.
+      try machine.transition(.captureStopped)
       let audio = try await audioCapture.stop()
+      guard machine.phase == .transcribing else { return }
+      await publishTransition(.captureStopped)
       guard machine.phase == .transcribing else { return }
       await recovery.retainAudio(audio, target: currentTarget)
       guard machine.phase == .transcribing else { return }

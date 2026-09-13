@@ -3,6 +3,12 @@ import Testing
 
 @testable import VaniCore
 
+private final class QuarantineRefusingFileManager: FileManager, @unchecked Sendable {
+  override func moveItem(at source: URL, to destination: URL) throws {
+    throw CocoaError(.fileWriteNoPermission)
+  }
+}
+
 private func personalizationTemporaryDirectory() throws -> URL {
   let url = FileManager.default.temporaryDirectory.appendingPathComponent(
     "vani-personalization-tests-\(UUID().uuidString)",
@@ -56,6 +62,30 @@ func personalizationStoreQuarantinesCorruptionBeforeStartingFresh() async throws
     applicationBundleIdentifier: nil
   )
   #expect(try await store.load().count == 1)
+}
+
+@Test
+func failedPersonalizationQuarantinePreventsLearnAndRemoveFromOverwritingTheOriginal() async throws
+{
+  let directory = try personalizationTemporaryDirectory()
+  defer { try? FileManager.default.removeItem(at: directory) }
+  let fileURL = directory.appendingPathComponent("personalization.json")
+  let original = Data("unreadable profile that must be preserved".utf8)
+  try original.write(to: fileURL)
+  let store = PersonalizationStore(
+    directory: directory, fileManager: QuarantineRefusingFileManager())
+
+  await #expect(throws: CocoaError.self) {
+    _ = try await store.learn(
+      original: "Vanny", corrected: "Vani", applicationBundleIdentifier: nil)
+  }
+  #expect(try Data(contentsOf: fileURL) == original)
+  await #expect(throws: CocoaError.self) {
+    _ = try await store.remove(ids: [UUID()])
+  }
+  #expect(try Data(contentsOf: fileURL) == original)
+  #expect(
+    try FileManager.default.contentsOfDirectory(atPath: directory.path) == ["personalization.json"])
 }
 
 @Test

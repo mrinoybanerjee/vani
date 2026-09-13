@@ -1503,3 +1503,43 @@ func routeChangeDuringAudioFinalizationDoesNotStopTheRecordingAgain() async thro
   #expect(await session.snapshot().phase == .ready)
   #expect(await session.snapshot().failure == nil)
 }
+
+@Test(arguments: ["sleep", "route", "permission"]) @MainActor
+func interruptedCapturePublishesStoppedOnlyAfterMicrophoneStops(_ interruption: String) async throws
+{
+  let audio = MockAudioCapture(pausesStop: true)
+  let speech = MockSpeechRecognizer(results: [.success(speechResult("preserve this speech"))])
+  let insertion = MockTextInserter(results: [.success(.verified)])
+  let session = DictationSession(
+    audioCapture: audio,
+    speechRecognizer: speech,
+    textInserter: insertion,
+    focusProvider: MockFocusProvider(),
+    diagnostics: DiagnosticStore()
+  )
+  var observedPhases: [SessionPhase] = []
+  await session.setObserver { observedPhases.append($0.phase) }
+  #expect(await session.prepareModels(allowDownload: false))
+  await session.beginDictation()
+
+  let interrupted = Task {
+    switch interruption {
+    case "sleep": await session.systemWillSleep()
+    case "route": await session.audioRouteDidChange()
+    default: await session.permissionWasRevoked(.microphonePermissionDenied)
+    }
+  }
+  #expect(await audio.waitUntilStop())
+  // The observer drives recording sounds: publishing now would record the stop cue.
+  #expect(observedPhases.last == .listening)
+  await audio.resumeStop()
+  await interrupted.value
+
+  #expect(observedPhases.suffix(2) == [.transcribing, .recoverableError])
+  #expect(await audio.stopCount == 1)
+  #expect(await session.snapshot().failure == .recordingInterrupted)
+  #expect(await speech.transcribeCount == 0)
+  await session.retry()
+  #expect(insertion.insertedTexts == ["preserve this speech"])
+  #expect(await session.snapshot().phase == .ready)
+}

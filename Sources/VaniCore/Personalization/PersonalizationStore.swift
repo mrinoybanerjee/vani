@@ -86,7 +86,7 @@ public actor PersonalizationStore {
     applicationBundleIdentifier: String?,
     now: Date = Date()
   ) throws -> PersonalizationLearningResult {
-    let existing = loadRecoveringFromCorruption()
+    let existing = try loadRecoveringFromCorruption()
     let result = engine.learn(
       original: original,
       corrected: corrected,
@@ -101,7 +101,7 @@ public actor PersonalizationStore {
   }
 
   public func remove(ids: Set<UUID>) throws -> [LearnedCorrection] {
-    var corrections = loadRecoveringFromCorruption()
+    var corrections = try loadRecoveringFromCorruption()
     corrections.removeAll { ids.contains($0.id) }
     try write(corrections)
     return corrections
@@ -117,10 +117,10 @@ public actor PersonalizationStore {
     try !storedDataURLs().isEmpty
   }
 
-  private func loadRecoveringFromCorruption() -> [LearnedCorrection] {
+  private func loadRecoveringFromCorruption() throws -> [LearnedCorrection] {
     do {
       return try load()
-    } catch {
+    } catch PersonalizationStoreError.corrupt {
       return []
     }
   }

@@ -20,8 +20,11 @@ private final class InsertionEnvironment: TextInsertionEnvironment {
   var canPostPaste = true
   var reads: [TextInsertionRead?]
   var postResult = true
+  var errorBeforeDelivery: (any Error)?
+  var errorAfterDelivery: (any Error)?
   var onRead: (() -> Void)?
   var onPost: (() -> Void)?
+  var onDelivery: (() -> Void)?
   private(set) var postCount = 0
   private(set) var deliveryCount = 0
   private var lastRead: TextInsertionRead?
@@ -46,7 +49,10 @@ private final class InsertionEnvironment: TextInsertionEnvironment {
     postCount += 1
     onPost?()
     try beforePaste()
+    if let errorBeforeDelivery { throw errorBeforeDelivery }
     deliveryCount += 1
+    onDelivery?()
+    if let errorAfterDelivery { throw errorAfterDelivery }
     return postResult
   }
 }
@@ -378,6 +384,43 @@ func secureFieldChangeAtPasteBoundaryRestoresClipboardAndDoesNotDeliver() async 
   #expect(environment.postCount == 1)
   #expect(environment.deliveryCount == 0)
   #expect(pasteboard.string(forType: .string) == "original")
+}
+
+@Test @MainActor
+func cancellationRestoresClipboardOnlyBeforePasteDispatch() async throws {
+  let focus = InsertionFocusProvider()
+  let pasteboard = NSPasteboard.withUniqueName()
+  defer { pasteboard.releaseGlobally() }
+  pasteboard.setString("original", forType: .string)
+  let before = InsertionEnvironment(reads: [nil])
+  before.errorBeforeDelivery = CancellationError()
+  await #expect(throws: CancellationError.self) {
+    try await makeInserter(focus: focus, environment: before, pasteboard: pasteboard)
+      .insert("transcript", into: focus.target)
+  }
+  #expect(before.deliveryCount == 0)
+  #expect(pasteboard.string(forType: .string) == "original")
+
+  let after = InsertionEnvironment(reads: [nil])
+  after.errorAfterDelivery = PasteShortcutError.interruptedAfterDispatch
+  let result = try await makeInserter(focus: focus, environment: after, pasteboard: pasteboard)
+    .insert("transcript", into: focus.target)
+  #expect(after.deliveryCount == 1)
+  #expect(result == .unverifiedClipboardPreserved)
+  #expect(pasteboard.string(forType: .string) == "transcript")
+
+  let changedAfter = InsertionEnvironment(reads: [nil])
+  changedAfter.errorAfterDelivery = PasteShortcutError.interruptedAfterDispatch
+  changedAfter.onDelivery = {
+    pasteboard.clearContents()
+    pasteboard.setString("newer clipboard", forType: .string)
+  }
+  await #expect(throws: VaniFailure.clipboardChanged) {
+    try await makeInserter(focus: focus, environment: changedAfter, pasteboard: pasteboard)
+      .insert("transcript", into: focus.target)
+  }
+  #expect(changedAfter.deliveryCount == 1)
+  #expect(pasteboard.string(forType: .string) == "newer clipboard")
 }
 
 @Test @MainActor
