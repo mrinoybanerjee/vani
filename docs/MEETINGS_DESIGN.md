@@ -54,7 +54,10 @@ be lost on process crash. A two-hour recording contains roughly 880 MiB of uncom
 when both sources are continuously active; keep sufficient disk space available.
 
 Notes autosave after a 600 ms pause. Close, navigation and audio removal pass through a save
-barrier. A save failure retains the draft for retry or export. Recover transcript retries saved
+barrier. A save failure retains the draft for retry or export. When idle, explicitly
+confirming Discard Changes after a save failure restores the
+last saved meeting without writing, hiding the error, or deleting captured audio. Export first
+to keep unsaved edits; closing never discards automatically. Recover transcript retries saved
 chunks; already persisted segment IDs are skipped. Remove saved audio requires every captured
 chunk to have a durable transcript, and a user confirmation. It keeps notes, transcript and
 summary. No automatic audio deletion or silent truncation occurs.

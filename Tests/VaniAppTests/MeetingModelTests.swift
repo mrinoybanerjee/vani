@@ -24,6 +24,14 @@ private struct MeetingTestSummarizer: MeetingSummarizing {
   func summarize(_ meeting: MeetingRecord) -> String { "Launch on Monday." }
 }
 
+private actor CountingMeetingSummary: MeetingSummarizing {
+  private(set) var calls = 0
+  func summarize(_ meeting: MeetingRecord) -> String {
+    calls += 1
+    return "New summary"
+  }
+}
+
 private actor ControlledMeetingSummary: MeetingSummarizing {
   private var continuation: CheckedContinuation<String, Error>?
   private var started: CheckedContinuation<Void, Never>?
@@ -84,6 +92,109 @@ private final class MeetingTestCapture: MeetingAudioRecording {
 
 @Suite(.serialized) @MainActor
 struct MeetingModelTests {
+  @Test func failedSaveCanExportThenExplicitlyDiscardWithoutTouchingAudioOrStorage() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let store = MeetingStore(directory: directory)
+    let model = MeetingModel(
+      store: store, recognizer: MeetingTestRecognizer(), summarizer: MeetingTestSummarizer(),
+      makeCapture: { MeetingTestCapture() }, reserveSpeech: { true }, releaseSpeech: {})
+    await model.start()
+    model.draft?.notes = "Saved meeting note"
+    model.discardChanges()
+    #expect(model.draft?.notes == "Saved meeting note")  // Recording cannot discard.
+    await model.stop(summarize: false)
+    let saved = try #require(model.draft)
+    let folder = try await store.audioDirectory(for: saved.id)
+    let files = try FileManager.default.contentsOfDirectory(
+      at: folder, includingPropertiesForKeys: nil
+    )
+    .filter { $0.pathExtension == "vani-audio" }
+    #expect(files.count == 1)
+    let audioBefore = try files.map { try Data(contentsOf: $0) }
+    let current = folder.appendingPathComponent("meeting.json")
+    try Data("corrupt".utf8).write(to: current)
+    model.draft?.notes = "Keep this exported edit"
+    #expect(await model.save() == false)
+    #expect(await model.prepareToClose() == false)
+    #expect(await model.prepareToQuit() == false)
+    let failure = model.error
+    let exported = directory.appendingPathComponent("export.txt")
+    try #require(model.draft).exportedText.write(to: exported, atomically: true, encoding: .utf8)
+    #expect(try String(contentsOf: exported, encoding: .utf8).contains("Keep this exported edit"))
+    model.discardChanges()
+    #expect(model.draft == saved && !model.dirty)
+    #expect(model.error == failure)
+    #expect(await model.prepareToClose())
+    #expect(await model.prepareToQuit())
+    #expect(try Data(contentsOf: current) == Data("corrupt".utf8))
+    #expect(try files.map { try Data(contentsOf: $0) } == audioBefore)
+  }
+
+  @Test func discardIsIgnoredWhileSavingOrSummarizing() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let store = MeetingStore(directory: directory)
+    var meeting = MeetingRecord(title: "Original")
+    meeting.transcript = [
+      .init(id: UUID(), source: .system, offset: 0, duration: 1, text: "Agreed.")
+    ]
+    try await store.save(meeting)
+    let summary = ControlledMeetingSummary()
+    let model = MeetingModel(
+      store: store, recognizer: MeetingTestRecognizer(), summarizer: summary,
+      reserveSpeech: { true }, releaseSpeech: {})
+    await model.load()
+    await model.select(meeting)
+    model.draft?.notes = "Save this edit"
+    var observedSaving = false
+    let saving = model.$saving.dropFirst().sink { value in
+      // Published emits before assigning: during the false notification the
+      // previous true value still marks the active save, without timing sleeps.
+      if !value {
+        observedSaving = model.saving
+        model.draft?.notes = "Edit during save completion"
+        model.discardChanges()
+      }
+    }
+    #expect(await model.save())
+    saving.cancel()
+    #expect(observedSaving && model.draft?.notes == "Edit during save completion")
+    let generation = Task { await model.generateSummary() }
+    await summary.waitUntilStarted()
+    model.discardChanges()
+    #expect(model.draft?.notes == "Edit during save completion")
+    await summary.finish(.success("Summary"))
+    await generation.value
+  }
+
+  @Test func cancelAsSummaryStartsPreventsSummarizerInvocation() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let store = MeetingStore(directory: directory)
+    var meeting = MeetingRecord(title: "Original")
+    meeting.summary = "Previous summary"
+    meeting.transcript = [
+      .init(id: UUID(), source: .system, offset: 0, duration: 1, text: "Agreed.")
+    ]
+    try await store.save(meeting)
+    let summary = CountingMeetingSummary()
+    let model = MeetingModel(
+      store: store, recognizer: MeetingTestRecognizer(), summarizer: summary,
+      reserveSpeech: { true }, releaseSpeech: {})
+    await model.load()
+    await model.select(meeting)
+    let cancellation = model.$phase.sink { phase in
+      if phase == .summarizing { model.cancelSummary() }
+    }
+    await model.generateSummary()
+    cancellation.cancel()
+    #expect(await summary.calls == 0)
+    #expect(model.phase == .idle && model.error?.contains("cancelled") == true)
+    #expect(model.draft?.summary == "Previous summary")
+    #expect(try await store.load().first?.summary == "Previous summary")
+  }
+
   @Test func recordingDrainsFinalChunkAndSummarizesBeforeReturning() async throws {
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: directory) }

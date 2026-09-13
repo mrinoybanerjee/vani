@@ -210,6 +210,16 @@ final class MeetingModel: ObservableObject {
 
   func generateSummary() async {
     guard phase == .idle, !transcriptionFailed, let original = draft else { return }
+    let task = Task {
+      try Task.checkCancellation()
+      guard try await store.pendingAudioFiles(for: original).isEmpty else {
+        throw MeetingError.summary("Finish recovering the transcript before generating a summary.")
+      }
+      try Task.checkCancellation()
+      return try await summarizer.summarize(original)
+    }
+    // Own cancellation before publishing the phase that reveals the Cancel button.
+    summaryTask = task
     phase = .summarizing
     error = nil
     defer {
@@ -217,11 +227,6 @@ final class MeetingModel: ObservableObject {
       summaryTask = nil
     }
     do {
-      guard try await store.pendingAudioFiles(for: original).isEmpty else {
-        throw MeetingError.summary("Finish recovering the transcript before generating a summary.")
-      }
-      let task = Task { try await summarizer.summarize(original) }
-      summaryTask = task
       let text = try await task.value
       guard !task.isCancelled else { throw CancellationError() }
       guard draft?.id == original.id, draft?.transcript == original.transcript,
@@ -238,6 +243,12 @@ final class MeetingModel: ObservableObject {
   }
 
   func cancelSummary() { summaryTask?.cancel() }
+
+  func discardChanges() {
+    guard phase == .idle, !saving else { return }
+    // Keep storage failures and captured audio available for explicit recovery.
+    draft = lastSaved
+  }
 
   func prepareToClose() async -> Bool {
     // Closing a window during a meeting only hides it; capture remains explicit in the menu.
