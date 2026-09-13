@@ -6,24 +6,16 @@ import VaniCore
 struct NotesView: View {
   @ObservedObject var model: NotesModel
   @State private var confirmingDiscard = false
-  @State private var sidebarVisible = true
-  @FocusState private var searchFocused: Bool
   @FocusState private var titleFocused: Bool
 
   var body: some View {
     VStack(spacing: 0) {
-      HSplitView {
-        if sidebarVisible { sidebar }
-        VStack(spacing: 0) {
-          toolbar
-          Divider().overlay(VaniTheme.line)
-          editor
-          status
-        }
-        .frame(minWidth: 420, maxWidth: .infinity, maxHeight: .infinity)
-        .background(VaniTheme.paper)
-      }
+      toolbar
+      Divider().overlay(VaniTheme.line)
+      editor
+      status
     }
+    .frame(maxWidth: .infinity, maxHeight: .infinity)
     .tint(VaniTheme.accent)
     .background(VaniTheme.paper)
     .confirmationDialog("Discard unsaved changes?", isPresented: $confirmingDiscard) {
@@ -33,119 +25,10 @@ struct NotesView: View {
       Text(
         "Only the unsaved edits will be discarded. Export a copy first if you want to keep them.")
     }
-    .background {
-      Button("Find Notes") {
-        sidebarVisible = true
-        searchFocused = true
-      }
-      .keyboardShortcut("f", modifiers: .command).hidden().accessibilityHidden(true)
-    }
-  }
-
-  private var sidebar: some View {
-    VStack(alignment: .leading, spacing: 0) {
-      HStack {
-        VaniWordmark()
-        Spacer()
-        Image(systemName: "lock").foregroundStyle(.secondary)
-          .help("Your notes are stored on this Mac")
-      }.padding(24)
-      VStack(alignment: .leading, spacing: 16) {
-        HStack {
-          Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-          TextField("Search notes", text: $model.search)
-            .textFieldStyle(.plain).focused($searchFocused).accessibilityLabel("Search notes")
-          if !model.search.isEmpty {
-            Button {
-              model.search = ""
-            } label: {
-              Image(systemName: "xmark.circle.fill")
-            }
-            .buttonStyle(.plain).accessibilityLabel("Clear search")
-          }
-        }
-        .padding(10).background(VaniTheme.paper, in: RoundedRectangle(cornerRadius: 8))
-        HStack(spacing: 4) {
-          categoryButton("Notes", deleted: false)
-          categoryButton("Recently Deleted", deleted: true)
-        }
-
-      }.padding(.horizontal, 20)
-      ScrollView {
-        LazyVStack(alignment: .leading, spacing: 4) {
-          ForEach(model.visibleNotes) { note in
-            Button {
-              Task { await model.select(note) }
-            } label: {
-              VStack(alignment: .leading, spacing: 7) {
-                Text(note.displayTitle).font(.system(size: 14, weight: .semibold)).lineLimit(2)
-                Text(note.text.isEmpty ? "Empty note" : String(note.text.prefix(160)))
-                  .font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(2)
-                Text(note.updatedAt, format: .dateTime.month(.abbreviated).day())
-                  .font(.system(size: 11)).foregroundStyle(.secondary)
-              }
-              .frame(maxWidth: .infinity, alignment: .leading).padding(14)
-              .background(
-                model.draft?.id == note.id ? VaniTheme.paper : .clear,
-                in: RoundedRectangle(cornerRadius: 10)
-              )
-              .overlay {
-                RoundedRectangle(cornerRadius: 10)
-                  .strokeBorder(model.draft?.id == note.id ? VaniTheme.line : .clear)
-              }
-              .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain).disabled(model.busy)
-            .accessibilityAddTraits(model.draft?.id == note.id ? .isSelected : [])
-          }
-          if model.visibleNotes.isEmpty {
-            VStack(alignment: .leading, spacing: 6) {
-              Text(model.search.isEmpty ? "A fresh page awaits" : "No matching notes")
-                .font(.system(size: 13, weight: .medium))
-              Text(
-                model.search.isEmpty
-                  ? "Your notes will appear here." : "Try another word or clear your search."
-              )
-              .font(.caption).foregroundStyle(.secondary)
-            }.padding(14)
-          }
-        }.padding(10)
-      }.padding(.top, 12)
-      HStack {
-        Label("On this Mac", systemImage: "internaldrive")
-        Spacer()
-        Text("\(model.visibleNotes.count)")
-      }.font(.caption).foregroundStyle(.secondary).padding(20)
-    }
-    .frame(minWidth: 230, idealWidth: 260, maxWidth: 320)
-    .background(VaniTheme.sidebar)
-  }
-
-  private func categoryButton(_ title: String, deleted: Bool) -> some View {
-    Button {
-      Task { await model.showDeleted(deleted) }
-    } label: {
-      Text(title).font(
-        .system(size: 12, weight: model.showingDeleted == deleted ? .semibold : .regular)
-      )
-      .foregroundStyle(model.showingDeleted == deleted ? Color.primary : .secondary)
-      .padding(.horizontal, 9).padding(.vertical, 8)
-      .background(
-        model.showingDeleted == deleted ? VaniTheme.paper : .clear,
-        in: RoundedRectangle(cornerRadius: 6))
-    }.buttonStyle(.plain).disabled(model.busy)
-      .accessibilityAddTraits(model.showingDeleted == deleted ? .isSelected : [])
   }
 
   private var toolbar: some View {
     HStack(spacing: 14) {
-      Button {
-        sidebarVisible.toggle()
-      } label: {
-        Image(systemName: "sidebar.left")
-      }
-      .help(sidebarVisible ? "Hide sidebar" : "Show sidebar")
-      .accessibilityLabel(sidebarVisible ? "Hide sidebar" : "Show sidebar")
       Text("Notes").font(.system(size: 13, weight: .medium))
       Spacer()
       if let note = model.draft {
@@ -287,4 +170,102 @@ struct NotesView: View {
       }
     }
   }
+}
+
+struct NotesLibraryView: View {
+  @ObservedObject var model: NotesModel
+  @FocusState private var searchFocused: Bool
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 0) {
+      VStack(alignment: .leading, spacing: 16) {
+        HStack {
+          Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+          TextField("Search notes", text: $model.search)
+            .textFieldStyle(.plain).focused($searchFocused).accessibilityLabel("Search notes")
+          if !model.search.isEmpty {
+            Button {
+              model.search = ""
+            } label: {
+              Image(systemName: "xmark.circle.fill")
+            }
+            .buttonStyle(.plain).accessibilityLabel("Clear search")
+          }
+        }
+        .padding(10).background(VaniTheme.paper, in: RoundedRectangle(cornerRadius: 8))
+        HStack(spacing: 4) {
+          categoryButton("Notes", deleted: false)
+          categoryButton("Recently Deleted", deleted: true)
+        }
+
+      }.padding(.horizontal, 20).padding(.top, 20)
+      ScrollView {
+        LazyVStack(alignment: .leading, spacing: 4) {
+          ForEach(model.visibleNotes) { note in
+            Button {
+              Task { await model.select(note) }
+            } label: {
+              VStack(alignment: .leading, spacing: 7) {
+                Text(note.displayTitle).font(.system(size: 14, weight: .semibold)).lineLimit(2)
+                Text(note.text.isEmpty ? "Empty note" : String(note.text.prefix(160)))
+                  .font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(2)
+                Text(note.updatedAt, format: .dateTime.month(.abbreviated).day())
+                  .font(.system(size: 11)).foregroundStyle(.secondary)
+              }
+              .frame(maxWidth: .infinity, alignment: .leading).padding(14)
+              .background(
+                model.draft?.id == note.id ? VaniTheme.paper : .clear,
+                in: RoundedRectangle(cornerRadius: 10)
+              )
+              .overlay {
+                RoundedRectangle(cornerRadius: 10)
+                  .strokeBorder(model.draft?.id == note.id ? VaniTheme.line : .clear)
+              }
+              .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain).disabled(model.busy)
+            .accessibilityAddTraits(model.draft?.id == note.id ? .isSelected : [])
+          }
+          if model.visibleNotes.isEmpty {
+            VStack(alignment: .leading, spacing: 6) {
+              Text(model.search.isEmpty ? "No notes yet" : "No matching notes")
+                .font(.system(size: 13, weight: .medium))
+              Text(
+                model.search.isEmpty
+                  ? "Your notes will appear here." : "Try another word or clear your search."
+              )
+              .font(.caption).foregroundStyle(.secondary)
+            }.padding(14)
+          }
+        }.padding(10)
+      }.padding(.top, 12)
+      HStack {
+        Label("On this Mac", systemImage: "internaldrive")
+        Spacer()
+        Text("\(model.visibleNotes.count)")
+      }.font(.caption).foregroundStyle(.secondary).padding(20)
+    }
+    .background(VaniTheme.sidebar)
+    .background {
+      Button("Find Notes") { searchFocused = true }
+        .keyboardShortcut("f", modifiers: .command).hidden().accessibilityHidden(true)
+    }
+  }
+
+  private func categoryButton(_ title: String, deleted: Bool) -> some View {
+    Button {
+      Task { await model.showDeleted(deleted) }
+    } label: {
+      Text(title).font(
+        .system(size: 12, weight: model.showingDeleted == deleted ? .semibold : .regular)
+      )
+      .foregroundStyle(model.showingDeleted == deleted ? Color.primary : .secondary)
+      .padding(.horizontal, 9).padding(.vertical, 8)
+      .background(
+        model.showingDeleted == deleted ? VaniTheme.paper : .clear,
+        in: RoundedRectangle(cornerRadius: 6))
+    }.buttonStyle(.plain).disabled(model.busy)
+      .accessibilityAddTraits(model.showingDeleted == deleted ? .isSelected : [])
+  }
+
 }

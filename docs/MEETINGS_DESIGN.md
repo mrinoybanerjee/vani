@@ -21,7 +21,7 @@ Quitting must finish capture and save successfully. No recording starts automati
 
 ```text
 AppCoordinator: exclusive speech reservation + quit preflight
-  MeetingWindowController: native window + close save barrier
+  WorkspaceWindowController / WorkspaceModel: shared window, navigation and close save barriers
     MeetingView: library / authored notes / transcript / summary / export
       MeetingModel: prepare → record → stop → transcribe → summarize → idle
         MeetingAudioCapture: ScreenCaptureKit audio outputs, serial work queue

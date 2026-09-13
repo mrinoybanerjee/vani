@@ -60,9 +60,11 @@ struct VaniApplication: App {
     }
     .menuBarExtraStyle(.window)
 
-    Settings {
-      SettingsView()
-        .environmentObject(coordinator)
+    .commands {
+      CommandGroup(replacing: .appSettings) {
+        Button("Settings…") { coordinator.showSettings() }
+          .keyboardShortcut(",", modifiers: .command)
+      }
     }
   }
 }

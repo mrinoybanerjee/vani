@@ -92,9 +92,13 @@ Mac, never correction audio.
 After a term is confirmed twice, the optional experimental 98 MiB vocabulary model can use acoustic
 evidence for harder names and terminology. The model is not required for dictation.
 
+Meetings, Notes and Settings share one window with a sidebar. Open any section from
+the menu bar, or use Command-comma for Settings. Switching sections preserves drafts
+and keeps active meetings running.
+
 Choose **Notes** in the menu to open your local notebook, or **Save as Note** after
 a dictation to keep its text. Notes are separate from optional transcript history.
-Use **Save** or Command-S; switching notes, closing the window, and quitting also
+Use **Save** or Command-S; switching notes or sections, closing the window, and quitting also
 save edits. A failed save keeps your draft open. You can export a copy and confirm
 **Discard Changes** if saving cannot recover. Unsaved edits can be lost if the
 process crashes. Export writes a plain-text copy to a location you choose.
@@ -170,6 +174,7 @@ storage, and UI remain outside that callback. Dependencies are exact-pinned in
 - [Architecture](docs/ARCHITECTURE.md)
 - [Product design](docs/PRODUCT_DESIGN.md)
 - [Visual system](DESIGN.md)
+- [Unified workspace](docs/WORKSPACE_DESIGN.md)
 - [Redesign research and acceptance boundaries](docs/REDESIGN_2026-09-12.md)
 - [Local Notes design and storage](docs/NOTES_DESIGN.md)
 - [Meeting capture, summaries and recovery](docs/MEETINGS_DESIGN.md)

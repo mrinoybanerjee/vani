@@ -27,13 +27,12 @@ final class AppCoordinator: ObservableObject {
   private let personalizationStore: PersonalizationStore
   private let speechRecognizer: FluidAudioSpeechRecognizer
   @Published private(set) var meetingOwnsSpeech = false
-  private var meetingWindowController: MeetingWindowController?
+  private var workspaceWindowController: WorkspaceWindowController?
   private let session: DictationSession
   private let hotkeyMonitor = GlobalHotkeyMonitor()
   private let overlay = OverlayController()
   private let cuePlayer = DictationCuePlayer()
   private let teachWindowController = TeachWindowController()
-  private var notesWindowController: NotesWindowController?
   private var notificationTokens: [NSObjectProtocol] = []
   private var qaWindow: NSWindow?
   private var captureStartTask: Task<Void, Never>?
@@ -311,30 +310,40 @@ final class AppCoordinator: ObservableObject {
     NSApplication.shared.terminate(nil)
   }
 
-  func showMeetings() {
-    if meetingWindowController == nil {
-      let model = MeetingModel(
-        recognizer: speechRecognizer,
-        reserveSpeech: { [weak self] in
-          guard let self, !meetingOwnsSpeech, snapshot.phase == .ready,
-            captureStartTask == nil, sessionOperationTask == nil, !isTerminating, !quitPreflight
-          else { return false }
-          meetingOwnsSpeech = true
-          return true
-        }, releaseSpeech: { [weak self] in self?.meetingOwnsSpeech = false })
-      meetingWindowController = MeetingWindowController(model: model)
-    }
-    meetingWindowController?.present()
+  private func workspaceController() -> WorkspaceWindowController {
+    if let workspaceWindowController { return workspaceWindowController }
+    let meetings = MeetingModel(
+      recognizer: speechRecognizer,
+      reserveSpeech: { [weak self] in
+        guard let self, !meetingOwnsSpeech, snapshot.phase == .ready,
+          captureStartTask == nil, sessionOperationTask == nil, !isTerminating, !quitPreflight
+        else { return false }
+        meetingOwnsSpeech = true
+        return true
+      }, releaseSpeech: { [weak self] in self?.meetingOwnsSpeech = false })
+    let controller = WorkspaceWindowController(model: WorkspaceModel(meetings: meetings))
+    workspaceWindowController = controller
+    return controller
+  }
+
+  func showMeetings() { showWorkspace(.meetings) }
+  func showSettings() { showWorkspace(.settings) }
+
+  private func showWorkspace(_ section: WorkspaceModel.Section) {
+    let controller = workspaceController()
+    controller.present(coordinator: self)
+    controller.window?.makeFirstResponder(nil)
+    Task { await controller.model.select(section) }
   }
 
   func showNotes(saveLastTranscript: Bool = false) {
-    if notesWindowController == nil { notesWindowController = NotesWindowController() }
-    guard let controller = notesWindowController else { return }
-    controller.present(load: !saveLastTranscript)
-    if saveLastTranscript {
-      Task {
-        guard let text = await session.transcriptForNote() else { return }
-        await controller.model.create(text: text)
+    let controller = workspaceController()
+    controller.present(coordinator: self)
+    controller.window?.makeFirstResponder(nil)
+    Task {
+      guard await controller.model.select(.notes) else { return }
+      if saveLastTranscript, let text = await session.transcriptForNote() {
+        await controller.model.notes.create(text: text)
       }
     }
   }
@@ -343,18 +352,14 @@ final class AppCoordinator: ObservableObject {
     quitPreflight = true
     var accepted = false
     defer { if !accepted { quitPreflight = false } }
-    if let meetingWindowController, !(await meetingWindowController.model.prepareToQuit()) {
-      meetingWindowController.present()
-      return false
-    }
-    guard let controller = notesWindowController else {
+    guard let controller = workspaceWindowController else {
       accepted = true
       return true
     }
-    let saved = await controller.model.save()
-    if !saved { controller.present() }
-    accepted = saved
-    return saved
+    controller.window?.makeFirstResponder(nil)
+    accepted = await controller.model.prepareToClose(quitting: true)
+    if !accepted { controller.present(coordinator: self) }
+    return accepted
   }
 
   func prepareForTermination() async {
@@ -756,7 +761,7 @@ final class AppCoordinator: ObservableObject {
     inputMonitoringPermission = currentInputMonitoring
 
     if previousMicrophone.isGranted, !currentMicrophone.isGranted {
-      await meetingWindowController?.model.interrupt(
+      await workspaceWindowController?.model.meetings.interrupt(
         "Meeting stopped because microphone permission changed. Saved audio is available for recovery."
       )
       await session.permissionWasRevoked(.microphonePermissionDenied)
@@ -848,7 +853,7 @@ final class AppCoordinator: ObservableObject {
         queue: .main
       ) { [weak self] _ in
         Task { @MainActor in
-          await self?.meetingWindowController?.model.interrupt(
+          await self?.workspaceWindowController?.model.meetings.interrupt(
             "Meeting stopped for sleep. Saved audio is available for recovery.")
           await self?.session.systemWillSleep()
         }
@@ -917,27 +922,26 @@ final class AppCoordinator: ObservableObject {
       )
       return
     }
-    let showsSettings = qaMode == .settings
+    if qaMode == .settings {
+      showSettings()
+      return
+    }
     let window = NSWindow(
       contentRect: NSRect(
         x: 0,
         y: 0,
-        width: showsSettings ? 760 : 360,
-        height: showsSettings ? 580 : 440
+        width: 360,
+        height: 440
       ),
       styleMask: [.titled, .closable, .miniaturizable],
       backing: .buffered,
       defer: false
     )
-    window.title = showsSettings ? "Vani Settings QA" : "Vani QA"
+    window.title = "Vani QA"
     window.contentViewController = NSHostingController(
       rootView: AnyView(
         Group {
-          if showsSettings {
-            SettingsView()
-          } else {
-            MenuContentView()
-          }
+          MenuContentView()
         }
         .environmentObject(self)
       )

@@ -6,10 +6,10 @@ following phase 1 of COMPETITIVE_DISCOVERY.md.
 Implementation: Vani v0.3.0 build 8, locally validated with 23 Notes tests.
 Installation and physical dictation verification remain separate release gates.
 
-One optional native window provides a searchable list, title and text editor,
+The Notes section of the [shared workspace](WORKSPACE_DESIGN.md) provides a searchable list, title and text editor,
 Save (Command-S), new blank note, save-last-transcript, export, Recently Deleted,
 and Restore. Notes are explicitly persisted independently of dictation history.
-Closing or switching notes saves the current edit first; a failed save retains
+Closing or switching notes or workspace sections saves the current edit first; a failed save retains
 the editor and prevents that transition. Save status stays visible. Unsaved
 edits can be lost in a process crash; this first release does not claim autosave.
 After a failed save, the user may export a copy and explicitly confirm discarding
@@ -18,13 +18,14 @@ in the application; it never discards automatically. Discard restores the last
 saved draft without writing to storage or hiding the storage error.
 
 ```
-Menu action -> NotesWindowController -> NotesModel -> NoteStore actor
+Menu action -> WorkspaceWindowController -> WorkspaceModel -> NotesModel -> NoteStore actor
                    native UI            draft       atomic versioned JSON
 DictationSession -> read last transcript only --------^
 ```
 
 Keep capture, target-app insertion, shortcuts, learning and model ownership
-unchanged. The store is created only on opening Notes. It uses an owner-only
+unchanged. The store is constructed with the workspace; note loading begins only
+when Notes is selected. It uses an owner-only
 directory, bounded reads/writes, validated version/IDs/content and a previous
 saved copy. Corruption fails closed; explicit restoration preserves the unreadable
 file. Soft deletion changes one field, with no irreversible deletion control.
