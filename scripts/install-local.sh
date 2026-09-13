@@ -95,8 +95,8 @@ printf '%s\n' \
     '4. In System Settings > Keyboard, set "Press Globe key to" to "Do Nothing".' \
     '5. Hold Left Fn, speak, then release to insert text. Other hold keys are available in Settings.'
 
-if ! codesign -dv --verbose=4 "$DESTINATION_APP" 2>&1 \
-    | grep -F 'Authority=Vani Local Development' >/dev/null; then
+if codesign -dv --verbose=4 "$DESTINATION_APP" 2>&1 \
+    | grep -F 'Signature=adhoc' >/dev/null; then
     printf '\nNote: this app is ad-hoc signed. macOS may treat the next rebuilt version as a different app and reset its privacy permissions.\n'
     printf 'Prevent this with the free setup in docs/BUILDING.md#stable-local-signing.\n'
     printf 'If permission switches will not stay enabled, follow docs/TROUBLESHOOTING.md#permissions-stopped-working-after-an-update.\n'

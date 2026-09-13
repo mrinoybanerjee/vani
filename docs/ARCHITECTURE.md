@@ -74,6 +74,7 @@ Opt-in personalization stores only confirmed correction spans in a separate vers
 bounded, atomic local profile. The profile actor serializes teach, delete, and reset
 transactions and quarantines unsafe data. Deterministic learned corrections run before
 the manual dictionary, while manual dictionary and snippet collisions are excluded.
+Confirming a replacement again preserves its identity and uses the latest explicit casing.
 After two confirmations, up to 50 ranked terms can be passed to an optional experimental pinned CTC
 110M model for conservative acoustic rescoring. Any auxiliary-model failure returns the
 successful base TDT transcript. FluidAudio 0.15.5's rescoring path is disabled in Debug
@@ -106,6 +107,8 @@ and metadata only.
 The personalization profile uses `personalization.json` in Application Support with a
 1 MiB pre-read ceiling, schema version, private permissions, atomic writes, and corrupt
 file quarantine. It is independent of transcript history and contains no audio.
+Learning and removal can start fresh only after corrupt data is successfully preserved;
+a failed quarantine propagates the storage error and prevents replacement of the original file.
 
 Notes use versioned `Notes/notes.json`, bounded to 1,000 records, 1 MiB text and
 4 KiB title per note, and a 16 MiB encoded file. Atomic owner-only writes retain
