@@ -36,6 +36,7 @@ Apple notarization.
 - Opt-in local Smart Formatting for conservative fillers, spoken punctuation,
   sentence casing, and line breaks
 - Optional bounded history, disabled by default
+- Local Notes with editing, search, plain-text export, and recoverable deletion
 - Personal phrase dictionary and launch-at-login setting
 - Opt-in local learning from corrections, with transparent delete and reset controls
 - Optional experimental acoustic vocabulary boosting for repeatedly corrected terms
@@ -88,6 +89,18 @@ without discarding an unfinished edit. Vani stores only the changed phrases on t
 Mac, never correction audio.
 After a term is confirmed twice, the optional experimental 98 MiB vocabulary model can use acoustic
 evidence for harder names and terminology. The model is not required for dictation.
+
+Choose **Notes** in the menu to open your local notebook, or **Save as Note** after
+a dictation to keep its text. Notes are separate from optional transcript history.
+Use **Save** or Command-S; switching notes, closing the window, and quitting also
+save edits. A failed save keeps your draft open. Unsaved edits can be lost if the
+process crashes. Export writes a plain-text copy to a location you choose.
+
+Deleted notes remain in **Recently Deleted** until restored. The notebook keeps up
+to 1,000 notes, with a 1 MiB text limit per note and 16 MiB total. Files live in
+`~/Library/Application Support/Vani/Notes`, with a previous saved copy; if the main
+file cannot be read, **Restore Previous Copy** preserves that file before recovery.
+Notes do not record meetings or generate summaries.
 
 ## Updating Vani
 
