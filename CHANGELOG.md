@@ -2,6 +2,26 @@
 
 All notable changes follow semantic versioning.
 
+## 0.3.0 - 2026-09-12
+
+### Added
+
+- [Vani Notes](README.md#run-locally): save a dictation or start a blank note, edit and search locally, export
+  plain text, and recover notes from Recently Deleted.
+- Recover a previous saved notebook copy when the current file cannot be read;
+  private atomic storage preserves the unreadable file during explicit recovery.
+
+### Fixed
+
+- Prevent repeated stop and audio-route events from finalizing the same dictation twice.
+- Preserve global learned corrections when teaching the same correction in another app.
+- Keep an unfinished correction visible after a failed save and support Command-S.
+
+### Changed
+
+- Simplified menu and settings labels, empty states, and native editor spacing.
+- Keep note storage separate from recording, insertion, models, and transcript history.
+
 ## 0.2.1 - 2026-08-28
 
 ### Changed

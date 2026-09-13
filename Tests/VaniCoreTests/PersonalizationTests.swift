@@ -324,3 +324,32 @@ func settingsFromBeforePersonalizationDecodeWithLearningDisabled() throws {
   let settings = try JSONDecoder().decode(VaniSettings.self, from: Data(legacy.utf8))
   #expect(!settings.personalizationEnabled)
 }
+
+@Test
+func crossApplicationCorrectionStaysGlobalAfterFurtherConfirmations() {
+  let engine = PersonalizationEngine()
+  var corrections: [LearnedCorrection] = []
+  for app in ["one.app", "two.app", "one.app", "three.app"] {
+    corrections =
+      engine.learn(
+        original: "Vanny",
+        corrected: "Vani",
+        applicationBundleIdentifier: app,
+        existing: corrections
+      ).corrections
+    if corrections[0].confirmationCount >= 2 {
+      #expect(corrections[0].applicationBundleIdentifier == nil)
+    }
+  }
+
+  #expect(corrections.count == 1)
+  #expect(corrections[0].confirmationCount == 4)
+  #expect(corrections[0].applicationBundleIdentifier == nil)
+  #expect(
+    engine.apply(
+      "Vanny",
+      corrections: corrections,
+      manualDictionary: [],
+      applicationBundleIdentifier: "another.app"
+    ) == "Vani")
+}

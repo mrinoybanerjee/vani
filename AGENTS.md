@@ -6,6 +6,9 @@ Vani v1 is an Apple Silicon, English-only, local dictation app. Do not add
 cloud transcription, accounts, telemetry, plugins, meeting capture, or a generic
 LLM cleanup layer without an approved design change.
 
+The approved v0.3.0 extension is an optional local Notes window. Follow
+[docs/NOTES_DESIGN.md](docs/NOTES_DESIGN.md); meeting capture and AI summaries remain outside scope.
+
 ## Workflow
 
 Use the installed gstack workflow for substantive work:

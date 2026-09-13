@@ -1,6 +1,7 @@
 # Architecture
 
-Vani is a Swift 6 package with two production targets.
+Vani is a Swift 6 package with two production targets. This diagram shows the
+dictation and correction branch; the optional Notes branch is described below.
 
 ```text
 Vani (SwiftUI/AppKit, @MainActor)
@@ -17,13 +18,19 @@ Vani (SwiftUI/AppKit, @MainActor)
 
 ## State ownership
 
-`DictationSession` is the only owner of the operational phase. Its explicit state
+`DictationSession` is the only owner of the dictation phase. Its explicit state
 machine rejects duplicate and out-of-order events. UI receives immutable
 `SessionSnapshot` values and cannot mutate the state directly.
 
 `AppCoordinator` owns the standalone Teach Vani window. Reopening Teach brings the
 existing window forward so an unfinished correction is preserved, and application
 activation restores keyboard focus to its editor.
+
+The coordinator lazily owns a separate `NotesWindowController`. Its main-actor
+`NotesModel` owns the editable draft and UI state; a `NoteStore` actor owns local
+file operations. Save as Note reads the selected transcript without changing the
+dictation session. Switching notes, closing, and quitting first save the draft;
+a failed save prevents the transition. See [Local Notes](NOTES_DESIGN.md).
 
 The app moves through `setup`, `preparing`, `ready`, `listening`, `transcribing`,
 `inserting`, and `recoverableError`. Permission loss, sleep, audio-route changes,
@@ -99,6 +106,12 @@ and metadata only.
 The personalization profile uses `personalization.json` in Application Support with a
 1 MiB pre-read ceiling, schema version, private permissions, atomic writes, and corrupt
 file quarantine. It is independent of transcript history and contains no audio.
+
+Notes use versioned `Notes/notes.json`, bounded to 1,000 records, 1 MiB text and
+4 KiB title per note, and a 16 MiB encoded file. Atomic owner-only writes retain
+`notes.backup.json`; explicit backup restoration preserves the current file.
+Recently Deleted is a reversible field change, not a purge. The notebook has no
+audio capture, inference, network activity, or dependency on transcript history.
 
 ## Dependency boundary
 

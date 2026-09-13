@@ -20,6 +20,7 @@ struct SettingsView: View {
           }
           .buttonStyle(.plain)
           .help("Dismiss")
+          .accessibilityLabel("Dismiss error")
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
@@ -270,19 +271,29 @@ private struct DictionarySettingsView: View {
             || replacement.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         )
         .help("Add correction")
+        .accessibilityLabel("Add dictionary correction")
       }
 
-      List {
-        ForEach(coordinator.settings.dictionary) { entry in
-          HStack {
-            Text(entry.spoken)
-            Spacer()
-            Image(systemName: "arrow.right")
-              .foregroundStyle(.secondary)
-            Text(entry.replacement)
+      if coordinator.settings.dictionary.isEmpty {
+        ContentUnavailableView(
+          "Your words, spelled correctly",
+          systemImage: "character.book.closed",
+          description: Text("Add a name or phrase above, then the spelling you want Vani to use.")
+        )
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+      } else {
+        List {
+          ForEach(coordinator.settings.dictionary) { entry in
+            HStack {
+              Text(entry.spoken)
+              Spacer()
+              Image(systemName: "arrow.right")
+                .foregroundStyle(.secondary)
+              Text(entry.replacement)
+            }
           }
+          .onDelete { coordinator.removeDictionaryEntries(at: $0) }
         }
-        .onDelete { coordinator.removeDictionaryEntries(at: $0) }
       }
     }
     .padding(20)
@@ -311,6 +322,7 @@ private struct SnippetSettingsView: View {
           .font(.body)
           .scrollContentBackground(.hidden)
           .padding(2)
+          .accessibilityLabel("Expanded snippet text")
       }
       .frame(height: 72)
       .background(.background)
@@ -331,6 +343,7 @@ private struct SnippetSettingsView: View {
             Image(systemName: "xmark")
           }
           .help("Cancel editing")
+          .accessibilityLabel("Cancel editing snippet")
         }
         Button(
           editingSnippetID == nil ? "Add" : "Save",
@@ -368,6 +381,7 @@ private struct SnippetSettingsView: View {
               }
               .buttonStyle(.borderless)
               .help("Edit snippet")
+              .accessibilityLabel("Edit snippet: \(snippet.trigger)")
             }
             .padding(.vertical, 2)
           }
@@ -430,7 +444,15 @@ private struct HistorySettingsView: View {
   var body: some View {
     VStack(spacing: 12) {
       if coordinator.history.isEmpty {
-        ContentUnavailableView("No History", systemImage: "clock")
+        ContentUnavailableView(
+          "No saved transcripts",
+          systemImage: "clock",
+          description: Text(
+            coordinator.settings.historyEnabled
+              ? "Your next dictation will appear here."
+              : "Turn on transcript history in General to keep a local record."
+          )
+        )
       } else {
         List(coordinator.history) { entry in
           VStack(alignment: .leading, spacing: 4) {

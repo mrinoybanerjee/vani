@@ -12,6 +12,7 @@ Vani is local-first by design.
 - Support diagnostics exclude audio and transcript text by default.
 - Snippets and optional Smart Formatting run entirely inside the Vani process.
 - Opt-in learned corrections stay in a separate local profile and contain no audio.
+- Notes persist only through explicit notebook actions and never upload text or audio.
 
 The one-time model download comes from an exact revision of the
 `FluidInference/parakeet-tdt-0.6b-v2-coreml` Hugging Face repository. Vani downloads
@@ -39,6 +40,13 @@ without this model and falls back to the base transcript if rescoring fails.
   replaced or the app exits.
 - Transcript history is written only when the user enables it. History is bounded,
   stored atomically, and can be cleared in Settings.
+- Saved notes use plaintext JSON in `~/Library/Application Support/Vani/Notes`,
+  protected by owner-only directory/file permissions, without app-level encryption.
+  Notes are separate from history; clearing history does not delete them.
+- Notes in Recently Deleted remain recoverable with no automatic purge. A previous
+  saved copy and files preserved during explicit recovery can also contain note text.
+  Export creates a plain-text copy at the user's chosen location; Vani does not
+  manage that copy afterward. [Uninstalling](docs/UNINSTALLING.md) removes the local notebook.
 - Diagnostics form a bounded in-memory ring of event codes, phases, timing, and
   counts. They do not include transcript, audio, clipboard, or focused-field data.
 

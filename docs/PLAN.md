@@ -4,6 +4,9 @@ Status: Implemented; Developer ID distribution and dogfood percentiles are optio
 Owner: mrinoybanerjee
 Target: Apple Silicon macOS, English
 
+This is the original dictation plan and review history. The approved v0.3.0 local
+notebook extension is described in [NOTES_DESIGN.md](NOTES_DESIGN.md).
+
 ## Outcome
 
 Ship a signed, testable menu-bar app that captures speech through a hold shortcut,

@@ -136,6 +136,8 @@ VANI_RUN_LONG_AUDIO_TESTS=1 swift test -c release \
 - Optional history: `~/Library/Application Support/Vani/history.json` and quarantined
   `history.corrupt-*.json` files, all clearable from Settings
 - Learned corrections: `~/Library/Application Support/Vani/personalization.json`
+- Notes: `~/Library/Application Support/Vani/Notes/notes.json`, its previous copy
+  `notes.backup.json`, and any `notes.preserved-*.json` recovery files
 - Cache: `~/Library/Caches/com.mrinoy.vani`
 - Shared speech model: `~/Library/Application Support/FluidAudio/Models/parakeet-tdt-0.6b-v2`
 - Optional vocabulary model:

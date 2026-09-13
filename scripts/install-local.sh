@@ -39,11 +39,8 @@ CONFIGURATION=release "$ROOT/scripts/build-app.sh"
 if pgrep -x Vani >/dev/null 2>&1; then
     osascript -e 'tell application id "com.mrinoy.vani" to quit' >/dev/null 2>&1 || true
     if ! wait_for_vani_exit; then
-        pkill -TERM -x Vani >/dev/null 2>&1 || true
-        if ! wait_for_vani_exit; then
-            echo "error: Vani is still running. Quit it, then run the installer again." >&2
-            exit 1
-        fi
+        echo "error: Vani is still running. Save any unfinished notes, quit Vani, then run the installer again." >&2
+        exit 1
     fi
 fi
 
