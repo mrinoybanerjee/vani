@@ -18,10 +18,10 @@ someone who wants private English voice typing without an account or cloud servi
 ## Experience direction
 
 - Warm native visual system defined in [DESIGN.md](../DESIGN.md), with adaptive light/dark paper surfaces and restrained green accents
-- Compact menu-bar popover, one settings window, and a focused correction window shown
-  only when the user chooses Teach
-- Optional Notes opens a spacious native notebook with search, title/text previews,
-  focus mode, keyboard creation/find/save, export, and Recently Deleted.
+- Compact menu-bar popover, one shared [Meetings, Notes and Settings workspace](WORKSPACE_DESIGN.md),
+  and a focused correction window shown only when the user chooses Teach
+- Optional Notes uses the shared sidebar and a spacious editor with search, title/text previews,
+  keyboard creation/find/save, export, and Recently Deleted.
   Category changes save first; persistence status and save failures remain visible.
 - Non-activating upper-right overlay with listening, processing, success, and error
   states, positioned below the menu bar so it does not cover common text composers

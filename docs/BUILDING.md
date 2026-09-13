@@ -136,11 +136,13 @@ Generate light/dark native UI fixtures using temporary notebook and meeting reco
 
 ```bash
 VANI_UI_SNAPSHOT_DIR="$PWD/.build/design-snapshots" swift test \
-  --filter 'captureDesignStatesWhenRequested|meetingDesignAndNativeNotesWhenRequested'
+  --filter 'captureDesignStatesWhenRequested|meetingDesignAndNativeNotesWhenRequested|WorkspaceInteractionTests|WorkspaceModelTests'
 ```
 
-These tests open native windows and save PNGs; they do not use the real notebook or
-record audio. Run them in a logged-in Mac session.
+These tests open the shared workspace, save light/dark PNGs at default and compact
+sizes, and check navigation, draft recovery and visible-section shortcuts. They use
+temporary stores and fake capture, not the real notebook or recorded audio. Run them
+in a logged-in Mac session.
 
 ## Environment variables
 

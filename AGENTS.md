@@ -11,6 +11,10 @@ alongside the optional quick notebook. Follow [docs/MEETINGS_DESIGN.md](docs/MEE
 and [docs/NOTES_DESIGN.md](docs/NOTES_DESIGN.md). The user approved microphone + Mac audio
 capture and local summaries on September 12, 2026. Cloud processing remains outside scope.
 
+The approved v0.5.0 workspace consolidates Meetings, Notes and Settings into one window.
+Follow [docs/WORKSPACE_DESIGN.md](docs/WORKSPACE_DESIGN.md) for navigation, draft retention
+and close/quit ownership; Teach Vani retains its separate correction window.
+
 ## Workflow
 
 Use the installed gstack workflow for substantive work:
