@@ -6,9 +6,10 @@ All notable changes follow semantic versioning.
 
 ### Added
 
-- Vani Notes: save a dictation or start a blank note, edit and search locally, export
+- [Vani Notes](README.md#run-locally): save a dictation or start a blank note, edit and search locally, export
   plain text, and recover notes from Recently Deleted.
-- Private atomic note storage with a previous saved copy and explicit recovery.
+- Recover a previous saved notebook copy when the current file cannot be read;
+  private atomic storage preserves the unreadable file during explicit recovery.
 
 ### Fixed
 

@@ -2,8 +2,8 @@
 
 ## Protected data
 
-Vani handles microphone audio, transcript text, focused application identity, and
-temporary clipboard content. Transcript and audio content are prohibited from logs
+Vani handles microphone audio, transcript and note text, focused application identity,
+and temporary clipboard content. Note, transcript and audio content are prohibited from logs
 and diagnostics.
 
 ## Trust boundaries
@@ -44,6 +44,11 @@ and diagnostics.
 - Snippet matching uses escaped literal triggers and one-pass expansion, preventing
   regex injection and recursive expansion.
 - History is opt-in, capped at 500 entries and a 64 MiB file, atomic, and clearable.
+- Notes use a separate owner-only directory and atomic owner-only files, validate
+  schema and unique IDs, and reject symlinked/nonregular note files. Reads/writes
+  are bounded to 16 MiB, 1,000 notes, 1 MiB body and 4 KiB title per note.
+- Previous and recovery copies preserve note text locally. Recently Deleted is
+  recoverable retention, not secure erasure; exported copies are user-managed.
 - Diagnostics are content-free and bounded.
 - Unexpected, missing, changed, hidden, or symlinked model artifacts are rejected.
 - Model files are downloaded to a private staging directory, verified in full, and

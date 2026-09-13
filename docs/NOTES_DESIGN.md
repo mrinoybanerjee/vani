@@ -3,6 +3,9 @@
 Approved scope: the user's September 12 request to also build Vani Notes,
 following phase 1 of COMPETITIVE_DISCOVERY.md.
 
+Implementation: Vani v0.3.0 build 8, locally validated with 22 Notes tests.
+Installation and physical dictation verification remain separate release gates.
+
 One optional native window provides a searchable list, title and text editor,
 Save (Command-S), new blank note, save-last-transcript, export, Recently Deleted,
 and Restore. Notes are explicitly persisted independently of dictation history.
@@ -26,7 +29,7 @@ There is no meeting capture, cloud service, summarizer or new dependency.
 Tests cover durable create/edit/reopen, search, trash/restore, export formatting,
 duplicate clicks, invalid/oversized files, recoverable corruption, permissions,
 failed saves retaining drafts, switching and close guards, native text entry,
-and repeat window presentation. Run the existing full dictation suite unchanged
+and repeat window presentation. Run the existing full dictation suite
 and signed app checks before installing. Inspect native light/dark renders.
 
 Architecture review: one store and one UI owner are sufficient. No generic

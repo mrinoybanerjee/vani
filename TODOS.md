@@ -15,7 +15,7 @@ These items are intentionally outside v1.
 - Cloud transcription or synchronization
 - Generative rewriting and custom prompts
 - Command or assistant mode
-- Meeting recording and notes
+- Meeting capture, speaker identification, and AI summaries (the local notebook ships in v0.3.0)
 - Team administration
 - Plugin or model marketplace
 - Background auto-updater

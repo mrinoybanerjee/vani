@@ -121,7 +121,7 @@ git pull --ff-only origin main
 
 If it prints any files, stop and review those local changes before pulling. The
 installer replaces `/Applications/Vani.app` atomically and keeps the downloaded model,
-settings, snippets, dictionary, and optional history.
+settings, snippets, dictionary, optional history, and saved notes.
 
 ### Keep permissions across updates
 
@@ -144,6 +144,9 @@ storage, and UI remain outside that callback. Dependencies are exact-pinned in
 
 - [Architecture](docs/ARCHITECTURE.md)
 - [Product design](docs/PRODUCT_DESIGN.md)
+- [Local Notes design and storage](docs/NOTES_DESIGN.md)
+- [Competitive discovery and future direction](docs/COMPETITIVE_DISCOVERY.md)
+- [September audit and release evidence](docs/AUDIT_2026-09-12.md)
 - [Local personalization](docs/PERSONALIZATION.md)
 - [Project provenance](docs/PROVENANCE.md)
 - [Privacy contract](PRIVACY.md)
@@ -153,6 +156,11 @@ storage, and UI remain outside that callback. Dependencies are exact-pinned in
 - [Troubleshooting](docs/TROUBLESHOOTING.md)
 - [Uninstalling](docs/UNINSTALLING.md)
 - [Contributing](CONTRIBUTING.md)
+
+Project references: [engineering instructions](AGENTS.md), [agent guide](CLAUDE.md),
+[original v1 plan](docs/PLAN.md), [roadmap](TODOS.md), [changelog](CHANGELOG.md),
+[release workflow](docs/RELEASING.md), [security policy](SECURITY.md), and
+[code of conduct](CODE_OF_CONDUCT.md).
 
 ## License
 

@@ -1,6 +1,7 @@
 # Vani competitive discovery and product direction
 
-Research date: September 12, 2026. Status: design proposal, not implemented functionality.
+Research date: September 12, 2026. Updated for Vani v0.3.0: phase 1 local Notes is
+implemented and locally tested; meeting capture and AI summaries remain proposals.
 
 ## Recommendation
 
@@ -29,8 +30,9 @@ Vani's existing capabilities below come from the current repository's
 [README](../README.md), [architecture](ARCHITECTURE.md),
 [product design](PRODUCT_DESIGN.md), [privacy contract](../PRIVACY.md), and
 [benchmark record](BENCHMARKS.md). They are not a fresh installed-app certification.
-This document proposes future work; it does not modify the v1 boundary in
-[AGENTS.md](../AGENTS.md).
+The user approved phase 1 after this discovery. Its implemented boundary is in
+[Local Notes](NOTES_DESIGN.md); [AGENTS.md](../AGENTS.md) continues to exclude
+meeting capture and generative summaries without another approved design.
 
 Use current help pages to qualify landing-page claims. One Granola search snippet
 still described desktop speakers as only Me/Them; opening the live page showed
@@ -46,7 +48,7 @@ gates can change; recheck before a purchase or a public comparison.
 | Turn speech into polished prose | Context-sensitive cleanup and formatting | Meeting summaries | Notes enhanced from meeting context | Optional conservative deterministic formatting |
 | Personal names and terminology | Dictionary, learned corrections, snippets | Reuses dictionary and meeting context | Personal/workspace jargon | Dictionary, explicit Teach, optional acoustic vocabulary |
 | Capture a meeting | Separate Notetaker | Microphone and system audio, no meeting bot | Microphone and system audio, no meeting bot | Not implemented |
-| Notes, transcript, summary | Dictation history | Separate Thoughts, Transcript, Summary | Manual and enhanced notes with transcript inspection | Memory-only latest transcript; optional bounded history |
+| Notes, transcript, summary | Dictation history | Separate Thoughts, Transcript, Summary | Manual and enhanced notes with transcript inspection | Local editable/searchable notes, Save as Note, plain-text export and recoverable deletion; optional history; no generated summaries |
 | Ask questions across meetings | Through Notetaker | Advertised with source links | Chat, templates/Recipes, shared context | Not implemented |
 | Offline transcription | No; cloud transcription | Offline recording can defer cloud transcription | Provider-based transcription | Yes after model download |
 | Platforms | Mac, Windows, iOS, Android | Mac; availability gates | Mac, Windows, iOS, Android; Apple Watch offering | Apple Silicon Mac, macOS 14+, English |
@@ -150,7 +152,7 @@ separately; this is not a uniform capability promise across devices.
 | --- | --- | --- |
 | Wispr | Free desktop dictation: 2,000 words/week. Pro: $15/user/month monthly, or $12/user/month annual. Notetaker has plan-dependent weekly/history limits; the public comparison does not give precise meeting counts. | Dictation transcription always occurs in the cloud. Storage, training, and context settings are separate controls. Notetaker transcripts are stored in Wispr's cloud. |
 | Granola | Basic free; Business $14/user/month; Enterprise $35/user/month as displayed. Homepage describes free access to the most recent 30 days. | Audio goes to transcription providers; notes/transcripts are cloud stored. Local note caching does not mean offline transcription. |
-| Vani | Free open source, local build. | Local inference, no account/telemetry, history off by default, memory-only recovery audio. |
+| Vani | Free open source, local build. | Local inference, no account/telemetry, history off by default, memory-only recovery audio; explicit Notes actions persist text locally with previous/recovery copies. |
 
 Sources: [Wispr pricing](https://wisprflow.ai/pricing),
 [Wispr data controls](https://wisprflow.ai/data-controls),
@@ -195,8 +197,8 @@ permission, download, processing, recovery, and ready states. Settings should us
 short labels and disclosure for rare options. Avoid a dashboard, usage streaks,
 duplicated status cards, decorative gradients, and another onboarding sequence.
 
-A future Notes window should look like a document: compact searchable note list,
-title, content, small toolbar, and explicit capture status. Keep transcript
+The implemented Notes window uses a compact searchable note list, title, content,
+and a small toolbar. Any future meeting mode should show explicit capture status. Keep transcript
 inspection available without requiring it to dominate the editor. Preserve manual
 notes independently of any generated output. Label the recording source and show
 Stop prominently; privacy must remain legible even when visual chrome is minimal.
@@ -206,14 +208,14 @@ Increase Contrast, Reduce Motion, narrow windows, long names, empty states, and
 failure states. Cosmetic changes must not alter target-app activation or steal
 focus during dictation.
 
-## Proposed Notes architecture
+## Notes architecture and future extensions
 
-The simplest useful first step is an explicit **Save last transcript as note**
-action and a native local editor. That provides a trustworthy private voice notebook
-using the current dictation engine before adding long meeting capture. It is not
-Granola parity and should not be described as an AI meeting notetaker.
+Vani v0.3.0 implements **Save as Note**, a native local editor, search, plain-text
+export, and recoverable deletion. `NotesModel` owns the draft between the window
+and `NoteStore`. This notebook uses the current dictation engine without meeting
+capture; it is not Granola parity or an AI meeting notetaker.
 
-Suggested future ownership, within the existing small Swift package graph:
+Ownership overview within the existing package graph; the lower branches remain future work:
 
 ```text
 AppCoordinator
@@ -233,7 +235,7 @@ Optional later local summarizer
 
 Keep dictation history and saved notes separate: a note is explicitly persisted;
 ordinary dictation still is not. Start with atomic, versioned local documents and
-bounded reads, with recoverable deletion and export to Markdown/plain text. Use a
+bounded reads, with recoverable deletion and plain-text export (implemented). Use a
 database only if measured note count, search latency, or transaction needs justify
 it. Do not introduce a service layer, plugin framework, generic workflow engine,
 vector store, or account system for a personal notebook.
@@ -262,8 +264,10 @@ limits; a faithful transcript without a summary remains a complete saved result.
 
 ## Delivery phases and acceptance gates
 
-These phases are proposed future work, not completed milestones or automatic
-authorization to change capture and privacy behavior.
+Phases 0 and 1 are implemented and locally validated, with installed-app and
+physical dictation verification still owned by the release task. Phases 2–4 remain
+proposals, not authorization to change capture or privacy behavior. The table
+retains the required acceptance gates; implementation alone does not prove every gate.
 
 | Phase | Deliverable | Required evidence before moving on |
 | --- | --- | --- |
@@ -302,6 +306,6 @@ every citation opens the right source. Include interruptions, unresolved decisio
 negation, conflicting dates, unnamed speakers, and long silence. A small fast local
 model is useful only if it reduces work without fabricating commitments.
 
-The immediate product decision is to finish the existing dictation audit and
-validation, then pursue Phase 1 as a small separate change. Full meeting capture and
-generative notes should be reviewed against this design before implementation.
+The immediate next step is to complete release validation for dictation and the
+implemented phase 1 notebook. Full meeting capture and generative notes still need
+their own design review and evidence before implementation.
