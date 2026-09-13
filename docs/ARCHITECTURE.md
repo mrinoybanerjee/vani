@@ -26,11 +26,14 @@ machine rejects duplicate and out-of-order events. UI receives immutable
 existing window forward so an unfinished correction is preserved, and application
 activation restores keyboard focus to its editor.
 
-The coordinator lazily owns a separate `NotesWindowController`. Its main-actor
-`NotesModel` owns the editable draft and UI state; a `NoteStore` actor owns local
-file operations. Save as Note reads the selected transcript without changing the
-dictation session. Switching notes, closing, and quitting first save the draft;
-a failed save prevents the transition. See [Local Notes](NOTES_DESIGN.md).
+The coordinator lazily owns one `WorkspaceWindowController` for Meetings, Notes and
+Settings. `WorkspaceModel` owns section selection and save barriers; the existing
+main-actor feature models retain drafts while their stores own file operations.
+Switching sections saves the outgoing draft; closing saves both feature models and
+reveals any failed save. Views retain settings drafts and editor state while hidden
+controls are disabled and excluded from accessibility. Save as Note reads the latest
+transcript without changing the dictation session. See [Workspace](WORKSPACE_DESIGN.md)
+and [Local Notes](NOTES_DESIGN.md).
 
 The app moves through `setup`, `preparing`, `ready`, `listening`, `transcribing`,
 `inserting`, and `recoverableError`. Permission loss, sleep, audio-route changes,
@@ -127,7 +130,7 @@ bundled or covered by Vani's speech-model manifest.
 
 ## Meeting boundary
 
-`AppCoordinator` lazily owns `MeetingWindowController → MeetingModel → MeetingStore`.
+`AppCoordinator` lazily owns `WorkspaceWindowController → WorkspaceModel → MeetingModel → MeetingStore`.
 A synchronous reservation protects the existing `FluidAudioSpeechRecognizer` from overlapping
 dictation and meeting work, including quit preflight. `MeetingAudioCapture` uses ScreenCaptureKit
 on macOS 15+ with microphone and system audio outputs on one serial work queue. There is no

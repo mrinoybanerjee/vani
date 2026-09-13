@@ -14,3 +14,7 @@ A quiet native writing tool. Warm paper, forest green, comfortable reading, imme
 - No decorative card grids, gradients, scoreboards, promotional UI or fake features.
 
 See [redesign rationale](docs/REDESIGN_2026-09-12.md) and [product behavior](docs/PRODUCT_DESIGN.md).
+
+Meetings, Notes and Settings share one native workspace and one navigation sidebar.
+The selected library lives below navigation; Settings uses a native section picker.
+See [workspace layout and lifecycle](docs/WORKSPACE_DESIGN.md).

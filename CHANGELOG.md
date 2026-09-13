@@ -2,6 +2,16 @@
 
 All notable changes follow semantic versioning.
 
+## 0.5.0 - 2026-09-13
+
+### Changed
+
+- Consolidate Meetings, Notes and Settings into one resizable native window with a shared sidebar and contextual libraries.
+- Preserve editor and settings drafts across sections; save before navigation, and reveal failed saves when closing.
+- Keep active meeting status visible while using Notes or Settings, and retain the same window on reopen.
+- Route menu-bar actions and Command-comma into the workspace; replace custom meeting tabs with a native keyboard-accessible picker.
+- Remove the separate notebook and meeting window controllers and standalone Settings scene. Audio, inference and persistence engines are unchanged.
+
 ## 0.4.1 - 2026-09-12
 
 ### Fixed

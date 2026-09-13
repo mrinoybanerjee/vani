@@ -18,7 +18,7 @@ in the application; it never discards automatically. Discard restores the last
 saved draft without writing to storage or hiding the storage error.
 
 ```
-Menu action -> NotesWindowController -> NotesModel -> NoteStore actor
+Menu action -> WorkspaceWindowController -> WorkspaceModel -> NotesModel -> NoteStore actor
                    native UI            draft       atomic versioned JSON
 DictationSession -> read last transcript only --------^
 ```
