@@ -18,6 +18,14 @@ Vani verifies model artifacts against repository revision
 
 Vani does not redistribute model weights in this repository or app bundle.
 
+## Optional local meeting summaries
+
+Meeting summaries use a separately installed [Ollama](https://github.com/ollama/ollama)
+service, whose source is [MIT licensed](https://github.com/ollama/ollama/blob/main/LICENSE),
+and the [Qwen3 4B model](https://ollama.com/library/qwen3:4b), published under Apache-2.0.
+The configured Ollama model tag is `qwen3:4b`. Neither Ollama nor these model weights
+are bundled in Vani; their installation and model storage are managed separately.
+
 ## LibriSpeech test fixture
 
 `Tests/VaniCoreTests/Fixtures/librispeech-1272-128104-0000.wav` is derived from

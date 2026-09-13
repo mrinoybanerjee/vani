@@ -133,7 +133,7 @@ struct NotesTests {
       if textEditor(in: window.contentView) != nil { break }
       try await Task.sleep(for: .milliseconds(20))
     }
-    let editor = try #require(textEditor(in: window.contentView))
+    _ = try #require(textEditor(in: window.contentView))
     if let directory = ProcessInfo.processInfo.environment["VANI_UI_SNAPSHOT_DIR"] {
       let content = try #require(window.contentView)
       let folder = URL(fileURLWithPath: directory, isDirectory: true)
@@ -150,10 +150,16 @@ struct NotesTests {
         try data.write(to: folder.appendingPathComponent("notes-\(appearance.rawValue).png"))
       }
     }
+    // Appearance changes can replace the SwiftUI-backed native text view.
+    let editor = try #require(textEditor(in: window.contentView))
     #expect(window.makeFirstResponder(editor))
     editor.selectAll(nil)
     editor.insertText(
       "Typed in the native editor", replacementRange: NSRange(location: NSNotFound, length: 0))
+    for _ in 0..<30 {
+      if model.draft?.text == "Typed in the native editor" { break }
+      try await Task.sleep(for: .milliseconds(10))
+    }
     #expect(model.draft?.text == "Typed in the native editor")
     try Data("corrupt".utf8).write(to: directory.appendingPathComponent("notes.json"))
     #expect(!controller.windowShouldClose(window))
@@ -165,9 +171,29 @@ struct NotesTests {
     #expect(model.draft?.text == "Typed in the native editor")
   }
 
+  @Test func switchingCategorySavesDraftAndBlocksOnStorageFailure() async throws {
+    let (directory, model) = fixture()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    await model.create(text: "Keep this thought")
+    model.draft?.text = "Saved before switching"
+    await model.showDeleted(true)
+    #expect(model.showingDeleted)
+    #expect(model.draft == nil)
+    #expect(
+      try await NoteStore(directory: directory).load().first?.text == "Saved before switching")
+    await model.showDeleted(false)
+    await model.select(model.notes.first)
+    model.draft?.text = "Do not lose this edit"
+    try Data("corrupt".utf8).write(to: directory.appendingPathComponent("notes.json"))
+    await model.showDeleted(true)
+    #expect(!model.showingDeleted)
+    #expect(model.draft?.text == "Do not lose this edit")
+    #expect(model.error != nil)
+  }
+
   private func textEditor(in view: NSView?) -> NSTextView? {
     guard let view else { return nil }
-    if let editor = view as? NSTextView, editor.isEditable { return editor }
+    if let editor = view as? NSTextView, editor.isEditable, !editor.isFieldEditor { return editor }
     for child in view.subviews {
       if let editor = textEditor(in: child) { return editor }
     }

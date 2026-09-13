@@ -140,10 +140,10 @@ private struct OverlayView: View {
     }
     .padding(.horizontal, 14)
     .frame(width: 252, height: 54)
-    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8))
+    .background(VaniTheme.paper, in: Capsule())
     .overlay {
-      RoundedRectangle(cornerRadius: 8)
-        .strokeBorder(.white.opacity(0.14), lineWidth: 1)
+      Capsule()
+        .strokeBorder(VaniTheme.line, lineWidth: 1)
     }
     .accessibilityElement(children: .combine)
     .accessibilityLabel(label)
@@ -155,7 +155,7 @@ private struct OverlayView: View {
     case .hidden:
       EmptyView()
     case .listening:
-      Image(systemName: "waveform.circle.fill").foregroundStyle(.teal)
+      Image(systemName: "waveform.circle.fill").foregroundStyle(VaniTheme.accent)
     case .recordingLimitWarning:
       Image(systemName: "waveform.circle.fill").foregroundStyle(.orange)
     case .processing:
@@ -167,7 +167,7 @@ private struct OverlayView: View {
     case .backupCopied:
       Image(systemName: "clipboard.fill").foregroundStyle(.blue)
     case .lastTranscriptCopied:
-      Image(systemName: "doc.on.clipboard.fill").foregroundStyle(.teal)
+      Image(systemName: "doc.on.clipboard.fill").foregroundStyle(VaniTheme.accent)
     case .failure:
       Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
     }
@@ -198,7 +198,7 @@ private struct WaveformBars: View {
         ForEach(0..<5, id: \.self) { index in
           let wave = sin(time * 7 + Double(index) * 0.9)
           Capsule()
-            .fill(.teal)
+            .fill(VaniTheme.accent)
             .frame(width: 4, height: 21)
             .scaleEffect(y: animated ? (8 + abs(wave) * 13) / 21 : 12 / 21)
         }

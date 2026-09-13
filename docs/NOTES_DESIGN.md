@@ -28,7 +28,8 @@ unchanged. The store is created only on opening Notes. It uses an owner-only
 directory, bounded reads/writes, validated version/IDs/content and a previous
 saved copy. Corruption fails closed; explicit restoration preserves the unreadable
 file. Soft deletion changes one field, with no irreversible deletion control.
-There is no meeting capture, cloud service, summarizer or new dependency.
+This quick notebook has no capture or inference. The separately approved meeting
+workflow is described in [MEETINGS_DESIGN.md](MEETINGS_DESIGN.md).
 
 Tests cover durable create/edit/reopen, search, trash/restore, export formatting,
 duplicate clicks, invalid/oversized files, recoverable corruption, permissions,

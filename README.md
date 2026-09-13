@@ -8,7 +8,8 @@ A private, local, and free Wispr Flow alternative for Apple Silicon Macs.
 
 Hold a shortcut, speak English, and release. Vani transcribes on your Mac and
 inserts the result into the app you were using. There is no account, telemetry,
-cloud transcription, or generative rewriting.
+or cloud transcription. Dictation uses deterministic cleanup; optional meeting
+summaries use a separate local model.
 
 ## Status
 
@@ -37,6 +38,7 @@ Apple notarization.
   sentence casing, and line breaks
 - Optional bounded history, disabled by default
 - Local Notes with editing, search, plain-text export, and recoverable deletion
+- Explicit meeting capture, live transcript, personal notes and local summaries (macOS 15+)
 - Personal phrase dictionary and launch-at-login setting
 - Opt-in local learning from corrections, with transparent delete and reset controls
 - Optional experimental acoustic vocabulary boosting for repeatedly corrected terms
@@ -70,7 +72,7 @@ The first source build can take several minutes. After Vani opens in the menu ba
 
 1. Allow Microphone, Accessibility, and Input Monitoring when Vani requests them.
 2. Download the verified 443 MiB English model once. It is the only required network
-   download after the source dependencies are resolved.
+   download for dictation after the source dependencies are resolved.
 3. In System Settings > Keyboard, set "Press Globe key to" to "Do Nothing."
 4. Hold Left Fn, speak, then release to insert text. Choose Left Control, Right Option,
    or Right Command in Settings if you prefer, and turn sound feedback off there if needed.
@@ -101,7 +103,29 @@ Deleted notes remain in **Recently Deleted** until restored. The notebook keeps 
 to 1,000 notes, with a 1 MiB text limit per note and 16 MiB total. Files live in
 `~/Library/Application Support/Vani/Notes`, with a previous saved copy; if the main
 file cannot be read, **Restore Previous Copy** preserves that file before recovery.
-Notes do not record meetings or generate summaries.
+The quick notebook stays separate from **Meetings**, the live meeting note taker.
+
+### Meeting notes
+
+On macOS 15 or later, choose **Meetings → Start a meeting**, review the capture disclosure,
+and allow macOS Screen & System Audio Recording access when prompted. Vani records your
+microphone and other Mac audio; let participants know and use headphones. Keep your own
+notes while the transcript updates roughly every 20 seconds. **Stop meeting** finishes
+transcription and generates a local summary with decisions, action items and source quotes.
+Closing the window keeps recording; return through the menu to stop it.
+
+Summaries require [Ollama](https://ollama.com/) running locally with `qwen3:4b` installed:
+
+```bash
+ollama pull qwen3:4b
+```
+
+The model download is about 2.5 GB. There is no cloud fallback. If the service is unavailable,
+your notes and transcript remain available; start Ollama and choose **Generate summary** again.
+A failed transcript can be retried through **Meeting actions → Recover transcript**.
+**Remove saved audio** permanently removes captured chunks only after their transcript is saved.
+Meetings last up to two hours; transcript labels identify microphone versus Mac audio, not
+individual speakers. Review AI output before relying on it. See [meeting design and limits](docs/MEETINGS_DESIGN.md).
 
 ## Updating Vani
 
@@ -122,7 +146,7 @@ git pull --ff-only origin main
 
 If it prints any files, stop and review those local changes before pulling. The
 installer replaces `/Applications/Vani.app` atomically and keeps the downloaded model,
-settings, snippets, dictionary, optional history, and saved notes.
+settings, snippets, dictionary, optional history, saved notes, and meetings.
 
 ### Keep permissions across updates
 
@@ -145,7 +169,10 @@ storage, and UI remain outside that callback. Dependencies are exact-pinned in
 
 - [Architecture](docs/ARCHITECTURE.md)
 - [Product design](docs/PRODUCT_DESIGN.md)
+- [Visual system](DESIGN.md)
+- [Redesign research and acceptance boundaries](docs/REDESIGN_2026-09-12.md)
 - [Local Notes design and storage](docs/NOTES_DESIGN.md)
+- [Meeting capture, summaries and recovery](docs/MEETINGS_DESIGN.md)
 - [Competitive discovery and future direction](docs/COMPETITIVE_DISCOVERY.md)
 - [September audit and release evidence](docs/AUDIT_2026-09-12.md)
 - [Local personalization](docs/PERSONALIZATION.md)

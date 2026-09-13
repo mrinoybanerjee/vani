@@ -20,10 +20,10 @@ and diagnostics.
 
 ## Controls
 
-- Hold-to-record means no background microphone capture while idle.
+- Dictation is hold-to-record. Meeting recording requires an explicit Start action and disclosure.
 - Global key-down events are filtered to the exact Last Transcript chords before
   they reach the main actor; key content is not retained or logged.
-- Capture storage remains memory-only and is limited to 20 minutes. Capacity is
+- Dictation capture storage remains memory-only and is limited to 20 minutes. Capacity is
   reserved in bounded pages away from the real-time callback, with a one-minute warning
   and automatic stop at the limit.
 - Reaching capture capacity preserves the retained audio for transcription or recovery;
@@ -74,3 +74,16 @@ and diagnostics.
 - Ad-hoc local builds do not provide the identity or Gatekeeper assurance of a
   Developer ID signed, notarized release.
 - The app has no automatic updater in v1.
+
+## Meeting controls
+
+- ScreenCaptureKit captures microphone and other Mac audio only after explicit start; no video output is registered.
+- Meeting source chunks and records are private atomic files in a separate local directory. Bounded reads reject symlinks,
+  nonregular files, unsafe sample rates/counts, nonfinite PCM, invalid offsets and oversized content.
+- Completed chunks survive transcription failure. Audio removal requires a durable transcript and explicit confirmation.
+- Save failure prevents navigation/quit that would discard drafts. Stop failure retains recorder ownership; final flush is retryable.
+- A two-hour capture limit bounds each source. Up to 20 seconds per source can remain volatile before persistence.
+- Summary traffic is fixed to `127.0.0.1:11434`, uses an ephemeral session, disables proxies and refuses redirects.
+  Responses are capped at 256 KiB and require completed structured output. Transcript text is untrusted data in the prompt.
+- Generated items must quote their referenced transcript segment. This checks provenance, not semantic truth or prompt-injection immunity.
+- Ollama is a separately installed local service and model runtime. Vani does not isolate that service from the current user.

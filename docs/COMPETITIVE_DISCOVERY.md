@@ -1,7 +1,11 @@
 # Vani competitive discovery and product direction
 
-Research date: September 12, 2026. Updated for Vani v0.3.0: phase 1 local Notes is
-implemented and locally tested; meeting capture and AI summaries remain proposals.
+Research date: September 12, 2026. This preserves the v0.3.0 discovery snapshot and
+its original proposals. The user subsequently approved all-local meeting capture and
+summaries for v0.4.0. See [meeting implementation and limits](MEETINGS_DESIGN.md) and
+[redesign research](REDESIGN_2026-09-12.md) for the current scope. References below to
+"today," future meeting work and pending approval describe the v0.3.0 snapshot;
+they do not supersede that later approval or establish completed hardware acceptance.
 
 ## Recommendation
 

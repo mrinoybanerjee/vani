@@ -5,7 +5,9 @@ Owner: mrinoybanerjee
 Target: Apple Silicon macOS, English
 
 This is the original dictation plan and review history. The approved v0.3.0 local
-notebook extension is described in [NOTES_DESIGN.md](NOTES_DESIGN.md).
+notebook extension is described in [NOTES_DESIGN.md](NOTES_DESIGN.md). The subsequent
+approved v0.4.0 local meeting extension is described in [MEETINGS_DESIGN.md](MEETINGS_DESIGN.md);
+the original scope and review history below are retained as historical decisions.
 
 ## Outcome
 

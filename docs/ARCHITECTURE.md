@@ -1,7 +1,7 @@
 # Architecture
 
 Vani is a Swift 6 package with two production targets. This diagram shows the
-dictation and correction branch; the optional Notes branch is described below.
+dictation and correction branch; the optional Notes and Meetings branches are described below.
 
 ```text
 Vani (SwiftUI/AppKit, @MainActor)
@@ -99,8 +99,8 @@ clipboard and presents a neutral manual-paste hint; it is never reported as veri
 ## Persistence
 
 Settings are Codable values stored in `UserDefaults`. Optional history uses an
-atomic local JSON file, is bounded, and quarantines corrupt data. Recovery audio and
-the latest failed or successful transcript are memory-only. Diagnostics are bounded
+atomic local JSON file, is bounded, and quarantines corrupt data. Dictation recovery audio and
+the latest failed or successful dictation transcript are memory-only. Diagnostics are bounded
 and metadata only.
 
 The personalization profile uses `personalization.json` in Application Support with a
@@ -116,6 +116,24 @@ audio capture, inference, network activity, or dependency on transcript history.
 ## Dependency boundary
 
 FluidAudio is the only external package. Its exact source revision and transitive
-graph are locked by SwiftPM. Model artifacts are pinned independently by revision
+graph are locked by SwiftPM. Speech model artifacts are pinned independently by revision
 and SHA-256 manifest. Apple frameworks provide audio, UI, Accessibility, global
-keyboard events, login items, logging, and code signing integration.
+keyboard events, login items, logging, and code signing integration. Meeting summaries
+use a separately installed Ollama runtime and its `qwen3:4b` model tag; those are not
+bundled or covered by Vani's speech-model manifest.
+
+## Meeting boundary
+
+`AppCoordinator` lazily owns `MeetingWindowController → MeetingModel → MeetingStore`.
+A synchronous reservation protects the existing `FluidAudioSpeechRecognizer` from overlapping
+dictation and meeting work, including quit preflight. `MeetingAudioCapture` uses ScreenCaptureKit
+on macOS 15+ with microphone and system audio outputs on one serial work queue. There is no
+video output. Chunk conversion and atomic persistence run off the main actor; transcription
+drains one saved file at a time through the existing recognizer. Capture callbacks carry a
+session identity, and a stopped stream can retry a failed final flush without restarting capture.
+
+`LocalMeetingSummarizer` sends bounded transcript batches to a fixed loopback-only Ollama
+endpoint. It validates structured output against exact transcript quotes and renders separate
+summary, decisions and actions. Personal notes are not overwritten by generation. The existing
+quick-note schema and dictation state machine do not migrate. See [MEETINGS_DESIGN.md](MEETINGS_DESIGN.md)
+for persistence limits, failure behavior and local runtime requirements.

@@ -193,14 +193,15 @@ struct TeachVaniView: View {
   }
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 12) {
-      Label("Correct your transcript", systemImage: "text.badge.checkmark")
-        .font(.headline)
+    VStack(alignment: .leading, spacing: 16) {
+      Text("A little more like you.")
+        .font(.system(size: 26, weight: .regular, design: .serif))
       Text("Fix only what Vani got wrong. The correction is saved locally for future dictation.")
         .font(.subheadline)
         .foregroundStyle(.secondary)
       TextEditor(text: $model.corrected)
-        .font(.body)
+        .font(.system(size: 15))
+        .lineSpacing(5)
         .scrollContentBackground(.hidden)
         .padding(8)
         .frame(minHeight: 150)
@@ -246,9 +247,10 @@ struct TeachVaniView: View {
         .keyboardShortcut("s", modifiers: .command)
       }
     }
-    .padding(20)
+    .padding(28)
+    .tint(VaniTheme.accent)
     .frame(minWidth: TeachWindowMetrics.width, maxWidth: .infinity, maxHeight: .infinity)
-    .background(Color(nsColor: .windowBackgroundColor))
+    .background(VaniTheme.paper)
     .task {
       await Task.yield()
       editorFocused = true

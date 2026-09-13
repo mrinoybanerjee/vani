@@ -8,6 +8,10 @@
 - Git
 - 3 GB of free disk space for build artifacts and the speech model
 
+Meeting capture additionally requires macOS 15+. Local summaries require a separately
+installed Ollama service and approximately 2.5 GB for `qwen3:4b`; saved meeting audio
+uses additional space. See [meeting setup and use](../README.md#meeting-notes).
+
 If the Apple developer tools are not installed:
 
 ```bash
@@ -41,7 +45,8 @@ Set `INSTALL_ROOT` to install somewhere other than `/Applications`.
 ## Permissions and signatures
 
 macOS grants Microphone, Accessibility, and Input Monitoring access to a signed app
-identity. An ad-hoc
+identity. Meetings also request Screen & System Audio Recording permission when first
+started. An ad-hoc
 signature is based on the current executable, so its identity changes after a rebuild
 and macOS can ask for those permissions again.
 
@@ -109,12 +114,33 @@ VANI_RUN_PERSONALIZATION_MODEL_TESTS=1 swift test -c release \
   --filter bundledEnglishFixtureExercisesAcousticPersonalization
 ```
 
-The full paged capture and 48 kHz conversion boundary is also opt-in:
+The full paged dictation capture and 48 kHz conversion boundary is also opt-in:
 
 ```bash
 VANI_RUN_LONG_AUDIO_TESTS=1 swift test -c release \
   --filter twentyMinutePagedCaptureDrainsAndResamples
 ```
+
+The local summary fixture is opt-in. Start Ollama with `qwen3:4b` installed first;
+the test sends only its synthetic meeting transcript to the local service:
+
+```bash
+VANI_RUN_SUMMARY_TESTS=1 swift test -c release \
+  --filter realLocalSummaryFixtureWhenRequested
+```
+
+This fixture does not record microphone or Mac audio. Real meeting capture, permission
+prompts, device transitions and target-app dictation need separate signed-app checks.
+
+Generate light/dark native UI fixtures using temporary notebook and meeting records:
+
+```bash
+VANI_UI_SNAPSHOT_DIR="$PWD/.build/design-snapshots" swift test \
+  --filter 'captureDesignStatesWhenRequested|meetingDesignAndNativeNotesWhenRequested'
+```
+
+These tests open native windows and save PNGs; they do not use the real notebook or
+record audio. Run them in a logged-in Mac session.
 
 ## Environment variables
 
@@ -128,6 +154,9 @@ VANI_RUN_LONG_AUDIO_TESTS=1 swift test -c release \
 | `VANI_SKIP_OPEN=1` | Install without launching, for isolated automation |
 | `VANI_QA_WINDOW=1` | Show the menu content in a window for UI automation |
 | `VANI_QA_WINDOW=teach` | Show a correction editor with fixture text for UI automation |
+| `VANI_UI_SNAPSHOT_DIR` | Output directory for opt-in native design snapshot tests |
+| `VANI_RUN_SUMMARY_TESTS=1` | Run the synthetic meeting fixture through local Ollama |
+| `VANI_SUMMARY_FIXTURE_OUTPUT` | Optional text output path for that synthetic summary fixture |
 
 ## Local data
 
@@ -138,6 +167,8 @@ VANI_RUN_LONG_AUDIO_TESTS=1 swift test -c release \
 - Learned corrections: `~/Library/Application Support/Vani/personalization.json`
 - Notes: `~/Library/Application Support/Vani/Notes/notes.json`, its previous copy
   `notes.backup.json`, and any `notes.preserved-*.json` recovery files
+- Meetings: `~/Library/Application Support/Vani/Meetings/<UUID>/`, including records,
+  previous copies and retained `.vani-audio` chunks
 - Cache: `~/Library/Caches/com.mrinoy.vani`
 - Shared speech model: `~/Library/Application Support/FluidAudio/Models/parakeet-tdt-0.6b-v2`
 - Optional vocabulary model:

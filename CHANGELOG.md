@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.4.0
+
+- [Record a meeting](README.md#meeting-notes) with microphone and Mac audio, follow its incremental transcript, keep personal notes, recover saved audio and generate source-quoted summaries through local Ollama.
+- Keep dictation and meeting recording from overlapping, retain drafts after failed saves, and prevent delayed capture events from interrupting a newer meeting.
+- Redesign dictation, Notes, Settings, Teach and recording feedback with a unified native visual system.
+- Add notebook focus mode, note previews, keyboard creation/search and safe category switching.
+
+### For contributors
+
+- Keep notebook presentation, draft coordination and window lifecycle separate while preserving the existing speech and storage engines.
+
+
 All notable changes follow semantic versioning.
 
 ## 0.3.0 - 2026-09-12
