@@ -60,9 +60,15 @@ struct MenuContentView: View {
 
   private var footer: some View {
     HStack {
+      Button("Notes", systemImage: "note.text") { coordinator.showNotes() }
+        .buttonStyle(.plain)
+        .font(.caption)
+        .frame(height: 28)
       SettingsLink {
-        Image(systemName: "gearshape")
-          .frame(width: 24, height: 24)
+        Label("Settings", systemImage: "gearshape")
+          .font(.caption)
+          .padding(.horizontal, 4)
+          .frame(height: 28)
       }
       .buttonStyle(.plain)
       .help("Settings")
@@ -77,6 +83,7 @@ struct MenuContentView: View {
       }
       .buttonStyle(.plain)
       .help("Quit Vani")
+      .accessibilityLabel("Quit Vani")
     }
   }
 
@@ -189,9 +196,16 @@ private struct ReadyView: View {
           Text(phaseTitle)
             .font(.system(size: 14, weight: .semibold))
           if coordinator.snapshot.phase == .ready {
-            Text(coordinator.settings.shortcut.label)
-              .font(.caption)
-              .foregroundStyle(.secondary)
+            HStack(spacing: 6) {
+              Text(coordinator.settings.shortcut.label)
+                .font(.caption.weight(.medium))
+                .padding(.horizontal, 6)
+                .padding(.vertical, 3)
+                .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 4))
+              Text("Release to insert")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
           }
         }
         Spacer()
@@ -233,13 +247,17 @@ private struct ReadyView: View {
           Spacer()
         }
         .controlSize(.small)
+        Button("Save as Note", systemImage: "note.text.badge.plus") {
+          coordinator.showNotes(saveLastTranscript: true)
+        }
+        .controlSize(.small)
       }
     }
   }
 
   private var phaseTitle: String {
     switch coordinator.snapshot.phase {
-    case .ready: "Ready"
+    case .ready: "Hold to dictate"
     case .listening: "Listening"
     case .transcribing: "Transcribing"
     case .inserting: "Inserting text"

@@ -30,6 +30,7 @@ final class AppCoordinator: ObservableObject {
   private let overlay = OverlayController()
   private let cuePlayer = DictationCuePlayer()
   private let teachWindowController = TeachWindowController()
+  private var notesWindowController: NotesWindowController?
   private var notificationTokens: [NSObjectProtocol] = []
   private var qaWindow: NSWindow?
   private var captureStartTask: Task<Void, Never>?
@@ -299,6 +300,25 @@ final class AppCoordinator: ObservableObject {
 
   func quit() {
     NSApplication.shared.terminate(nil)
+  }
+
+  func showNotes(saveLastTranscript: Bool = false) {
+    if notesWindowController == nil { notesWindowController = NotesWindowController() }
+    guard let controller = notesWindowController else { return }
+    controller.present(load: !saveLastTranscript)
+    if saveLastTranscript {
+      Task {
+        guard let text = await session.transcriptForNote() else { return }
+        await controller.model.create(text: text)
+      }
+    }
+  }
+
+  func saveNotesBeforeTermination() async -> Bool {
+    guard let controller = notesWindowController else { return true }
+    let saved = await controller.model.save()
+    if !saved { controller.present() }
+    return saved
   }
 
   func prepareForTermination() async {

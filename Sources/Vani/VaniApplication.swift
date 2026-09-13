@@ -94,6 +94,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
     terminationInProgress = true
     Task {
+      guard await coordinator.saveNotesBeforeTermination() else {
+        terminationInProgress = false
+        sender.reply(toApplicationShouldTerminate: false)
+        return
+      }
       await coordinator.prepareForTermination()
       sender.reply(toApplicationShouldTerminate: true)
     }
