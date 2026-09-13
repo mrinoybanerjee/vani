@@ -3,7 +3,7 @@
 Approved scope: the user's September 12 request to also build Vani Notes,
 following phase 1 of COMPETITIVE_DISCOVERY.md.
 
-Implementation: Vani v0.3.0 build 8, locally validated with 22 Notes tests.
+Implementation: Vani v0.3.0 build 8, locally validated with 23 Notes tests.
 Installation and physical dictation verification remain separate release gates.
 
 One optional native window provides a searchable list, title and text editor,
@@ -14,7 +14,8 @@ the editor and prevents that transition. Save status stays visible. Unsaved
 edits can be lost in a process crash; this first release does not claim autosave.
 After a failed save, the user may export a copy and explicitly confirm discarding
 unsaved changes. This prevents an unrecoverable disk error from trapping the user
-in the application; it never discards automatically.
+in the application; it never discards automatically. Discard restores the last
+saved draft without writing to storage or hiding the storage error.
 
 ```
 Menu action -> NotesWindowController -> NotesModel -> NoteStore actor
@@ -37,7 +38,7 @@ and signed app checks before installing. Inspect native light/dark renders.
 
 Architecture review: one store and one UI owner are sufficient. No generic
 repository layer or background service. Code-quality review: errors are surfaced
-at the window, draft text is never replaced after a failed write. Performance
+at the window, draft text is never automatically replaced after a failed write. Performance
 review: storage runs on its own actor, only on explicit actions; notes are bounded
 to 1,000 records and 16 MiB total, with no silent truncation. Test review: every
 new persistence transition gets a real temporary-directory round trip; native
