@@ -25,6 +25,9 @@ final class AppCoordinator: ObservableObject {
   private let historyStore: TranscriptHistoryStore
   private let diagnosticStore: DiagnosticStore
   private let personalizationStore: PersonalizationStore
+  private let speechRecognizer: FluidAudioSpeechRecognizer
+  @Published private(set) var meetingOwnsSpeech = false
+  private var meetingWindowController: MeetingWindowController?
   private let session: DictationSession
   private let hotkeyMonitor = GlobalHotkeyMonitor()
   private let overlay = OverlayController()
@@ -42,9 +45,10 @@ final class AppCoordinator: ObservableObject {
   private var personalizationRevision: UInt64 = 0
   private var startCueWasPreplayed = false
   private var isTerminating = false
+  private var quitPreflight = false
   private var started = false
 
-  init() {
+  init(startAutomatically: Bool = true) {
     let focusProvider = SystemFocusProvider()
     let historyStore = TranscriptHistoryStore()
     let diagnosticStore = DiagnosticStore.shared
@@ -53,18 +57,21 @@ final class AppCoordinator: ObservableObject {
     self.historyStore = historyStore
     self.diagnosticStore = diagnosticStore
     self.personalizationStore = personalizationStore
+    let speechRecognizer = FluidAudioSpeechRecognizer()
+    self.speechRecognizer = speechRecognizer
     session = DictationSession(
       audioCapture: AVAudioEngineCapture(),
-      speechRecognizer: FluidAudioSpeechRecognizer(),
+      speechRecognizer: speechRecognizer,
       textInserter: SystemTextInserter(focusProvider: focusProvider),
       focusProvider: focusProvider,
       history: historyStore,
       diagnostics: diagnosticStore
     )
-    AppDelegate.coordinator = self
-
-    Task { [weak self] in
-      await self?.start()
+    if startAutomatically {
+      AppDelegate.coordinator = self
+      Task { [weak self] in
+        await self?.start()
+      }
     }
   }
 
@@ -81,6 +88,8 @@ final class AppCoordinator: ObservableObject {
 
   var canDictate: Bool {
     snapshot.phase == .ready
+      && !meetingOwnsSpeech
+      && !quitPreflight
       && microphonePermission.isGranted
       && accessibilityPermission.isGranted
       && inputMonitoringPermission.isGranted
@@ -302,6 +311,22 @@ final class AppCoordinator: ObservableObject {
     NSApplication.shared.terminate(nil)
   }
 
+  func showMeetings() {
+    if meetingWindowController == nil {
+      let model = MeetingModel(
+        recognizer: speechRecognizer,
+        reserveSpeech: { [weak self] in
+          guard let self, !meetingOwnsSpeech, snapshot.phase == .ready,
+            captureStartTask == nil, sessionOperationTask == nil, !isTerminating, !quitPreflight
+          else { return false }
+          meetingOwnsSpeech = true
+          return true
+        }, releaseSpeech: { [weak self] in self?.meetingOwnsSpeech = false })
+      meetingWindowController = MeetingWindowController(model: model)
+    }
+    meetingWindowController?.present()
+  }
+
   func showNotes(saveLastTranscript: Bool = false) {
     if notesWindowController == nil { notesWindowController = NotesWindowController() }
     guard let controller = notesWindowController else { return }
@@ -315,9 +340,20 @@ final class AppCoordinator: ObservableObject {
   }
 
   func saveNotesBeforeTermination() async -> Bool {
-    guard let controller = notesWindowController else { return true }
+    quitPreflight = true
+    var accepted = false
+    defer { if !accepted { quitPreflight = false } }
+    if let meetingWindowController, !(await meetingWindowController.model.prepareToQuit()) {
+      meetingWindowController.present()
+      return false
+    }
+    guard let controller = notesWindowController else {
+      accepted = true
+      return true
+    }
     let saved = await controller.model.save()
     if !saved { controller.present() }
+    accepted = saved
     return saved
   }
 
@@ -720,6 +756,9 @@ final class AppCoordinator: ObservableObject {
     inputMonitoringPermission = currentInputMonitoring
 
     if previousMicrophone.isGranted, !currentMicrophone.isGranted {
+      await meetingWindowController?.model.interrupt(
+        "Meeting stopped because microphone permission changed. Saved audio is available for recovery."
+      )
       await session.permissionWasRevoked(.microphonePermissionDenied)
     } else if previousAccessibility.isGranted, !currentAccessibility.isGranted {
       await session.permissionWasRevoked(.accessibilityPermissionDenied)
@@ -808,7 +847,11 @@ final class AppCoordinator: ObservableObject {
         object: nil,
         queue: .main
       ) { [weak self] _ in
-        Task { await self?.session.systemWillSleep() }
+        Task { @MainActor in
+          await self?.meetingWindowController?.model.interrupt(
+            "Meeting stopped for sleep. Saved audio is available for recovery.")
+          await self?.session.systemWillSleep()
+        }
       }
     )
     notificationTokens.append(
@@ -879,8 +922,8 @@ final class AppCoordinator: ObservableObject {
       contentRect: NSRect(
         x: 0,
         y: 0,
-        width: showsSettings ? 600 : 340,
-        height: showsSettings ? 500 : 360
+        width: showsSettings ? 760 : 360,
+        height: showsSettings ? 580 : 440
       ),
       styleMask: [.titled, .closable, .miniaturizable],
       backing: .buffered,

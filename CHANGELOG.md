@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.0
+
+- Add explicit local meeting recording with microphone and Mac audio, incremental transcript, personal notes, recoverable audio and source-quoted summaries through local Ollama.
+- Protect dictation and meeting ownership, preserve failed saves, and reject stale capture callbacks.
+- Redesign dictation, Notes, Settings, Teach and recording feedback with a unified native visual system.
+- Add notebook focus mode, note previews, keyboard creation/search and safe category switching.
+- Separate notebook presentation, draft coordination and window lifecycle; retain speech and storage engines.
+
+
 All notable changes follow semantic versioning.
 
 ## 0.3.0 - 2026-09-12
