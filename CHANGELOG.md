@@ -2,6 +2,60 @@
 
 All notable changes follow semantic versioning.
 
+## 0.6.0 - 2026-09-23
+
+### Added
+
+- Double-tap the hold shortcut for hands-free dictation; press it again to insert. The
+  overlay and menu show the locked state, with Stop and Cancel in the menu.
+- Press Escape to discard a recording without inserting text. Typing a key chord while
+  holding the shortcut (for example Fn-Delete) also discards it.
+- Choose the Last Transcript chord: Control-Command, Option-Command, Control-Option or off.
+- Smart Formatting: say "scratch that" (or "delete that"), set off by a pause or
+  punctuation, to remove the sentence or clause you just said.
+- Guided first-run setup in the menu with explicit status for each permission, the
+  one-time model download and the Fn / Globe keyboard setting; a clear recovery when
+  the shortcut is not active.
+- Meetings: your dictionary and learned vocabulary apply to meeting transcripts;
+  microphone lines that repeat Mac audio (no headphones) are marked as echo and hidden;
+  "Me" and "Others" labels; Recently Deleted; Copy as Markdown; exports named after the
+  meeting; summaries use your notes to decide emphasis and run in the background.
+
+### Changed
+
+- FluidAudio 0.15.8: long dictations make 8–23% fewer word errors on LibriSpeech
+  long-form sets; short dictation accuracy is unchanged. See
+  [speech accuracy](docs/BENCHMARKS.md#speech-accuracy).
+- Meeting audio is cut at the quietest moment between 15 and 24 seconds instead of at
+  exactly 20 seconds, so words are no longer split between chunks.
+- Consecutive dictations are separated by a space; transcripts on the clipboard are
+  marked transient and are not synced to other devices.
+- The optional vocabulary model stays warm and is verified once, removing reloads after
+  the shortcut is released; faster verification and clipboard restoration after paste.
+
+### Fixed
+
+- A shortcut release could be dropped behind another operation, leaving the microphone
+  open until the 20-minute limit.
+- Quiet speech in long dictations or meetings could be rejected as silence.
+- Clips shorter than 0.3 seconds failed transcription with a Retry that could not succeed.
+- One unknown or malformed setting reset the whole dictionary and snippets.
+- A copied password (concealed clipboard content) was written back after dictation,
+  defeating the password manager's auto-clear.
+- "Period" and "colon" used as nouns became punctuation with Smart Formatting.
+- Paste Last and a new recording could clear each other's transcript.
+- The menu could report Ready while the shortcut was not listening.
+- One untranscribable meeting chunk blocked recovery, summaries and audio removal;
+  a single unsupported summary quote discarded the whole summary.
+- Launch at login now reflects the login-item state in System Settings.
+
+### For contributors
+
+- `scripts/test.sh` requires Swift Testing's completion summary and runs each native
+  window test in its own process. AppKit's nested run loops could stop the Swift async
+  main loop and exit the test process with status 0 mid-run, silently skipping tests.
+- A reproducible word-error-rate harness lives in `Benchmarks/`.
+
 ## 0.5.0 - 2026-09-13
 
 ### Changed
