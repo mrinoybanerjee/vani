@@ -8,6 +8,8 @@ final class OverlayController {
   static let maximumWidth: CGFloat = 340
 
   private(set) var state: OverlayState = .hidden
+  /// Supplies the live microphone level while recording.
+  var level: @Sendable () -> Float = { 0 }
   private var listeningStartedAt = Date()
   private let hosting: NSHostingController<OverlayView>
   private let panel: NSPanel
@@ -119,7 +121,8 @@ final class OverlayController {
 
   /// Fits one line when possible, then wraps to at most two lines at the maximum width.
   private func resizePanel(for newState: OverlayState) {
-    let size = Self.layout(hosting, state: newState, listeningStartedAt: listeningStartedAt)
+    let size = Self.layout(
+      hosting, state: newState, listeningStartedAt: listeningStartedAt, level: level)
     guard panel.frame.size != size else { return }
     panel.setContentSize(size)
   }
@@ -127,13 +130,15 @@ final class OverlayController {
   /// Installs the overlay view in `hosting` and returns the pill size: the single-line width
   /// clamped to the minimum and maximum, and the height of up to two wrapped lines.
   static func layout(
-    _ hosting: NSHostingController<OverlayView>, state: OverlayState, listeningStartedAt: Date
+    _ hosting: NSHostingController<OverlayView>, state: OverlayState, listeningStartedAt: Date,
+    level: @escaping @Sendable () -> Float = { 0 }
   ) -> NSSize {
     hosting.rootView = OverlayView(
       state: state, listeningStartedAt: listeningStartedAt, fillsWidth: false)
     let ideal = hosting.sizeThatFits(in: CGSize(width: 10_000, height: 200))
     let width = min(max(ideal.width, minimumWidth), maximumWidth).rounded(.up)
-    hosting.rootView = OverlayView(state: state, listeningStartedAt: listeningStartedAt)
+    hosting.rootView = OverlayView(
+      state: state, listeningStartedAt: listeningStartedAt, level: level)
     let height = hosting.sizeThatFits(in: CGSize(width: width, height: 200)).height.rounded(.up)
     return NSSize(width: width, height: max(height, 52))
   }
@@ -207,6 +212,8 @@ enum OverlayState: Equatable {
 struct OverlayView: View {
   let state: OverlayState
   let listeningStartedAt: Date
+  /// Microphone loudness (RMS) while recording; drives the listening icon.
+  var level: @Sendable () -> Float = { 0 }
   var fillsWidth = true
 
   var body: some View {
@@ -244,12 +251,10 @@ struct OverlayView: View {
     switch state {
     case .hidden:
       EmptyView()
-    case .listening:
-      Image(systemName: "waveform.circle.fill").foregroundStyle(VaniTheme.accent)
+    case .listening, .handsFree:
+      ListeningLevelIcon(level: level)
     case .recordingLimitWarning:
       Image(systemName: "hourglass.circle.fill").foregroundStyle(VaniTheme.accent)
-    case .handsFree:
-      Image(systemName: "lock.circle.fill").foregroundStyle(VaniTheme.accent)
     case .processing:
       Image(systemName: "text.bubble.fill").foregroundStyle(.secondary)
     case .success:
@@ -265,39 +270,76 @@ struct OverlayView: View {
 }
 
 /// A recording indicator, not a level meter: a pulsing dot and the true elapsed time.
+/// Elapsed recording time. The listening icon shows activity, so no second animation is needed.
 private struct RecordingIndicator: View {
   let startedAt: Date
-  @Environment(\.accessibilityReduceMotion) private var reduceMotion
-  @State private var pulsing = false
 
   var body: some View {
-    HStack(spacing: 8) {
-      Circle()
-        .fill(VaniTheme.accent)
-        .frame(width: 8, height: 8)
-        .opacity(pulsing && !reduceMotion ? 0.35 : 1)
-      TimelineView(.periodic(from: startedAt, by: 1)) { context in
-        Text(Self.elapsed(from: startedAt, to: context.date))
-          .font(.system(size: 12, weight: .medium).monospacedDigit())
-          .foregroundStyle(.secondary)
-      }
+    TimelineView(.periodic(from: startedAt, by: 1)) { context in
+      Text(Self.elapsed(from: startedAt, to: context.date))
+        .font(.system(size: 12, weight: .medium).monospacedDigit())
+        .foregroundStyle(.secondary)
     }
     .accessibilityHidden(true)
-    .onAppear { startPulse() }
-    .onChange(of: reduceMotion) { startPulse() }
-  }
-
-  /// The dot pulses only while Reduce Motion is off (the opacity above stays constant when it
-  /// is on, even mid-animation); the elapsed time shows recording either way.
-  private func startPulse() {
-    guard !reduceMotion, !pulsing else { return }
-    withAnimation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true)) {
-      pulsing = true
-    }
   }
 
   static func elapsed(from start: Date, to now: Date) -> String {
     let seconds = max(0, Int(now.timeIntervalSince(start)))
     return String(format: "%d:%02d", seconds / 60, seconds % 60)
+  }
+}
+
+/// The listening icon: four bars inside the accent circle that follow the real microphone
+/// level, so it moves when Vani hears speech and rests when the room is quiet. Reduce Motion
+/// shows the static waveform icon instead.
+struct ListeningLevelIcon: View {
+  let level: @Sendable () -> Float
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
+  @State private var meter = LevelMeter()
+
+  var body: some View {
+    if reduceMotion {
+      Image(systemName: "waveform.circle.fill").foregroundStyle(VaniTheme.accent)
+    } else {
+      TimelineView(.animation(minimumInterval: 1.0 / 30)) { context in
+        let heights = meter.barHeights(
+          level: level(), time: context.date.timeIntervalSinceReferenceDate)
+        ZStack {
+          Circle().fill(VaniTheme.accent)
+          HStack(spacing: 2) {
+            ForEach(heights.indices, id: \.self) { index in
+              Capsule().fill(VaniTheme.paper).frame(width: 2.5, height: heights[index])
+            }
+          }
+        }
+        .frame(width: 22, height: 22)
+      }
+    }
+  }
+}
+
+/// Converts RMS readings into smoothed bar heights: fast attack, slow release, and a small
+/// per-bar variation scaled by loudness, so silence renders as still, short bars.
+final class LevelMeter {
+  static let barWeights: [Double] = [0.55, 1.0, 0.8, 0.45]
+  static let minimumHeight: CGFloat = 3
+  static let maximumHeight: CGFloat = 12
+  private(set) var smoothed: Double = 0
+
+  /// Speech sits roughly between -55 dBFS (quiet) and -15 dBFS (loud) at a laptop microphone.
+  static func normalized(_ rms: Float) -> Double {
+    guard rms.isFinite, rms > 0 else { return 0 }
+    let decibels = 20 * log10(Double(rms))
+    return min(1, max(0, (decibels + 55) / 40))
+  }
+
+  func barHeights(level rms: Float, time: TimeInterval) -> [CGFloat] {
+    let target = Self.normalized(rms)
+    smoothed += (target - smoothed) * (target > smoothed ? 0.6 : 0.15)
+    return Self.barWeights.enumerated().map { index, weight in
+      let variation = 0.85 + 0.15 * sin(time * (6 + Double(index) * 1.7) + Double(index))
+      let value = min(1, smoothed * weight * variation)
+      return Self.minimumHeight + CGFloat(value) * (Self.maximumHeight - Self.minimumHeight)
+    }
   }
 }

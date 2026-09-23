@@ -33,6 +33,10 @@ public actor AVAudioEngineCapture: AudioCapturing {
   private static let capacityReservationInterval: Duration = .seconds(15)
   static let maximumSupportedInputSampleRate = 48_000.5
 
+  /// Loudness of the latest audio callback, readable from any thread without waiting for the
+  /// actor. Zero when not recording.
+  public nonisolated var inputLevel: Float { ringBuffer.recentLevel }
+
   public init(maximumDuration: TimeInterval = AudioPolicy.default.maximumDuration) {
     engine = AVAudioEngine()
     ringBuffer = AudioSampleRingBuffer()

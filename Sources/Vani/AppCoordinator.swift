@@ -77,6 +77,8 @@ final class AppCoordinator: ObservableObject {
       history: historyStore,
       diagnostics: diagnosticStore
     )
+    let levelSource = session
+    overlay.level = { levelSource.currentInputLevel() }
     if startAutomatically {
       AppDelegate.coordinator = self
       Task { [weak self] in

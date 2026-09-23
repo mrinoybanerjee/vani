@@ -68,6 +68,9 @@ public actor DictationSession {
     self.transientFailureDuration = transientFailureDuration
   }
 
+  /// Current microphone loudness (RMS) while recording, for the level indicator.
+  public nonisolated func currentInputLevel() -> Float { audioCapture.inputLevel }
+
   public func setObserver(_ observer: Observer?) async {
     self.observer = observer
     await publishSnapshot()

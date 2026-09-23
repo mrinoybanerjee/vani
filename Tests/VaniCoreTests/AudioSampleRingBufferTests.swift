@@ -196,3 +196,20 @@ func segmentsRecordedAtDifferentRatesAreJoinedInOrderAt16kHz() throws {
     samples: [Float](repeating: 0.1, count: 16_000), sampleRate: 16_000, overflowed: true)
   #expect(try AVAudioEngineCapture.makeCapturedAudio(from: [first, truncated]).wasTruncated)
 }
+
+@Test
+func theRingBufferReportsTheLatestCallbackLevelAndResetsWhenDrained() throws {
+  let ringBuffer = AudioSampleRingBuffer()
+  ringBuffer.reset(capacity: 4_800, sampleRate: 48_000)
+  let format = try #require(
+    AVAudioFormat(
+      commonFormat: .pcmFormatFloat32, sampleRate: 48_000, channels: 1, interleaved: false))
+  let buffer = try #require(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 480))
+  buffer.frameLength = 480
+  for frame in 0..<480 { buffer.floatChannelData![0][frame] = frame.isMultiple(of: 2) ? 0.5 : -0.5 }
+
+  ringBuffer.append(buffer)
+  #expect(abs(ringBuffer.recentLevel - 0.5) < 0.001)
+  _ = ringBuffer.drain()
+  #expect(ringBuffer.recentLevel == 0)
+}

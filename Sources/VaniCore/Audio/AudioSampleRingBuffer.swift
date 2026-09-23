@@ -28,6 +28,8 @@ final class AudioSampleRingBuffer: Sendable {
     var sampleRate: Double = 0
     var overflowed = false
     var generation: UInt64 = 0
+    /// RMS of the most recent callback, for the recording level indicator.
+    var recentLevel: Float = 0
   }
 
   private struct FrozenState: Sendable {
@@ -126,10 +128,15 @@ final class AudioSampleRingBuffer: Sendable {
   ) {
     let channelCount = min(max(channelCount, 1), Self.maximumMixedChannels)
     guard incomingCount > 0 else { return }
+    // One vDSP pass over the first channel: no allocation, safe on the audio thread.
+    var measured: Float = 0
+    vDSP_rmsqv(channels[0], 1, &measured, vDSP_Length(incomingCount))
+    let level = measured
     let channelsAddress = UInt(bitPattern: channels)
     let channelAddress = UInt(bitPattern: channels[0])
 
     state.withLock { state in
+      state.recentLevel = level
       let writableCount = min(incomingCount, state.reservedCapacity - state.count)
       guard writableCount > 0 else {
         state.overflowed = true
@@ -202,6 +209,9 @@ final class AudioSampleRingBuffer: Sendable {
     }
   }
 
+  /// RMS of the latest audio callback (0 when idle).
+  var recentLevel: Float { state.withLock { $0.recentLevel } }
+
   /// Samples captured in the current segment.
   var capturedCount: Int { state.withLock { $0.count } }
 
@@ -221,6 +231,7 @@ final class AudioSampleRingBuffer: Sendable {
       state.chunkCapacity = 0
       state.sampleRate = 0
       state.overflowed = false
+      state.recentLevel = 0
       return frozen
     }
     return Self.flatten(frozen)
@@ -228,6 +239,7 @@ final class AudioSampleRingBuffer: Sendable {
 
   func clear() {
     state.withLock { state in
+      state.recentLevel = 0
       state.generation &+= 1
       state.chunks = []
       state.count = 0

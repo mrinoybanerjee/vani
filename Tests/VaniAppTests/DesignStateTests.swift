@@ -146,3 +146,24 @@ extension NativeInteractionTests {
   #expect(SpeechModel.parakeetUnified.downloadSizeDescription == "583\u{00A0}MiB")
   #expect(SpeechModel.parakeetTDTv2.downloadSizeDescription == "443\u{00A0}MiB")
 }
+
+@Test func listeningIconRestsInSilenceAndRisesWithSpeech() {
+  #expect(LevelMeter.normalized(0) == 0)
+  #expect(LevelMeter.normalized(.nan) == 0)
+  #expect(LevelMeter.normalized(0.0005) < 0.05)  // about -66 dBFS: room noise
+  #expect(LevelMeter.normalized(1) == 1)
+
+  let silent = LevelMeter()
+  let rest = silent.barHeights(level: 0, time: 12.3)
+  #expect(rest.allSatisfy { $0 == LevelMeter.minimumHeight })
+
+  let speaking = LevelMeter()
+  var heights: [CGFloat] = []
+  for frame in 0..<10 { heights = speaking.barHeights(level: 0.08, time: Double(frame) / 30) }
+  #expect(heights.max()! > LevelMeter.minimumHeight + 4)
+  #expect(heights.allSatisfy { $0 <= LevelMeter.maximumHeight })
+
+  // Release is slower than attack: one quiet frame does not drop the bars to rest.
+  let afterSpeech = speaking.barHeights(level: 0, time: 1)
+  #expect(afterSpeech.max()! > LevelMeter.minimumHeight + 2)
+}
