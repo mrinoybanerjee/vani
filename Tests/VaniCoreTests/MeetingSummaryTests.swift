@@ -293,17 +293,68 @@ struct MeetingSummaryTests {
     #expect(LocalMeetingSummarizer.restates("Tom tests the annual invoices.", item))
   }
 
-  @Test func consolidationThatWouldOverflowTheContextIsSkipped() async throws {
-    let long = String(repeating: "Launch planning detail. ", count: 47)
-    let many = (0..<12).map { item("\($0) " + long, 1, "Priya will send results by Friday") }
+  /// Four-hour meetings produce more batch items than one consolidation request can hold.
+  @Test func consolidationThatWouldOverflowTheContextRunsInGroupsThenOnceMore() async throws {
+    let long = String(repeating: "Launch planning detail. ", count: 33)
+    let first = (0..<12).map { item("\($0) " + long, 0, "agreed to launch on Monday") }
+    let second = (12..<24).map { item("\($0) " + long, 1, "Priya will send results by Friday") }
+    // Every consolidation request merges its first two items.
+    let merge = try envelope([
+      "summary": [["text": "Launch planning detail.", "sources": [0, 1]]], "decisions": [],
+      "actions": [],
+    ])
     MeetingSummaryProtocol.reset(
-      try twoBatches(["summary": many, "decisions": [], "actions": many]))
+      [
+        try envelope(["summary": first, "decisions": [], "actions": []]),
+        try envelope(["summary": second, "decisions": [], "actions": []]), merge,
+      ])
     let result = try await summarizer.summarize(longMeeting())
-    #expect(result.components(separatedBy: "• ").count == 26)
-    // Two batch requests, then an explicit unload instead of a consolidation prompt.
-    #expect(MeetingSummaryProtocol.bodies.count == 3)
-    #expect(MeetingSummaryProtocol.bodies.last?["prompt"] == nil)
-    #expect(MeetingSummaryProtocol.bodies.last?["keep_alive"] as? Int == 0)
+    // Two batches, two group requests that keep the model loaded, then one final request that
+    // unloads it. Nothing else is sent.
+    #expect(
+      MeetingSummaryProtocol.bodies.map { $0["keep_alive"] as? String }
+        == ["5m", "5m", "5m", "5m", "0"])
+    let prompts = MeetingSummaryProtocol.bodies.compactMap { $0["prompt"] as? String }
+    #expect(prompts.dropFirst(2).allSatisfy { $0.contains("ITEMS\n") })
+    #expect(prompts.dropFirst(2).allSatisfy { LocalMeetingSummarizer.fitsContext($0) })
+    #expect(!LocalMeetingSummarizer.fitsContext(prompts[2] + prompts[3]))
+    // Three merges of two: 24 items become 21, and every one of the 24 quotes is still shown.
+    #expect(result.components(separatedBy: "• ").count - 1 == 21)
+    #expect(result.components(separatedBy: "Source: “").count - 1 == 24)
+    #expect(result.contains("• Launch planning detail. [0:00]"))
+  }
+
+  @Test func laterPassesKeepProvenanceChecksAgainstTheOriginalQuotes() {
+    let launch = LocalMeetingSummarizer.Supported(
+      text: "The launch is on Monday.", quote: "we agreed to launch on Monday", offset: 0)
+    let again = LocalMeetingSummarizer.Supported(
+      text: "Launch stays on Monday.", quote: "launch is still on Monday", offset: 600)
+    let results = LocalMeetingSummarizer.Supported(
+      text: "Priya sends results by Friday.", quote: "Priya will send results by Friday",
+      offset: 610)
+    let claims = [
+      LocalMeetingSummarizer.Claim(
+        section: 0, text: "The launch is on Monday.", evidence: [launch, again]),
+      LocalMeetingSummarizer.Claim(section: 0, results),
+      LocalMeetingSummarizer.Claim(section: 2, results),
+    ]
+    let merged = LocalMeetingSummarizer.applyMerge(
+      .init(
+        summary: [
+          // A name absent from all evidence is rejected.
+          .init(text: "The launch on Monday was confirmed by Sam.", sources: [0]),
+          // A statement restating both claims carries the evidence of both.
+          .init(text: "Launch on Monday, results by Friday.", sources: [0, 1]),
+        ],
+        decisions: [], actions: [.init(text: "Priya sends results.", sources: [1])]),
+      to: claims)
+    #expect(merged.count == 2)
+    #expect(merged[0].text == "Launch on Monday, results by Friday.")
+    #expect(merged[0].evidence.map(\.offset) == [0, 600, 610])
+    // A cited claim is not reused, the action citing a summary item is rejected, and the
+    // uncited action is kept as it was.
+    #expect(merged[1].section == 2 && merged[1].text == "Priya sends results by Friday.")
+    #expect(!merged.contains { $0.text.contains("Sam") })
   }
 
   @Test func failureOrCancellationDuringBatchesUnloadsTheModel() async throws {
