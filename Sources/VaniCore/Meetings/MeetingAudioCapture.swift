@@ -15,10 +15,11 @@ public protocol MeetingAudioRecording: AnyObject {
 /// ScreenCaptureKit supplies buffers on our serial work queue, not an audio render callback.
 /// File writes and conversion stay off the main actor. No video output is registered or stored.
 ///
-/// Capture heals itself: if the stream stops with an error (a microphone disconnects or the
-/// audio route changes) it restarts up to three times, and when the default input changes it
-/// switches to the new microphone. The meeting timeline stays continuous across restarts; a
-/// short gap is recorded as a gap, never as overlapping audio.
+/// Capture heals itself. If the stream stops with an error it restarts up to three times.
+/// If microphone audio stops arriving while the stream runs (ScreenCaptureKit raises no error
+/// when the microphone is unplugged; measured on hardware) it restarts on the current default
+/// input. A mere change of default input does not restart capture, which would also interrupt
+/// Mac audio. The meeting timeline stays continuous; a short gap is recorded as a gap.
 @available(macOS 15.0, *)
 @MainActor
 public final class MeetingAudioCapture: MeetingAudioRecording {
@@ -30,7 +31,11 @@ public final class MeetingAudioCapture: MeetingAudioRecording {
   private var startedAt: ContinuousClock.Instant?
   private var restarting = false
   private var stopping = false
-  private var inputObserver: DefaultInputObserver?
+  private var watchdog: Task<Void, Never>?
+  private var silentMicrophoneRestarts = 0
+  /// Microphone buffers normally arrive every few milliseconds, silence included.
+  static let microphoneSilenceLimit: TimeInterval = 2.5
+  static let maximumSilentMicrophoneRestarts = 3
   private let queue = DispatchQueue(label: "com.mrinoy.vani.meeting-audio", qos: .userInitiated)
   static let restartAttempts = 3
 
@@ -62,15 +67,20 @@ public final class MeetingAudioCapture: MeetingAudioRecording {
       self.output = nil
       throw error
     }
-    inputObserver = DefaultInputObserver { [weak self] in
-      Task { await self?.defaultInputChanged() }
+    silentMicrophoneRestarts = 0
+    watchdog = Task { [weak self] in
+      while !Task.isCancelled {
+        try? await Task.sleep(for: .seconds(1))
+        await self?.checkMicrophone()
+      }
     }
   }
 
   public func stop() async throws {
     guard let stream, let output else { return }
     stopping = true
-    inputObserver = nil
+    watchdog?.cancel()
+    watchdog = nil
     // Retain both handles if stop fails; callers must not claim the microphone is released.
     if !captureStopped {
       try await stream.stopCapture()
@@ -131,7 +141,7 @@ public final class MeetingAudioCapture: MeetingAudioRecording {
     for attempt in 1...Self.restartAttempts {
       try? await Task.sleep(for: .milliseconds(500 * attempt))
       guard !stopping, stream != nil else { return }
-      if await restartStream(stoppingCurrent: false) {
+      if await restartStream() {
         VaniLog.event(category: .capture, code: "meeting_capture_restarted")
         return
       }
@@ -140,19 +150,28 @@ public final class MeetingAudioCapture: MeetingAudioRecording {
     onFailure?(message)
   }
 
-  /// A different microphone became the default input: follow it.
-  private func defaultInputChanged() async {
-    guard isCapturing, !stopping else { return }
-    if await restartStream(stoppingCurrent: true) {
-      VaniLog.event(category: .capture, code: "meeting_capture_followed_input")
+  /// Restarts capture when the microphone has gone quiet at the buffer level (no buffers,
+  /// not silent audio), bounded so a microphone that never returns cannot cause a loop.
+  private func checkMicrophone() async {
+    guard isCapturing, !stopping, !restarting, let output else { return }
+    let silence = await withCheckedContinuation { continuation in
+      queue.async { continuation.resume(returning: output.secondsSinceMicrophoneBuffer()) }
+    }
+    guard let silence else { return }
+    if silence < 1 { silentMicrophoneRestarts = 0 }
+    guard silence > Self.microphoneSilenceLimit,
+      silentMicrophoneRestarts < Self.maximumSilentMicrophoneRestarts
+    else { return }
+    silentMicrophoneRestarts += 1
+    if await restartStream() {
+      VaniLog.event(category: .capture, code: "meeting_microphone_restarted")
     }
   }
 
-  private func restartStream(stoppingCurrent: Bool) async -> Bool {
-    guard !restarting, let output, let current = stream else { return false }
+  private func restartStream() async -> Bool {
+    guard !restarting, let output, stream != nil else { return false }
     restarting = true
     defer { restarting = false }
-    if stoppingCurrent { try? await current.stopCapture() }
     do {
       let replacement = try await makeStream(output: output)
       try await replacement.startCapture()
@@ -179,6 +198,8 @@ final class MeetingStreamOutput: NSObject, SCStreamOutput, SCStreamDelegate, @un
   /// from a replaced stream are ignored; the new stream continues the same timeline.
   private var timelineBase: TimeInterval = 0
   private var latestOffset: TimeInterval = 0
+  private var lastMicrophoneBuffer: ContinuousClock.Instant?
+  private var currentStreamStartedAt = ContinuousClock().now
   private var currentStream: ObjectIdentifier?
   private var failed = false
   private var closed = false
@@ -206,8 +227,26 @@ final class MeetingStreamOutput: NSObject, SCStreamOutput, SCStreamDelegate, @un
   /// Called on the sample queue before a (re)started stream delivers audio.
   func beginStream(_ identity: ObjectIdentifier, continuingAt base: TimeInterval) {
     currentStream = identity
+    currentStreamStartedAt = ContinuousClock().now
+    lastMicrophoneBuffer = nil
     origin = nil
     timelineBase = max(base, latestOffset)
+  }
+
+  /// Seconds since the current stream last delivered microphone audio, or since it began
+  /// (allowing a few seconds for the microphone to start). Nil while within that grace.
+  func secondsSinceMicrophoneBuffer(now: ContinuousClock.Instant = ContinuousClock().now)
+    -> TimeInterval?
+  {
+    let reference = lastMicrophoneBuffer ?? currentStreamStartedAt
+    let elapsed = now - reference
+    let seconds = Double(elapsed.components.seconds) + Double(elapsed.components.attoseconds) / 1e18
+    if lastMicrophoneBuffer == nil, seconds < 5 { return nil }
+    return seconds
+  }
+
+  func noteMicrophoneBuffer(at instant: ContinuousClock.Instant = ContinuousClock().now) {
+    lastMicrophoneBuffer = instant
   }
 
   /// Meeting time for a presentation timestamp of the current stream.
@@ -230,6 +269,7 @@ final class MeetingStreamOutput: NSObject, SCStreamOutput, SCStreamDelegate, @un
     }
     do {
       let source: MeetingAudioSource = type == .microphone ? .microphone : .system
+      if source == .microphone { noteMicrophoneBuffer() }
       let (samples, rate) = try Self.samples(from: sampleBuffer)
       guard !samples.isEmpty else { return }
       let timestamp = CMTimeGetSeconds(CMSampleBufferGetPresentationTimeStamp(sampleBuffer))

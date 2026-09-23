@@ -2,11 +2,13 @@ import AVFoundation
 import CoreAudio
 import Foundation
 
-/// Records one dictation from the current input device. A recording is a sequence of
-/// segments: when the input route changes (AirPods connect, a microphone is unplugged, the
-/// default input changes), the current segment is kept and capture continues on the new
-/// input. Segments keep their own sample rate and are converted and joined only when the
-/// recording finishes, off the real-time thread.
+/// Records one dictation. A recording is a sequence of segments: when the audio route
+/// changes, the current segment is kept and capture resumes. It stays on the microphone the
+/// take started with while that device is connected, because a newly selected input can take
+/// seconds to deliver audio (measured: an iPhone Continuity microphone delivered nothing for
+/// over 3 s after a switch). Only when that microphone disappears does capture move to the
+/// current default input. Segments keep their own sample rate and are converted and joined
+/// when the recording finishes, off the real-time thread.
 public actor AVAudioEngineCapture: AudioCapturing {
   private var engine: AVAudioEngine
   private let ringBuffer: AudioSampleRingBuffer
@@ -19,6 +21,8 @@ public actor AVAudioEngineCapture: AudioCapturing {
   /// which binds to the current default input.
   private var needsFreshEngine = false
   private var completedSegments: [AudioSampleRingBuffer.Snapshot] = []
+  /// The input device of the current take, kept across route changes while it is connected.
+  private var recordingDevice: AudioDeviceID?
   private var capacityTask: Task<Void, Never>?
   private var pendingSegments: [AudioSampleRingBuffer.Snapshot]?
 
@@ -46,8 +50,12 @@ public actor AVAudioEngineCapture: AudioCapturing {
     }
     completedSegments = []
     pendingSegments = nil
-    try startSegment(maximumDuration: maximumDuration)
+    recordingDevice = nil
+    try startSegment(maximumDuration: maximumDuration, device: Self.defaultInputDeviceID())
+    recordingDevice = engine.inputNode.auAudioUnit.deviceID
     isCapturing = true
+    deliveryRetries = 0
+    scheduleDeliveryCheck()
   }
 
   /// Keeps an active recording going after an input route change. Returns false when no
@@ -55,23 +63,64 @@ public actor AVAudioEngineCapture: AudioCapturing {
   /// Synchronous inside the actor, so a concurrent stop cannot interleave with it.
   public func continueOnCurrentInput() async -> Bool {
     guard isCapturing else { return false }
-    // Route changes often arrive in bursts; an engine still running on the current
-    // default input needs nothing.
-    if engineRunning, engine.isRunning,
-      engine.inputNode.auAudioUnit.deviceID == Self.defaultInputDeviceID()
+    // The engine is bound to one device, so a default-input change leaves it recording.
+    // Route changes also arrive in bursts; a healthy segment needs nothing.
+    if engineRunning, engine.isRunning, let recordingDevice,
+      Self.isConnectedInput(recordingDevice),
+      engine.inputNode.auAudioUnit.deviceID == recordingDevice
     {
       return true
     }
+    return restartSegment()
+  }
+
+  /// Closes the current segment and resumes on the take's microphone if it is still
+  /// connected, otherwise on the current default input. A newly started engine is checked
+  /// for delivered audio and restarted if it stays silent (observed right after a device
+  /// is removed).
+  private func restartSegment() -> Bool {
     closeSegment()
     engine = AVAudioEngine()
     let remaining = maximumDuration - capturedDuration
     guard remaining > 0.05 else { return false }
+    let device =
+      recordingDevice.flatMap { Self.isConnectedInput($0) ? $0 : nil }
+      ?? Self.defaultInputDeviceID()
     do {
-      try startSegment(maximumDuration: remaining)
+      try startSegment(maximumDuration: remaining, device: device)
+      recordingDevice = engine.inputNode.auAudioUnit.deviceID
+      scheduleDeliveryCheck()
       return true
     } catch {
       return false
     }
+  }
+
+  private var deliveryCheck: Task<Void, Never>?
+  private var deliveryRetries = 0
+  static let deliveryCheckDelay: Duration = .milliseconds(600)
+  static let maximumDeliveryRetries = 3
+
+  private func scheduleDeliveryCheck() {
+    deliveryCheck?.cancel()
+    let generation = segmentGeneration
+    deliveryCheck = Task { [weak self] in
+      try? await Task.sleep(for: Self.deliveryCheckDelay)
+      guard !Task.isCancelled else { return }
+      await self?.verifyDelivery(generation: generation)
+    }
+  }
+
+  private func verifyDelivery(generation: UInt64) {
+    guard isCapturing, engineRunning, generation == segmentGeneration else { return }
+    guard ringBuffer.capturedCount == 0 else {
+      deliveryRetries = 0
+      return
+    }
+    guard deliveryRetries < Self.maximumDeliveryRetries else { return }
+    deliveryRetries += 1
+    VaniLog.event(category: .capture, code: "capture_segment_silent_restart")
+    _ = restartSegment()
   }
 
   /// The input route changed while no recording is active.
@@ -85,6 +134,7 @@ public actor AVAudioEngineCapture: AudioCapturing {
     }
     closeSegment()
     isCapturing = false
+    deliveryRetries = 0
     pendingSegments = completedSegments
     completedSegments = []
     guard let audio = try finalizePendingAudio() else {
@@ -120,6 +170,9 @@ public actor AVAudioEngineCapture: AudioCapturing {
   }
 
   public func cancel() async {
+    deliveryCheck?.cancel()
+    deliveryCheck = nil
+    deliveryRetries = 0
     stopCapacityReservations()
     if engineRunning {
       engine.inputNode.removeTap(onBus: 0)
@@ -127,6 +180,7 @@ public actor AVAudioEngineCapture: AudioCapturing {
       engineRunning = false
     }
     isCapturing = false
+    recordingDevice = nil
     ringBuffer.clear()
     completedSegments = []
     pendingSegments = nil
@@ -149,6 +203,25 @@ public actor AVAudioEngineCapture: AudioCapturing {
     return status == noErr && device != kAudioObjectUnknown ? device : nil
   }
 
+  /// True while the device is present and still offers input streams.
+  static func isConnectedInput(_ device: AudioDeviceID) -> Bool {
+    var alive: UInt32 = 0
+    var size = UInt32(MemoryLayout<UInt32>.size)
+    var address = AudioObjectPropertyAddress(
+      mSelector: kAudioDevicePropertyDeviceIsAlive,
+      mScope: kAudioObjectPropertyScopeGlobal,
+      mElement: kAudioObjectPropertyElementMain)
+    guard AudioObjectGetPropertyData(device, &address, 0, nil, &size, &alive) == noErr, alive != 0
+    else { return false }
+    var streams = AudioObjectPropertyAddress(
+      mSelector: kAudioDevicePropertyStreams,
+      mScope: kAudioDevicePropertyScopeInput,
+      mElement: kAudioObjectPropertyElementMain)
+    var streamSize: UInt32 = 0
+    return AudioObjectGetPropertyDataSize(device, &streams, 0, nil, &streamSize) == noErr
+      && streamSize > 0
+  }
+
   /// Seconds of audio in closed segments.
   private var capturedDuration: TimeInterval {
     completedSegments.reduce(0) { total, segment in
@@ -156,8 +229,14 @@ public actor AVAudioEngineCapture: AudioCapturing {
     }
   }
 
-  private func startSegment(maximumDuration: TimeInterval) throws {
+  private var segmentGeneration: UInt64 = 0
+
+  private func startSegment(maximumDuration: TimeInterval, device: AudioDeviceID?) throws {
+    segmentGeneration &+= 1
     let input = engine.inputNode
+    // An explicit device stops the engine from following default-input changes, which
+    // otherwise reconfigure it and silently end the tap's audio.
+    if let device { try? input.auAudioUnit.setDeviceID(device) }
     let format = input.outputFormat(forBus: 0)
     guard format.channelCount > 0 else {
       throw VaniFailure.audioDeviceUnavailable
@@ -200,6 +279,8 @@ public actor AVAudioEngineCapture: AudioCapturing {
 
   /// Stops the engine and keeps the segment it captured.
   private func closeSegment() {
+    deliveryCheck?.cancel()
+    deliveryCheck = nil
     stopCapacityReservations()
     guard engineRunning else { return }
     engine.inputNode.removeTap(onBus: 0)

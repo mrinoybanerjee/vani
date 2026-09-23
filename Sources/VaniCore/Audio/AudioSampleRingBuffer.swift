@@ -202,6 +202,9 @@ final class AudioSampleRingBuffer: Sendable {
     }
   }
 
+  /// Samples captured in the current segment.
+  var capturedCount: Int { state.withLock { $0.count } }
+
   func drain() -> Snapshot {
     let frozen = state.withLock { state in
       let frozen = FrozenState(
