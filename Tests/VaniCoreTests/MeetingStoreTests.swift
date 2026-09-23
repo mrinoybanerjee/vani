@@ -120,4 +120,102 @@ struct MeetingStoreTests {
     await #expect(throws: MeetingError.self) { try await store.load() }
   }
 
+  @Test func staleTemporaryFilesFromACrashDoNotBlockLoading() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let store = MeetingStore(directory: directory)
+    let meeting = MeetingRecord(title: "Kept")
+    try await store.save(meeting)
+    let saved = try await store.audioDirectory(for: meeting.id)
+    try Data("partial".utf8).write(to: saved.appendingPathComponent(".\(UUID().uuidString).tmp"))
+    // A crash during a first save leaves a folder holding only a temporary file.
+    let crashed = try await store.audioDirectory(for: UUID())
+    let leftover = crashed.appendingPathComponent(".\(UUID().uuidString).tmp")
+    try Data("partial".utf8).write(to: leftover)
+    #expect(try await store.load() == [meeting])
+    #expect(FileManager.default.fileExists(atPath: leftover.path))
+  }
+
+  @Test func repeatedSavesKeepAValidPreviousCopyAndDetectOutsideChanges() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let store = MeetingStore(directory: directory)
+    var meeting = MeetingRecord(title: "Draft")
+    let folder = try await store.audioDirectory(for: meeting.id)
+    let file = folder.appendingPathComponent("meeting.json")
+    let backup = folder.appendingPathComponent("meeting.backup.json")
+    for index in 1...3 {
+      meeting.notes = "Version \(index)"
+      try await store.save(meeting)
+    }
+    let previous = try JSONDecoder().decode(MeetingRecord.self, from: Data(contentsOf: backup))
+    #expect(previous.notes == "Version 2")
+    #expect(try await store.record(id: meeting.id)?.notes == "Version 3")
+    let permissions = try FileManager.default.attributesOfItem(atPath: backup.path)
+    #expect((permissions[.posixPermissions] as? NSNumber)?.intValue == 0o600)
+    // A file changed by something else is validated again instead of trusted.
+    try Data("changed elsewhere".utf8).write(to: file)
+    meeting.notes = "Version 4"
+    await #expect(throws: (any Error).self) { try await store.save(meeting) }
+    #expect(try String(contentsOf: file, encoding: .utf8) == "changed elsewhere")
+    #expect(
+      try JSONDecoder().decode(MeetingRecord.self, from: Data(contentsOf: backup)).notes
+        == "Version 2")
+  }
+
+  @Test func pendingAudioIsOrderedByOffsetAndFailurePlaceholdersAreNotPending() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let store = MeetingStore(directory: directory)
+    var meeting = MeetingRecord()
+    try await store.save(meeting)
+    let folder = try await store.audioDirectory(for: meeting.id)
+    let encoder = PropertyListEncoder()
+    encoder.outputFormat = .binary
+    var chunks: [MeetingAudioChunk] = []
+    for offset in [40.0, 0, 20] {
+      let chunk = MeetingAudioChunk(source: .system, offset: offset, samples: [0.1])
+      chunks.append(chunk)
+      try MeetingStore.write(
+        encoder.encode(chunk),
+        to: folder.appendingPathComponent(chunk.id.uuidString).appendingPathExtension("vani-audio"))
+    }
+    try Data("unreadable".utf8).write(
+      to: folder.appendingPathComponent("\(UUID().uuidString).vani-audio"))
+    let names = { (files: [URL]) in files.map { $0.deletingPathExtension().lastPathComponent } }
+    let pending = try await store.pendingAudioFiles(for: meeting)
+    #expect(
+      Array(names(pending).prefix(3)) == [chunks[1], chunks[2], chunks[0]].map(\.id.uuidString))
+    #expect(pending.count == 4)
+    meeting.transcript = [
+      .init(id: chunks[1].id, source: .system, offset: 0, duration: 1, text: "", failed: true)
+    ]
+    #expect(
+      !names(try await store.pendingAudioFiles(for: meeting)).contains(chunks[1].id.uuidString))
+    #expect(try await store.pendingAudioFiles(for: meeting).count == 3)
+  }
+
+  @Test func onlyAnUnusedMeetingCanBeDiscarded() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let store = MeetingStore(directory: directory)
+    let unused = MeetingRecord(title: "Never started")
+    try await store.save(unused)
+    try await store.discardUnused(unused.id)
+    #expect(try await store.load().isEmpty)
+    var noted = MeetingRecord(title: "Has notes")
+    noted.notes = "Keep me"
+    try await store.save(noted)
+    await #expect(throws: MeetingError.self) { try await store.discardUnused(noted.id) }
+    let withAudio = MeetingRecord(title: "Has audio")
+    try await store.save(withAudio)
+    let folder = try await store.audioDirectory(for: withAudio.id)
+    try Data("audio".utf8).write(to: folder.appendingPathComponent("chunk.vani-audio"))
+    await #expect(throws: MeetingError.self) { try await store.discardUnused(withAudio.id) }
+    #expect(
+      FileManager.default.fileExists(atPath: folder.appendingPathComponent("chunk.vani-audio").path)
+    )
+    #expect(try await store.record(id: noted.id)?.notes == "Keep me")
+  }
+
 }

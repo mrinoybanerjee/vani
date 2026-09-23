@@ -3,7 +3,15 @@ import Foundation
 public enum MeetingAudioSource: String, Codable, Sendable {
   case microphone
   case system
-  public var label: String { self == .microphone ? "Microphone" : "Meeting audio" }
+  /// Sources are capture devices, not identified people: "Me" is this Mac's microphone and
+  /// "Others" is the other audio playing on the Mac.
+  public var label: String { self == .microphone ? "Me" : "Others" }
+}
+
+/// `m:ss` for transcript offsets that the store has already validated as finite and bounded.
+public func meetingTimestamp(_ seconds: TimeInterval) -> String {
+  let whole = Int(max(0, seconds))
+  return "\(whole / 60):\(String(format: "%02d", whole % 60))"
 }
 
 public struct MeetingTranscriptSegment: Codable, Identifiable, Sendable, Equatable {
@@ -12,15 +20,32 @@ public struct MeetingTranscriptSegment: Codable, Identifiable, Sendable, Equatab
   public let offset: TimeInterval
   public let duration: TimeInterval
   public let text: String
+  /// Microphone text that repeats nearby Mac audio (speaker echo). Hidden by default, never deleted.
+  public var echoOfSystemAudio: Bool?
+  /// Transcription failed repeatedly. The chunk's audio is kept so it can be retried later.
+  public let failed: Bool?
 
   public init(
-    id: UUID, source: MeetingAudioSource, offset: TimeInterval, duration: TimeInterval, text: String
+    id: UUID, source: MeetingAudioSource, offset: TimeInterval, duration: TimeInterval,
+    text: String, echoOfSystemAudio: Bool? = nil, failed: Bool? = nil
   ) {
     self.id = id
     self.source = source
     self.offset = offset
     self.duration = duration
     self.text = text
+    self.echoOfSystemAudio = echoOfSystemAudio
+    self.failed = failed
+  }
+
+  public var isEcho: Bool { echoOfSystemAudio == true }
+  public var isFailed: Bool { failed == true }
+  /// Real transcribed speech: not an echo, not a failure placeholder and not silence.
+  public var isSpeech: Bool {
+    !isEcho && !isFailed && !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+  }
+  public var timeRange: String {
+    "\(meetingTimestamp(offset))–\(meetingTimestamp(offset + duration))"
   }
 }
 
@@ -43,11 +68,44 @@ public struct MeetingRecord: Codable, Identifiable, Sendable, Equatable {
     summary = ""
   }
 
+  /// Speech and failure placeholders in time order. Echo copies are omitted from exports.
+  private var exportedSegments: [MeetingTranscriptSegment] {
+    transcript.filter { $0.isSpeech || $0.isFailed }.sorted { $0.offset < $1.offset }
+  }
+
   public var exportedText: String {
-    let lines = transcript.sorted { $0.offset < $1.offset }.map {
-      "[\(Int($0.offset) / 60):\(String(format: "%02d", Int($0.offset) % 60)) · \($0.source.label)] \($0.text)"
+    let lines = exportedSegments.map {
+      $0.isFailed
+        ? "[\(meetingTimestamp($0.offset)) · \($0.source.label)] (Couldn’t transcribe \($0.timeRange))"
+        : "[\(meetingTimestamp($0.offset)) · \($0.source.label)] \($0.text)"
     }.joined(separator: "\n\n")
     return "\(title)\n\nMY NOTES\n\(notes)\n\nSUMMARY\n\(summary)\n\nTRANSCRIPT\n\(lines)"
+  }
+
+  public var markdownText: String {
+    func section(_ heading: String, _ body: String) -> String {
+      let trimmed = body.trimmingCharacters(in: .whitespacesAndNewlines)
+      return "## \(heading)\n\n\(trimmed.isEmpty ? "_None_" : trimmed)"
+    }
+    let transcript = exportedSegments.map {
+      $0.isFailed
+        ? "**\($0.source.label) · \(meetingTimestamp($0.offset))** _Couldn’t transcribe \($0.timeRange)_"
+        : "**\($0.source.label) · \(meetingTimestamp($0.offset))** \($0.text)"
+    }.joined(separator: "\n\n")
+    let heading = title.trimmingCharacters(in: .whitespacesAndNewlines)
+    return [
+      "# \(heading.isEmpty ? "Untitled meeting" : heading)", section("My notes", notes),
+      section("Summary", summary), section("Transcript", transcript),
+    ].joined(separator: "\n\n") + "\n"
+  }
+
+  /// A file name derived from the title without path separators or hidden-file prefixes.
+  public var exportFileName: String {
+    let unsafe = CharacterSet(charactersIn: "/\\:?%*|\"<>").union(.controlCharacters)
+      .union(.newlines)
+    let cleaned = title.unicodeScalars.map { unsafe.contains($0) ? "-" : String($0) }.joined()
+      .trimmingCharacters(in: CharacterSet.whitespaces.union(CharacterSet(charactersIn: ".")))
+    return String((cleaned.isEmpty ? "Vani Meeting" : cleaned).prefix(120))
   }
 }
 
