@@ -177,3 +177,22 @@ func briefClipsArePaddedToOneSecondForInference() {
   let long = [Float](repeating: 0.1, count: 20_000)
   #expect(FluidAudioSpeechRecognizer.paddedForInference(long) == long)
 }
+
+@Test
+func segmentsRecordedAtDifferentRatesAreJoinedInOrderAt16kHz() throws {
+  let first = AudioSampleRingBuffer.Snapshot(
+    samples: [Float](repeating: 0.25, count: 48_000), sampleRate: 48_000, overflowed: false)
+  let second = AudioSampleRingBuffer.Snapshot(
+    samples: [Float](repeating: -0.25, count: 24_000), sampleRate: 24_000, overflowed: false)
+  let audio = try AVAudioEngineCapture.makeCapturedAudio(from: [first, second])
+
+  #expect(abs(audio.samples.count - 32_000) <= 64)
+  #expect(!audio.wasTruncated)
+  // First second is the 48 kHz segment, then the 24 kHz one, in order.
+  #expect(audio.samples[8_000] > 0.2)
+  #expect(audio.samples[24_000] < -0.2)
+
+  let truncated = AudioSampleRingBuffer.Snapshot(
+    samples: [Float](repeating: 0.1, count: 16_000), sampleRate: 16_000, overflowed: true)
+  #expect(try AVAudioEngineCapture.makeCapturedAudio(from: [first, truncated]).wasTruncated)
+}

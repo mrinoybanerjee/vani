@@ -83,6 +83,9 @@ final class OverlayController {
         self?.hide()
       }
     case .setup, .preparing, .ready, .disabled:
+      // A recording that ends without transcription (cancelled, too short, interrupted) would
+      // otherwise vanish silently for VoiceOver users.
+      if state.isRecording { announce("Recording stopped") }
       hide()
     }
   }
@@ -155,14 +158,7 @@ final class OverlayController {
   }
 
   static func postAnnouncement(_ announcement: String) {
-    NSAccessibility.post(
-      element: NSApplication.shared,
-      notification: .announcementRequested,
-      userInfo: [
-        .announcement: announcement,
-        .priority: NSAccessibilityPriorityLevel.high.rawValue,
-      ]
-    )
+    VoiceOverAnnouncer.announce(announcement)
   }
 }
 
@@ -201,6 +197,7 @@ enum OverlayState: Equatable {
   var announcement: String? {
     switch self {
     case .hidden, .processing: nil
+    case .handsFree: "Hands-free recording locked"
     case .backupCopied: "Paste sent, backup copied"
     default: label
     }
@@ -278,7 +275,7 @@ private struct RecordingIndicator: View {
       Circle()
         .fill(VaniTheme.accent)
         .frame(width: 8, height: 8)
-        .opacity(pulsing ? 0.35 : 1)
+        .opacity(pulsing && !reduceMotion ? 0.35 : 1)
       TimelineView(.periodic(from: startedAt, by: 1)) { context in
         Text(Self.elapsed(from: startedAt, to: context.date))
           .font(.system(size: 12, weight: .medium).monospacedDigit())
@@ -286,11 +283,16 @@ private struct RecordingIndicator: View {
       }
     }
     .accessibilityHidden(true)
-    .onAppear {
-      guard !reduceMotion else { return }
-      withAnimation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true)) {
-        pulsing = true
-      }
+    .onAppear { startPulse() }
+    .onChange(of: reduceMotion) { startPulse() }
+  }
+
+  /// The dot pulses only while Reduce Motion is off (the opacity above stays constant when it
+  /// is on, even mid-animation); the elapsed time shows recording either way.
+  private func startPulse() {
+    guard !reduceMotion, !pulsing else { return }
+    withAnimation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true)) {
+      pulsing = true
     }
   }
 

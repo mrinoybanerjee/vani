@@ -38,6 +38,7 @@ public actor DictationSession {
   private var isRecordingLimitApproaching = false
   private var didUnexpectedlyTruncateCurrentAudio = false
   private var historyRevision: UInt64 = 0
+  private var interruptionHandlerInstalled = false
 
   public init(
     audioCapture: any AudioCapturing,
@@ -188,6 +189,12 @@ public actor DictationSession {
     failure = nil
     insertionFeedback = nil
     didUnexpectedlyTruncateCurrentAudio = false
+    if !interruptionHandlerInstalled {
+      interruptionHandlerInstalled = true
+      await audioCapture.setInterruptionHandler { [weak self] in
+        Task { await self?.captureEndedUnexpectedly() }
+      }
+    }
 
     do {
       let captureStartedAt = ContinuousClock().now
@@ -477,11 +484,21 @@ public actor DictationSession {
   }
 
   public func audioRouteDidChange() async {
-    cancelRecordingLimitTimer()
     if machine.phase == .listening {
+      // Connecting headphones or switching microphones should not end a dictation.
+      if await audioCapture.continueOnCurrentInput(), machine.phase == .listening {
+        await diagnostics.record(
+          DiagnosticEvent(category: .capture, code: "capture_route_continued", phase: machine.phase)
+        )
+        return
+      }
+      guard machine.phase == .listening else { return }
+      cancelRecordingLimitTimer()
       await preserveInterruptedDictation(diagnosticCode: "capture_interrupted_audio_route")
       return
     }
+    cancelRecordingLimitTimer()
+    await audioCapture.inputRouteChanged()
     if isStartingCapture {
       await audioCapture.cancel()
     }
@@ -490,6 +507,13 @@ public actor DictationSession {
     } catch {
       await recordIgnored("audio_route_change", phase: machine.phase)
     }
+  }
+
+  /// Capture stopped on its own (every input vanished); keep the take for Retry.
+  private func captureEndedUnexpectedly() async {
+    guard machine.phase == .listening else { return }
+    cancelRecordingLimitTimer()
+    await preserveInterruptedDictation(diagnosticCode: "capture_input_lost")
   }
 
   public func systemWillSleep() async {

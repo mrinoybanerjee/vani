@@ -42,6 +42,7 @@ final class AppCoordinator: ObservableObject {
   private let cuePlayer = DictationCuePlayer()
   private let teachWindowController = TeachWindowController()
   private var notificationTokens: [NSObjectProtocol] = []
+  private var defaultInputObserver: DefaultInputObserver?
   private var qaWindow: NSWindow?
   private var captureStartTask: Task<Void, Never>?
   private var sessionOperationTask: Task<Void, Never>?
@@ -1073,17 +1074,16 @@ final class AppCoordinator: ObservableObject {
         }
       }
     )
+    defaultInputObserver = DefaultInputObserver { [weak self] in
+      self?.handleAudioRouteChange()
+    }
     notificationTokens.append(
       NotificationCenter.default.addObserver(
         forName: .AVAudioEngineConfigurationChange,
         object: nil,
         queue: .main
       ) { [weak self] _ in
-        Task { @MainActor in
-          await self?.session.audioRouteDidChange()
-          try? await Task.sleep(for: .milliseconds(300))
-          await self?.session.resumeAfterSystemChange()
-        }
+        Task { @MainActor in self?.handleAudioRouteChange() }
       }
     )
     notificationTokens.append(
@@ -1100,6 +1100,16 @@ final class AppCoordinator: ObservableObject {
         }
       }
     )
+  }
+
+  /// Headphones or microphones changed. Dictation continues on the new input; an idle
+  /// session re-prepares. Meetings follow the new microphone through their own capture.
+  private func handleAudioRouteChange() {
+    Task {
+      await session.audioRouteDidChange()
+      try? await Task.sleep(for: .milliseconds(300))
+      await session.resumeAfterSystemChange()
+    }
   }
 
   private func openPrivacyPane(_ pane: String) {

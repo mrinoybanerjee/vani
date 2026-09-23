@@ -183,6 +183,7 @@ storage, and UI remain outside that callback. Dependencies are exact-pinned in
 - [Product design](docs/PRODUCT_DESIGN.md)
 - [Visual system](DESIGN.md)
 - [Unified workspace](docs/WORKSPACE_DESIGN.md)
+- [Accessibility: VoiceOver, keyboard and display settings](docs/ACCESSIBILITY.md)
 - [Redesign research and acceptance boundaries](docs/REDESIGN_2026-09-12.md)
 - [Local Notes design and storage](docs/NOTES_DESIGN.md)
 - [Meeting capture, summaries and recovery](docs/MEETINGS_DESIGN.md)

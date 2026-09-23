@@ -255,6 +255,44 @@ struct MeetingSummaryTests {
     #expect(MeetingSummaryProtocol.bodies.count == 3)
   }
 
+  /// Measured on a synthetic two-hour meeting: the local model folded 33 different action
+  /// items into one line. A merged statement now cites only the items it restates.
+  @Test func consolidationCannotFoldUnrelatedItemsIntoOneStatement() async throws {
+    MeetingSummaryProtocol.reset(
+      [
+        try envelope([
+          "summary": [], "decisions": [],
+          "actions": [item("The team launches on Monday.", 0, "agreed to launch on Monday")],
+        ]),
+        try envelope([
+          "summary": [], "decisions": [],
+          "actions": [
+            item("Priya sends results by Friday.", 1, "Priya will send results by Friday")
+          ],
+        ]),
+        try envelope([
+          "summary": [], "decisions": [],
+          "actions": [["text": "Priya sends the results by Friday.", "sources": [0, 1]]],
+        ]),
+      ])
+    let result = try await summarizer.summarize(longMeeting())
+    #expect(result.contains("• Priya sends the results by Friday. [10:00]\n"))
+    #expect(result.contains("• The team launches on Monday. [0:00]"))
+    #expect(!result.contains("[0:00, 10:00]"))
+    #expect(MeetingSummaryProtocol.bodies.count == 3)
+  }
+
+  @Test func contentStemsIgnoreCommonWordsAndPlurals() {
+    #expect(
+      LocalMeetingSummarizer.contentStems("We agreed the team will draft notices")
+        == ["draft", "notic"])
+    let item = LocalMeetingSummarizer.Supported(
+      text: "Tom tests annual invoices in staging by Monday.",
+      quote: "Tom will test the annual invoices in staging by Monday", offset: 0)
+    #expect(!LocalMeetingSummarizer.restates("People draft customer notices by Monday.", item))
+    #expect(LocalMeetingSummarizer.restates("Tom tests the annual invoices.", item))
+  }
+
   @Test func consolidationThatWouldOverflowTheContextIsSkipped() async throws {
     let long = String(repeating: "Launch planning detail. ", count: 47)
     let many = (0..<12).map { item("\($0) " + long, 1, "Priya will send results by Friday") }

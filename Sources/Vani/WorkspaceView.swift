@@ -17,14 +17,14 @@ struct WorkspaceView: View {
                 .font(.system(size: 13, weight: model.selection == section ? .semibold : .regular))
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 12).padding(.vertical, 8)
-                .background(
-                  model.selection == section ? VaniTheme.paper : .clear,
-                  in: RoundedRectangle(cornerRadius: 8)
-                )
+                .selectionHighlight(model.selection == section, cornerRadius: 8)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .disabled(model.transitioning)
+            // Command-1, -2 and -3 move between sidebar sections, as in other Mac sidebars.
+            .keyboardShortcut(section.keyEquivalent, modifiers: .command)
+            .help("\(section.rawValue) (Command-\(section.keyEquivalent.character))")
             .accessibilityIdentifier("workspace-\(section.rawValue.lowercased())")
             .accessibilityAddTraits(model.selection == section ? .isSelected : [])
           }
@@ -62,13 +62,26 @@ struct WorkspaceView: View {
   }
 
   // Keep editor, tab and settings drafts alive, while only the visible page receives input.
+  // Zero opacity removes hidden pages from the accessibility tree (the audit tests pin this).
+  // `accessibilityHidden(false)` is deliberately not applied to the visible page: it would
+  // override the decorative images hidden inside it and expose raw symbol names to VoiceOver.
   private func retained<Content: View>(_ content: Content, for section: WorkspaceModel.Section)
     -> some View
   {
     content.opacity(model.selection == section ? 1 : 0)
       .allowsHitTesting(model.selection == section && !model.transitioning)
       .disabled(model.selection != section || model.transitioning)
-      .accessibilityHidden(model.selection != section)
+  }
+}
+
+extension WorkspaceModel.Section {
+  /// Sidebar order: Command-1 Meetings, Command-2 Notes, Command-3 Settings.
+  var keyEquivalent: KeyEquivalent {
+    switch self {
+    case .meetings: "1"
+    case .notes: "2"
+    case .settings: "3"
+    }
   }
 }
 
@@ -85,6 +98,8 @@ private struct WorkspaceMeetingStatus: View {
           .frame(maxWidth: .infinity, alignment: .leading)
           .padding(20)
       }.buttonStyle(.plain).help("Open current meeting")
+        .accessibilityLabel(label)
+        .accessibilityHint("Opens the current meeting")
     }
   }
 
