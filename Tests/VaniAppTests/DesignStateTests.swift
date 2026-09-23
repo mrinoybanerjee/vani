@@ -167,3 +167,15 @@ extension NativeInteractionTests {
   let afterSpeech = speaking.barHeights(level: 0, time: 1)
   #expect(afterSpeech.max()! > LevelMeter.minimumHeight + 2)
 }
+
+@MainActor @Test func theMarkIsFiveTopAlignedBarsFormingAV() {
+  let rect = CGRect(x: 0, y: 0, width: 212, height: 200)
+  let bounds = VaniMark().path(in: rect).boundingRect
+  #expect(abs(bounds.width - 212) < 0.5)
+  #expect(abs(bounds.height - 200) < 0.5)
+  #expect(VaniMark.barLengths == VaniMark.barLengths.reversed())
+  #expect(VaniMark.barLengths.max() == VaniMark.barLengths[2])
+  let icon = VaniMark.menuBarImage()
+  #expect(icon.isTemplate)
+  #expect(icon.size == NSSize(width: 18, height: 18))
+}

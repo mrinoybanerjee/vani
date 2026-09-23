@@ -116,14 +116,57 @@ extension View {
   }
 }
 
+/// The Vani mark: five bars whose shared top line and falling lengths form a V, a waveform
+/// that reads as the letter. Geometry matches `scripts/make-app-icon.swift`.
+struct VaniMark: Shape {
+  static let barLengths: [CGFloat] = [150, 270, 400, 270, 150]
+  static let barWidth: CGFloat = 56
+  static let barSpacing: CGFloat = 36
+  static let designSize = CGSize(width: 5 * 56 + 4 * 36, height: 400)
+  static var aspectRatio: CGFloat { designSize.width / designSize.height }
+
+  func path(in rect: CGRect) -> Path {
+    let scale = min(rect.width / Self.designSize.width, rect.height / Self.designSize.height)
+    let origin = CGPoint(
+      x: rect.midX - Self.designSize.width * scale / 2,
+      y: rect.midY - Self.designSize.height * scale / 2)
+    var path = Path()
+    for (index, length) in Self.barLengths.enumerated() {
+      let bar = CGRect(
+        x: origin.x + CGFloat(index) * (Self.barWidth + Self.barSpacing) * scale,
+        y: origin.y, width: Self.barWidth * scale, height: length * scale)
+      path.addRoundedRect(
+        in: bar, cornerSize: CGSize(width: bar.width / 2, height: bar.width / 2))
+    }
+    return path
+  }
+
+  /// A monochrome template for the menu bar, tinted by macOS for light and dark menus.
+  @MainActor static func menuBarImage(opacity: CGFloat = 1) -> NSImage {
+    let size = NSSize(width: 18, height: 18)
+    let image = NSImage(size: size, flipped: true) { bounds in
+      let markHeight: CGFloat = 13
+      let rect = CGRect(
+        x: (bounds.width - markHeight * aspectRatio) / 2, y: (bounds.height - markHeight) / 2,
+        width: markHeight * aspectRatio, height: markHeight)
+      NSColor.black.withAlphaComponent(opacity).setFill()
+      NSBezierPath(cgPath: VaniMark().path(in: rect).cgPath).fill()
+      return true
+    }
+    image.isTemplate = true
+    image.accessibilityDescription = "Vani"
+    return image
+  }
+}
+
 struct VaniWordmark: View {
   var size: CGFloat = 22
 
   var body: some View {
     HStack(spacing: 8) {
-      Image(systemName: "waveform")
-        .font(.system(size: size - 2, weight: .medium))
-        .foregroundStyle(VaniTheme.accent)
+      VaniMark()
+        .fill(VaniTheme.accent)
+        .frame(width: (size - 4) * VaniMark.aspectRatio, height: size - 4)
         .accessibilityHidden(true)
       Text("vani").font(.system(size: size, weight: .semibold, design: .rounded))
     }
