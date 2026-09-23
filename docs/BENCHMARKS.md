@@ -241,3 +241,25 @@ delivers silent Mac-audio buffers was not observed. The soak signal is tonal, no
 LibriSpeech is read speech with clean turn-taking and no overlapping talk; the echo is a
 delayed, attenuated copy, not a room response. The synthetic two-hour summary transcript is
 template text. Peak memory is for the whole test process, including test fixtures.
+
+## Hardware checks — September 23, 2026
+
+MacBook Air (M4), macOS 26.6.2, v0.7.1 candidate. A temporary signed helper app ran Vani's
+production capture code with real devices: the built-in microphone, an iPhone Continuity
+microphone, and a temporary aggregate input that was removed mid-recording. The helper used
+the same triggers as Vani (engine configuration changes and default-input changes).
+
+| Case | Result |
+| --- | --- |
+| Default input changed mid-dictation | Kept 5.2 of 5.0 s (stays on the take's microphone) |
+| Recording microphone removed mid-dictation | Kept 4.8 of 5.0 s, resumed on the built-in microphone |
+| 44.1 kHz input removed mid-dictation | Kept 5.0 of 5.0 s |
+| Meeting microphone removed at 3 s, Mac audio playing | Mac audio uninterrupted; microphone resumed at 6.6 s and continued to 12.8 s; no failures |
+| Mac audio captured and transcribed (Parakeet Unified) | The played clip was transcribed correctly both times |
+
+Before the fixes, the same checks lost audio: switching to the iPhone microphone delivered
+nothing for over 3 s (2.1 of 5.4 s kept); a default change silently stopped the engine tap
+(2.0 of 5.0 s); a removed meeting microphone stopped delivering without any error (microphone
+audio ended at 3.3 s). Limits: the aggregate input shares the built-in microphone's clock, so
+a true sample-rate mismatch between two physical microphones was not exercised; Bluetooth
+headsets, sleep during a meeting and multi-hour live calls were not tested on hardware.

@@ -2,6 +2,36 @@
 
 All notable changes follow semantic versioning.
 
+## 0.7.1 - 2026-09-23
+
+### Fixed
+
+- Dictation keeps recording when the default microphone changes or when the microphone in use
+  is disconnected; it stays on the take's microphone while connected and resumes on the
+  current input otherwise. Verified on hardware: default changed mid-take kept 5.2 of 5.0 s;
+  microphone removed mid-take kept 4.8 of 5.0 s.
+- Meetings recover when the microphone disappears (ScreenCaptureKit reports no error; a
+  watchdog restarts capture after 2.5 s without microphone audio), keep recording Mac audio
+  throughout, and say so if the microphone does not return. Verified on hardware: microphone
+  removed at 3 s, recording resumed and continued to 12.8 s.
+- Recovery restarts stop the stream they replace, cannot outlive a meeting, and a stream
+  that fails to start can no longer silence the meeting.
+
+### Accessibility
+
+- VoiceOver no longer reads decorative icons; repeated buttons name their item; headings,
+  selection and toggle states are exposed; announcements for recording, meetings, notes,
+  saving and downloads never include note or transcript text. See
+  [accessibility](docs/ACCESSIBILITY.md).
+- Command-1, Command-2 and Command-3 open Meetings, Notes and Settings.
+
+### Validation
+
+- Two-hour meeting soak, a 30-minute real-speech meeting with Parakeet Unified (1.74% and
+  1.55% WER), and summaries of 30-minute and two-hour transcripts within the model context.
+  See [long meetings](docs/BENCHMARKS.md#long-meetings--september-23-2026).
+- Opt-in real-hardware tests for microphone switches and meeting capture.
+
 ## 0.7.0 - 2026-09-23
 
 ### Changed
