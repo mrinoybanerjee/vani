@@ -70,6 +70,12 @@ not measure conversational dictation, accents, noise or domain vocabulary.
 
 ## Results
 
+On 2026-09-23 (v0.6.0 candidate, FluidAudio 0.15.8, same M4, macOS 26.6.2), the
+release-mode 20-minute boundary test transcribed 20 minutes of repeated fixture audio
+in 3.818 seconds of test time with 660,013,056 bytes (629 MiB) peak resident memory for
+the whole test process. The 20-minute paged capture and 48 kHz resampling boundary
+passed in 0.324 seconds. Repeated audio is not a quality benchmark.
+
 Local verification on 2026-07-19 used an Apple M4 running macOS 26.5.2. With the
 model already downloaded, the release-mode integration test loaded the model and
 transcribed a 5.855-second English fixture in 1.391 seconds of test wall time. This
