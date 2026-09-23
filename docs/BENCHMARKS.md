@@ -62,10 +62,24 @@ upstream fixes to chunk-seam merging and trailing-word recovery. The two residua
 "catastrophic" test-other items are dialect spellings in the reference transcripts
 ("awk'ard", "all outer is own ead"), not recognition failures.
 
-For comparison, NVIDIA Parakeet Unified EN 0.6B (int8 encoder, same harness) scored
-1.91% / 3.96% on single utterances and 2.45% / 5.01% long-form, at about 114× real time,
-with a larger download (about 600 MB against 443 MB). It is a candidate for a future
-model change, not what Vani uses today. LibriSpeech is read audiobook speech; it does
+NVIDIA Parakeet Unified EN 0.6B (int8 encoder, same harness and FluidAudio 0.15.8):
+
+| Set | Parakeet TDT v2 | Parakeet Unified |
+| --- | ---: | ---: |
+| test-clean, single utterances | 2.22% | **1.91%** |
+| test-other, single utterances | 4.20% | **3.96%** |
+| test-clean, long-form | 2.57% | **2.45%** |
+| test-other, long-form | **4.88%** | 5.01% |
+
+Unified ran at about 114× real time (v2: about 135×). It is the default from v0.7.0:
+single utterances, which dominate dictation, lose 6–14% of their errors. Formatting is
+comparable: 7.8% of Unified's single-utterance outputs start lowercase (v2: 9.9%), and
+53.9% end without terminal punctuation (v2: 51.2%; LibriSpeech segments often end
+mid-sentence). The pinned files at revision `4252711f` are byte-identical to the files
+measured here. Inside Vani the 5.855-second fixture transcribed in 0.068 seconds.
+Whole test-process peak resident memory for that short fixture was 632 MiB with Unified
+(534 MiB with v2). The 20-minute model boundary processed in 7.6 seconds with 1.28 GiB
+peak (v2: 3.8 seconds, 629 MiB), within the README's 1.5 GB guidance for the full limit. LibriSpeech is read audiobook speech; it does
 not measure conversational dictation, accents, noise or domain vocabulary.
 
 ## Results

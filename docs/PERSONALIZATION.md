@@ -24,7 +24,7 @@ telemetry, retained audio, or model training.
 Captured audio
     |
     v
-Parakeet TDT v2 ------------------------------+
+Parakeet Unified (or TDT v2) -----------------+
     |                                         |
     |                                   active learned terms
     |                                         |

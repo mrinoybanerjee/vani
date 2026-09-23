@@ -25,7 +25,7 @@ Apple notarization.
 - Double-tap the shortcut for hands-free recording; press it again to insert
 - Escape (or the menu's Cancel) discards a recording without inserting anything
 - Short local sound cues confirm when recording actually starts and stops
-- One-time English Parakeet TDT v2 model download
+- One-time English NVIDIA Parakeet Unified model download (583 MiB)
 - Exact model-revision manifest with per-file SHA-256 verification
 - Local microphone capture and Core ML transcription
 - Dictations up to 20 minutes, with a one-minute warning and automatic transcription
@@ -74,7 +74,7 @@ cd vani
 The first source build can take several minutes. After Vani opens in the menu bar:
 
 1. Allow Microphone, Accessibility, and Input Monitoring when Vani requests them.
-2. Download the verified 443 MiB English model once. It is the only required network
+2. Download the verified 583 MiB English model once. It is the only required network
    download for dictation after the source dependencies are resolved.
 3. In System Settings > Keyboard, set "Press Globe key to" to "Do Nothing."
 4. Hold Fn / Globe, speak, then release to insert text. Double-tap it to keep recording

@@ -215,7 +215,8 @@ struct SetupStepModel: Identifiable, Equatable {
     steps.append(
       SetupStepModel(
         number: steps.count + 1, title: "Speech model",
-        detail: "One-time 443 MiB download · stays on this Mac",
+        detail:
+          "One-time \(SpeechModel.parakeetUnified.downloadSizeDescription) download · stays on this Mac",
         status: modelInstalled ? "Installed" : "Not downloaded", isComplete: modelInstalled,
         actionTitle: modelInstalled ? nil : "Download", action: .downloadModel))
     if shortcut == .function {
@@ -459,6 +460,11 @@ private struct ReadyView: View {
             shortcut: shortcut,
             globeKey: shortcut == .function ? GlobeKeyAction.current() : .unknown,
             handsFreeEnabled: coordinator.settings.handsFreeEnabled)
+          if coordinator.improvedModelAvailable || coordinator.improvedModelProgress != nil {
+            ImprovedModelRow(
+              progress: coordinator.improvedModelProgress,
+              install: coordinator.installImprovedModel)
+          }
         } else {
           Text(phaseTitle)
             .font(.system(size: 28, weight: .regular, design: .serif))
@@ -554,6 +560,44 @@ private struct ReadyView: View {
     case .transcribing, .inserting: "text.bubble"
     default: "checkmark.circle"
     }
+  }
+}
+
+/// Offers the more accurate speech model to installations still on the previous one.
+/// Dictation keeps working during the download; nothing downloads without this click.
+struct ImprovedModelRow: View {
+  let progress: Double?
+  let install: () -> Void
+
+  var body: some View {
+    HStack(alignment: .top, spacing: 12) {
+      Image(systemName: "sparkles").foregroundStyle(VaniTheme.accent)
+        .accessibilityHidden(true)
+      VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 4) {
+          Text("More accurate speech model").font(.system(size: 12, weight: .semibold))
+          Text(
+            progress == nil
+              ? "Fewer errors on everyday dictation · \(SpeechModel.parakeetUnified.downloadSizeDescription) · stays on this Mac"
+              : "You can keep dictating while it downloads."
+          )
+          .font(.system(size: 12)).foregroundStyle(.secondary)
+          .fixedSize(horizontal: false, vertical: true)
+        }
+        if let progress {
+          ProgressView(value: progress)
+            .accessibilityLabel("Downloading speech model")
+            .accessibilityValue("\(Int(progress * 100)) percent")
+        } else {
+          Button("Download", action: install).controlSize(.small)
+            .accessibilityLabel("Download the more accurate speech model")
+        }
+      }
+      Spacer(minLength: 0)
+    }
+    .padding(12)
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .background(VaniTheme.sidebar, in: RoundedRectangle(cornerRadius: 8))
   }
 }
 

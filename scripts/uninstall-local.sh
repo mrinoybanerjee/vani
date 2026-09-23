@@ -10,8 +10,9 @@ usage() {
     cat <<'EOF'
 Usage: ./scripts/uninstall-local.sh [--remove-model] [--dry-run]
 
-  --remove-model  Also remove Vani's shared FluidAudio speech models (443 MiB, plus the
-                  optional 98 MiB vocabulary model if it was downloaded).
+  --remove-model  Also remove the shared FluidAudio models: the previous 443 MiB English
+                  model and the optional 98 MiB vocabulary model. The default model lives
+                  in Vani's Application Support folder and is always removed.
   --dry-run       Print the paths and privacy records without changing them.
 EOF
 }

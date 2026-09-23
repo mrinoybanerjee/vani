@@ -2,6 +2,18 @@
 
 All notable changes follow semantic versioning.
 
+## 0.7.0 - 2026-09-23
+
+### Changed
+
+- NVIDIA Parakeet Unified EN 0.6B is the default speech model: 6–14% fewer word errors
+  on single utterances than Parakeet TDT v2 in the LibriSpeech benchmark, with comparable
+  capitalization and punctuation. See [speech accuracy](docs/BENCHMARKS.md#speech-accuracy).
+- New installations download the verified 583 MiB model during setup. Existing
+  installations keep dictating with the previous model and can switch from the menu;
+  dictation keeps working during the download and the previous model remains the
+  fallback if the new one cannot load. Meetings use the same model.
+
 ## 0.6.0 - 2026-09-23
 
 ### Added

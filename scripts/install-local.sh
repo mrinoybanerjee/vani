@@ -91,9 +91,9 @@ printf '%s\n' \
     'Next steps:' \
     '1. Open Vani from the menu bar.' \
     '2. Allow Microphone, Accessibility, and Input Monitoring access.' \
-    '3. Download the verified 443 MiB English speech model.' \
+    '3. Download the verified 583 MiB English speech model.' \
     '4. In System Settings > Keyboard, set "Press Globe key to" to "Do Nothing".' \
-    '5. Hold Left Fn, speak, then release to insert text. Other hold keys are available in Settings.'
+    '5. Hold Fn / Globe, speak, then release to insert text. Double-tap it for hands-free.'
 
 if codesign -dv --verbose=4 "$DESTINATION_APP" 2>&1 \
     | grep -F 'Signature=adhoc' >/dev/null; then

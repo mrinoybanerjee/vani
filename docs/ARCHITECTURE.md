@@ -64,8 +64,12 @@ retry.
 
 ## Speech and text
 
-`FluidAudioSpeechRecognizer` loads the English Parakeet TDT v2 Core ML pipeline and
-uses CPU plus Neural Engine compute units. Vani downloads only an allowlist of exact
+`FluidAudioSpeechRecognizer` loads NVIDIA Parakeet Unified EN 0.6B (int8 encoder on CPU
+plus Neural Engine; decoder and joint on CPU) from Vani's own model folder. Installations
+that only have the previous Parakeet TDT v2 model keep using it until the user downloads
+the new one from the menu, and v2 remains the fallback if Unified cannot load. Both engines
+share padding, personalization and the recovery contract; the switch happens between
+transcriptions on the recognizer actor. Vani downloads only an allowlist of exact
 paths from a pinned model revision into private staging. Before atomic installation
 and loading, it verifies the exact file set, sizes, and SHA-256 digests. `TextPipeline`
 performs conservative whitespace cleanup, user-defined exact phrase replacement,

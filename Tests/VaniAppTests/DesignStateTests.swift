@@ -53,7 +53,7 @@ struct DesignStateTests {
       ])
     #expect(steps.map(\.actionTitle) == [nil, "Allow", "Allow", "Download", "Open"])
     #expect(steps[0].accessibilityLabel == "Step 1, Microphone, Allowed")
-    #expect(steps[3].detail.contains("443 MiB"))
+    #expect(steps[3].detail.contains(SpeechModel.parakeetUnified.downloadSizeDescription))
     #expect(steps[4].detail == "Set “Press 🌐 key to” → Do Nothing")
 
     let control = SetupStepModel.steps(
@@ -140,4 +140,9 @@ extension NativeInteractionTests {
       #expect(!announcements.contains { $0.contains("private words") })
     }
   }
+}
+
+@Test func improvedModelOfferStatesSizeAndLocality() {
+  #expect(SpeechModel.parakeetUnified.downloadSizeDescription == "583\u{00A0}MiB")
+  #expect(SpeechModel.parakeetTDTv2.downloadSizeDescription == "443\u{00A0}MiB")
 }

@@ -14,8 +14,34 @@ public actor FluidAudioSpeechRecognizer: SpeechRecognizing {
   }
 
   private let modelDownloader: PinnedModelDownloader
+  private let unifiedModelDownloader: PinnedModelDownloader
   private let personalizationModelDownloader: PinnedModelDownloader
-  private var manager: AsrManager?
+  private let unifiedModelDirectory: URL
+  private var engine: Engine?
+  private var unifiedIntegrityVerified = false
+
+  /// The loaded speech engine. Unified is preferred; TDT v2 remains for installations
+  /// that have not downloaded Unified yet, or if Unified cannot load on this Mac.
+  private enum Engine {
+    case unified(UnifiedAsrManager)
+    case tdt(AsrManager, decoderLayers: Int)
+
+    var model: SpeechModel {
+      switch self {
+      case .unified: .parakeetUnified
+      case .tdt: .parakeetTDTv2
+      }
+    }
+  }
+
+  /// A base transcription from either engine.
+  private struct BaseTranscript {
+    let text: String
+    let tokenTimings: [TokenTiming]?
+    let confidence: Float
+    let duration: TimeInterval
+    let processingTime: TimeInterval
+  }
   private var ctcModels: CtcModels?
   private var ctcTokenizer: CtcTokenizer?
   private var personalizationUnloadTask: Task<Void, Never>?
@@ -29,11 +55,24 @@ public actor FluidAudioSpeechRecognizer: SpeechRecognizing {
     let rescorer: VocabularyRescorer
   }
   private var personalizationUnloadGeneration: UInt64 = 0
-  private var decoderLayerCount = 2
   private var integrityVerified = false
   private var personalizationIntegrityVerified = false
 
-  public init() {
+  /// Vani owns this directory so another FluidAudio app cannot add files that fail the
+  /// exact-set verification, and Vani never replaces another app's model files.
+  public static var defaultUnifiedModelDirectory: URL {
+    FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+      .appendingPathComponent("Vani/Models/parakeet-unified-en-0.6b-int8", isDirectory: true)
+  }
+
+  public init(unifiedModelDirectory: URL = FluidAudioSpeechRecognizer.defaultUnifiedModelDirectory)
+  {
+    self.unifiedModelDirectory = unifiedModelDirectory
+    unifiedModelDownloader = PinnedModelDownloader(
+      repository: "FluidInference/parakeet-unified-en-0.6b-coreml",
+      revision: ModelIntegrityVerifier.parakeetUnifiedRevision,
+      verifier: .parakeetUnified
+    )
     modelDownloader = PinnedModelDownloader(
       repository: "FluidInference/parakeet-tdt-0.6b-v2-coreml",
       revision: ModelIntegrityVerifier.parakeetV2Revision,
@@ -46,7 +85,32 @@ public actor FluidAudioSpeechRecognizer: SpeechRecognizing {
     )
   }
 
+  /// True when either engine can run: dictation works with the fallback model while the
+  /// preferred model has not been downloaded.
   public func modelsAreInstalled() async -> Bool {
+    if await preferredModelIsInstalled() { return true }
+    return tdtModelIsInstalled()
+  }
+
+  public func preferredModelIsInstalled() async -> Bool {
+    guard FileManager.default.fileExists(atPath: unifiedModelDirectory.path) else {
+      unifiedIntegrityVerified = false
+      return false
+    }
+    if unifiedIntegrityVerified { return true }
+    do {
+      try ModelIntegrityVerifier.parakeetUnified.verify(directory: unifiedModelDirectory)
+      unifiedIntegrityVerified = true
+      return true
+    } catch {
+      unifiedIntegrityVerified = false
+      return false
+    }
+  }
+
+  public func activeModel() async -> SpeechModel? { engine?.model }
+
+  private func tdtModelIsInstalled() -> Bool {
     let directory = AsrModels.defaultCacheDirectory(for: Self.modelVersion)
     guard AsrModels.modelsExist(at: directory, version: Self.modelVersion) else {
       integrityVerified = false
@@ -63,41 +127,79 @@ public actor FluidAudioSpeechRecognizer: SpeechRecognizing {
     }
   }
 
+  /// Loads the preferred model when installed, otherwise the installed fallback. With
+  /// neither installed (a new setup), downloads the preferred model first.
   public func prepare(progress: @escaping @Sendable (Double) -> Void) async throws {
     guard SystemInfo.isAppleSilicon else {
       throw VaniFailure.unsupportedHardware
     }
-    if manager != nil {
+    if engine != nil {
       progress(1)
       return
     }
+    if await preferredModelIsInstalled() {
+      do {
+        try await loadUnified(progress: progress)
+        return
+      } catch {
+        // Fall back below; the preferred model stays installed for a later retry.
+        VaniLog.event(category: .model, code: "unified_load_failed")
+      }
+    }
+    if tdtModelIsInstalled() {
+      try await loadTDT(progress: progress)
+      return
+    }
+    try await installPreferredModel(progress: progress)
+  }
 
+  /// Downloads the preferred model if needed, then switches to it. The fallback engine keeps
+  /// working until the switch, and stays active if the preferred model cannot load.
+  public func installPreferredModel(progress: @escaping @Sendable (Double) -> Void) async throws {
+    guard SystemInfo.isAppleSilicon else {
+      throw VaniFailure.unsupportedHardware
+    }
+    if case .unified = engine {
+      progress(1)
+      return
+    }
+    do {
+      if !(await preferredModelIsInstalled()) {
+        try await unifiedModelDownloader.install(at: unifiedModelDirectory) { downloadProgress in
+          progress(min(max(downloadProgress * 0.85, 0), 0.85))
+        }
+        unifiedIntegrityVerified = false
+        guard await preferredModelIsInstalled() else { throw VaniFailure.modelIntegrityFailed }
+      }
+      try await loadUnified { value in progress(0.85 + value * 0.15) }
+    } catch let failure as VaniFailure {
+      throw failure
+    } catch {
+      throw await preferredModelIsInstalled()
+        ? VaniFailure.modelLoadFailed : VaniFailure.modelDownloadFailed
+    }
+  }
+
+  private func loadUnified(progress: @escaping @Sendable (Double) -> Void) async throws {
+    progress(0.1)
+    let configuration = MLModelConfiguration()
+    configuration.computeUnits = .cpuAndNeuralEngine
+    let manager = UnifiedAsrManager(configuration: configuration, encoderPrecision: .int8)
+    do {
+      try await manager.loadModels(from: unifiedModelDirectory)
+    } catch {
+      throw VaniFailure.modelLoadFailed
+    }
+    engine = .unified(manager)
+    progress(1)
+  }
+
+  private func loadTDT(progress: @escaping @Sendable (Double) -> Void) async throws {
     do {
       let configuration = MLModelConfiguration()
       configuration.computeUnits = .cpuAndNeuralEngine
       let directory = AsrModels.defaultCacheDirectory(for: Self.modelVersion)
-      var needsDownload = !AsrModels.modelsExist(at: directory, version: Self.modelVersion)
-      if AsrModels.modelsExist(at: directory, version: Self.modelVersion), !integrityVerified {
-        do {
-          try ModelIntegrityVerifier.parakeetV2.verify(directory: directory)
-          integrityVerified = true
-        } catch {
-          needsDownload = true
-        }
-      }
-
-      if needsDownload {
-        try await modelDownloader.install(at: directory) { downloadProgress in
-          progress(min(max(downloadProgress * 0.6, 0), 0.6))
-        }
-      }
-
       progress(0.65)
-      if needsDownload || !integrityVerified {
-        try ModelIntegrityVerifier.parakeetV2.verify(directory: directory)
-        integrityVerified = true
-      }
-
       let models = try await AsrModels.load(
         from: directory,
         configuration: configuration,
@@ -107,14 +209,10 @@ public actor FluidAudioSpeechRecognizer: SpeechRecognizing {
         }
       )
       let manager = AsrManager(config: .default, models: models)
-      decoderLayerCount = await manager.decoderLayerCount
-      self.manager = manager
+      engine = .tdt(manager, decoderLayers: await manager.decoderLayerCount)
       progress(1)
-    } catch let failure as VaniFailure {
-      throw failure
     } catch {
-      let installed = await modelsAreInstalled()
-      throw installed ? VaniFailure.modelLoadFailed : VaniFailure.modelDownloadFailed
+      throw VaniFailure.modelLoadFailed
     }
   }
 
@@ -248,21 +346,34 @@ public actor FluidAudioSpeechRecognizer: SpeechRecognizing {
     #endif
   }
 
-  private func transcribeBase(_ audio: CapturedAudio) async throws -> ASRResult {
-    guard let manager else {
+  private func transcribeBase(_ audio: CapturedAudio) async throws -> BaseTranscript {
+    guard let engine else {
       throw VaniFailure.modelUnavailable
     }
     guard audio.sampleRate == CapturedAudio.targetSampleRate else {
       throw VaniFailure.audioCaptureFailed
     }
-
+    let samples = Self.paddedForInference(audio.samples)
     do {
-      var decoderState = try TdtDecoderState(decoderLayers: decoderLayerCount)
-      let result = try await manager.transcribe(
-        Self.paddedForInference(audio.samples),
-        decoderState: &decoderState
-      )
-      return result
+      switch engine {
+      case .unified(let manager):
+        let startedAt = Date()
+        let result = try await manager.transcribeWithTimings(samples)
+        let confidences = result.tokenTimings.map(\.confidence)
+        return BaseTranscript(
+          text: result.text.trimmingCharacters(in: .whitespacesAndNewlines),
+          tokenTimings: result.tokenTimings,
+          confidence: confidences.isEmpty
+            ? 0 : confidences.reduce(0, +) / Float(confidences.count),
+          duration: audio.duration,
+          processingTime: Date().timeIntervalSince(startedAt))
+      case .tdt(let manager, let decoderLayers):
+        var decoderState = try TdtDecoderState(decoderLayers: decoderLayers)
+        let result = try await manager.transcribe(samples, decoderState: &decoderState)
+        return BaseTranscript(
+          text: result.text, tokenTimings: result.tokenTimings, confidence: result.confidence,
+          duration: result.duration, processingTime: result.processingTime)
+      }
     } catch {
       throw VaniFailure.transcriptionFailed
     }
@@ -278,7 +389,7 @@ public actor FluidAudioSpeechRecognizer: SpeechRecognizing {
   }
 
   private func speechResult(
-    from result: ASRResult,
+    from result: BaseTranscript,
     text: String,
     processingDuration: TimeInterval? = nil,
     acousticPersonalizationAttempted: Bool = false

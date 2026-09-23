@@ -75,9 +75,9 @@ Normal launches with the same stable identity do not require permissions to be r
 A new bundle identifier, signing identity, ad-hoc executable, or reset privacy database
 requires fresh grants.
 
-## Left Fn does not start recording
+## Fn / Globe does not start recording
 
-1. Confirm Vani shows `Ready` and `Left Fn`.
+1. Confirm Vani shows `Ready` and the `fn` key.
 2. Confirm Input Monitoring and Accessibility are enabled for `/Applications/Vani.app`.
 3. In System Settings > Keyboard, set "Press Globe key to" to "Do Nothing."
 4. Quit and reopen Vani after changing Input Monitoring.
@@ -96,8 +96,8 @@ An ad-hoc rebuild can require new permission grants.
 
 ## The model does not download
 
-The verified English model is approximately 443 MiB and comes from the pinned
-`FluidInference/parakeet-tdt-0.6b-v2-coreml` Hugging Face revision. Check the network
+The verified English model is approximately 583 MiB and comes from the pinned
+`FluidInference/parakeet-unified-en-0.6b-coreml` Hugging Face revision. Check the network
 connection and available disk space, then use Vani's Retry action. A failed replacement
 does not overwrite an existing valid model.
 

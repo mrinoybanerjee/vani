@@ -12,9 +12,17 @@ prebuilt Rust text-normalization library under the Apache License 2.0. SwiftPM v
 its archive against the checksum declared by the pinned FluidAudio release. Vani does
 not call it; it is linked because toolchains before Swift 6.2 cannot omit it.
 
-## Parakeet TDT 0.6B V2 Core ML
+## Parakeet Unified EN 0.6B Core ML
 
-The model downloaded during setup is
+The default model downloaded during setup is
+[FluidInference/parakeet-unified-en-0.6b-coreml](https://huggingface.co/FluidInference/parakeet-unified-en-0.6b-coreml), licensed under Creative Commons Attribution 4.0.
+It is based on NVIDIA's Parakeet Unified EN 0.6B model; Core ML conversion and Swift
+integration are credited to FluidInference. Vani verifies its artifacts against
+repository revision `4252711f6f060f9a2f91e5f081a806d7f45eebd8` before loading them.
+
+## Parakeet TDT 0.6B V2 Core ML (previous default)
+
+Installations from before v0.7.0 downloaded
 [FluidInference/parakeet-tdt-0.6b-v2-coreml](https://huggingface.co/FluidInference/parakeet-tdt-0.6b-v2-coreml),
 licensed under Creative Commons Attribution 4.0. It is based on NVIDIA's Parakeet TDT
 model; Core ML conversion and Swift integration are credited to FluidInference.

@@ -14,6 +14,10 @@ final class AppCoordinator: ObservableObject {
   @Published private(set) var modelInstalled = false
   @Published private(set) var personalizationModelInstalled = false
   @Published private(set) var personalizationModelProgress: Double?
+  /// The model dictation and meetings use, once prepared.
+  @Published private(set) var activeSpeechModel: SpeechModel?
+  /// Progress of the optional switch to the improved speech model, if running.
+  @Published private(set) var improvedModelProgress: Double?
   @Published private(set) var diagnostics: [DiagnosticEvent] = []
   @Published private(set) var history: [TranscriptHistoryEntry] = []
   @Published private(set) var learnedCorrections: [LearnedCorrection] = []
@@ -158,6 +162,7 @@ final class AppCoordinator: ObservableObject {
     if modelInstalled, microphonePermission.isGranted {
       _ = await session.prepareModels(allowDownload: false)
     }
+    activeSpeechModel = await session.activeSpeechModel()
     configureHotkey()
     refreshLaunchAtLogin()
     await refreshHistory()
@@ -223,6 +228,32 @@ final class AppCoordinator: ObservableObject {
       _ = await session.prepareModels(allowDownload: true)
       modelInstalled = await session.modelsAreInstalled()
       await prepareWhenPossible()
+      activeSpeechModel = await session.activeSpeechModel()
+    }
+  }
+
+  /// True when dictation runs on the fallback model and the improved one can be downloaded.
+  var improvedModelAvailable: Bool {
+    activeSpeechModel == .parakeetTDTv2 && !meetingOwnsSpeech
+  }
+
+  /// Downloads the improved model after an explicit click; dictation keeps working on the
+  /// current model until the new one has loaded.
+  func installImprovedModel() {
+    guard improvedModelProgress == nil, snapshot.phase == .ready, !meetingOwnsSpeech else { return }
+    improvedModelProgress = 0
+    Task {
+      do {
+        try await session.installPreferredSpeechModel { [weak self] progress in
+          Task { @MainActor in self?.improvedModelProgress = min(max(progress, 0), 1) }
+        }
+        settingsError = nil
+      } catch {
+        settingsError = "The improved speech model could not be installed. Dictation still works."
+        recordDiagnostic(category: .model, code: "improved_model_install_failed")
+      }
+      activeSpeechModel = await session.activeSpeechModel()
+      improvedModelProgress = nil
     }
   }
 
@@ -961,6 +992,7 @@ final class AppCoordinator: ObservableObject {
         && current.failure?.recoveryAction == .retryPreparation)
     {
       _ = await session.prepareModels(allowDownload: false)
+      activeSpeechModel = await session.activeSpeechModel()
     }
   }
 

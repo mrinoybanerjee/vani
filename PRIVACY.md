@@ -15,10 +15,11 @@ Vani is local-first by design.
 - Opt-in learned corrections stay in a separate local profile and contain no audio.
 - Quick notes persist through notebook actions. Meeting notes autosave after editing. Neither uploads text or audio.
 
-The one-time model download comes from an exact revision of the
-`FluidInference/parakeet-tdt-0.6b-v2-coreml` Hugging Face repository. Vani downloads
-only its allowlisted model files and verifies each file before installation. After
-setup, dictation does not need a network connection.
+The one-time model download comes from exact revision `4252711f6f060f9a2f91e5f081a806d7f45eebd8` of the
+`FluidInference/parakeet-unified-en-0.6b-coreml` Hugging Face repository (about 583 MiB). Vani downloads only its 13 allowlisted
+files and verifies each file before installation. Installations that already have the
+previous `FluidInference/parakeet-tdt-0.6b-v2-coreml` model keep using it until the user
+chooses to download the new one. After setup, dictation does not need a network connection.
 
 If the user explicitly enables experimental acoustic vocabulary, Vani downloads the
 optional Parakeet CTC 110M model from exact revision
