@@ -273,6 +273,24 @@ private struct GeneralSettingsView: View {
         }
         .pickerStyle(.segmented)
         Toggle(
+          isOn: Binding(
+            get: { coordinator.settings.handsFreeEnabled },
+            set: { coordinator.setHandsFreeEnabled($0) }
+          )
+        ) {
+          Text("Double-tap for hands-free")
+          Text("Double-tap the hold key to keep recording; press it again to insert.")
+        }
+        Toggle(
+          isOn: Binding(
+            get: { coordinator.settings.escapeCancelsEnabled },
+            set: { coordinator.setEscapeCancelsEnabled($0) }
+          )
+        ) {
+          Text("Escape cancels recording")
+          Text("Discards the recording without inserting text.")
+        }
+        Toggle(
           "Smart Formatting",
           isOn: Binding(
             get: { coordinator.settings.smartFormattingEnabled },
@@ -284,6 +302,17 @@ private struct GeneralSettingsView: View {
             get: { coordinator.settings.soundFeedbackEnabled },
             set: { coordinator.setSoundFeedbackEnabled($0) }
           ))
+        Picker(
+          "Last transcript shortcut",
+          selection: Binding(
+            get: { coordinator.settings.lastTranscriptBinding },
+            set: { coordinator.setLastTranscriptBinding($0) }
+          )
+        ) {
+          ForEach(LastTranscriptBinding.allCases) { binding in
+            Text(binding.symbols.map { "\($0)V paste · \($0)C copy" } ?? "Off").tag(binding)
+          }
+        }
       }
 
       Section("On this Mac") {

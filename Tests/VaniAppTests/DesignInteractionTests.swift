@@ -125,7 +125,7 @@ extension NativeInteractionTests.NotesTests {
       }, name: "menu-setup-steps", path: path)
     try await captureView(
       MenuPreview(status: "Ready") {
-        ReadyShortcutRow(shortcut: .function, globeKey: .doNothing)
+        ReadyShortcutRow(shortcut: .function, globeKey: .doNothing, handsFreeEnabled: true)
       }, name: "menu-ready", path: path)
     try await captureView(
       MenuPreview(status: "Ready") {
@@ -137,7 +137,8 @@ extension NativeInteractionTests.NotesTests {
       }, name: "menu-shortcut-inactive", path: path)
 
     let states: [(String, OverlayState)] = [
-      ("listening", .listening), ("processing", .processing), ("success", .success),
+      ("listening", .listening), ("hands-free", .handsFree), ("processing", .processing),
+      ("success", .success),
       ("backup", .backupCopied), ("truncated", .captureTruncated),
       ("failure", .failure(VaniFailure.inputMonitoringPermissionDenied.title)),
       ("failure-long", .failure(VaniFailure.clipboardChanged.title + " while pasting your text")),

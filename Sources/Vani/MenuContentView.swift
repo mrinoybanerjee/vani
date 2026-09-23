@@ -440,19 +440,29 @@ private struct ReadyView: View {
           let shortcut = coordinator.settings.shortcut
           ReadyShortcutRow(
             shortcut: shortcut,
-            globeKey: shortcut == .function ? GlobeKeyAction.current() : .unknown)
+            globeKey: shortcut == .function ? GlobeKeyAction.current() : .unknown,
+            handsFreeEnabled: coordinator.settings.handsFreeEnabled)
         } else {
           Text(phaseTitle)
             .font(.system(size: 28, weight: .regular, design: .serif))
           HStack(spacing: 8) {
             Image(systemName: phaseIcon).foregroundStyle(VaniTheme.accent)
               .accessibilityHidden(true)
-            Text(
-              coordinator.snapshot.phase == .listening
-                ? "Release your shortcut when you’re done." : "On this Mac"
-            )
-            .font(.system(size: 12)).foregroundStyle(.secondary)
+            Text(listeningHint)
+              .font(.system(size: 12)).foregroundStyle(.secondary)
             if coordinator.snapshot.phase != .listening { ProgressView().controlSize(.small) }
+          }
+          if coordinator.snapshot.phase == .listening {
+            HStack(spacing: 8) {
+              Button("Stop and Insert", systemImage: "stop.circle") {
+                coordinator.stopDictationFromMenu()
+              }
+              .buttonStyle(.borderedProminent)
+              Button("Cancel", systemImage: "xmark") {
+                coordinator.cancelDictationFromMenu()
+              }
+            }
+            .controlSize(.small)
           }
         }
       }.padding(.bottom, 8)
@@ -469,12 +479,12 @@ private struct ReadyView: View {
             coordinator.pasteLastTranscript()
           }
           .buttonStyle(.borderedProminent)
-          .help("Paste last transcript (Control-Command-V)")
+          .help(lastTranscriptHelp("Paste", key: "V"))
 
           Button("Copy", systemImage: "doc.on.doc") {
             coordinator.copyLastTranscript()
           }
-          .help("Copy last transcript (Control-Command-C)")
+          .help(lastTranscriptHelp("Copy", key: "C"))
 
           if coordinator.settings.personalizationEnabled {
             Button("Teach", systemImage: "brain.head.profile") {
@@ -496,6 +506,21 @@ private struct ReadyView: View {
         .controlSize(.small)
       }
     }
+  }
+
+  private func lastTranscriptHelp(_ verb: String, key: String) -> String {
+    guard let symbols = coordinator.settings.lastTranscriptBinding.symbols else {
+      return "\(verb) last transcript"
+    }
+    return "\(verb) last transcript (\(symbols)\(key))"
+  }
+
+  private var listeningHint: String {
+    guard coordinator.snapshot.phase == .listening else { return "On this Mac" }
+    let key = coordinator.settings.shortcut.displayName
+    return coordinator.handsFreeLocked
+      ? "Hands-free. Press \(key) again when you’re done."
+      : "Release \(key) when you’re done."
   }
 
   private var phaseTitle: String {
@@ -520,16 +545,22 @@ private struct ReadyView: View {
 struct ReadyShortcutRow: View {
   let shortcut: HoldShortcut
   let globeKey: GlobeKeyAction
+  var handsFreeEnabled = false
 
   var body: some View {
     VStack(alignment: .leading, spacing: 12) {
       HStack(spacing: 8) {
         ShortcutKey(shortcut: shortcut)
-        Text("Hold to speak · Release to insert")
-          .font(.system(size: 12)).foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 4) {
+          Text("Hold to speak · Release to insert")
+          if handsFreeEnabled { Text("Double-tap for hands-free · Esc cancels") }
+        }
+        .font(.system(size: 12)).foregroundStyle(.secondary)
       }
       .accessibilityElement(children: .ignore)
-      .accessibilityLabel("Ready. Hold \(shortcut.displayName) to speak, release to insert.")
+      .accessibilityLabel(
+        "Ready. Hold \(shortcut.displayName) to speak, release to insert."
+          + (handsFreeEnabled ? " Double-tap for hands-free. Escape cancels." : ""))
       if shortcut == .function, globeKey != .doNothing, globeKey != .unknown {
         VStack(alignment: .leading, spacing: 8) {
           Text("macOS also reacts to 🌐. Set “Press 🌐 key to” → Do Nothing.")

@@ -792,6 +792,16 @@ final class AppCoordinator: ObservableObject {
   private func setHandsFreeLocked(_ locked: Bool) {
     guard handsFreeLocked != locked else { return }
     handsFreeLocked = locked
+    overlay.handsFree = locked
+  }
+
+  func stopDictationFromMenu() {
+    resetHoldGesture()
+    endDictation()
+  }
+
+  func cancelDictationFromMenu() {
+    cancelDictation(reason: "menu")
   }
 
   private func resetHoldGesture() {

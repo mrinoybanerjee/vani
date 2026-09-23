@@ -40,11 +40,23 @@ final class OverlayController {
   var isVisible: Bool { panel.isVisible }
   var panelSize: NSSize { panel.frame.size }
 
+  /// Set while a double-tap has locked recording on.
+  var handsFree = false {
+    didSet {
+      guard handsFree != oldValue, state.isRecording, state != .recordingLimitWarning else {
+        return
+      }
+      show(handsFree ? .handsFree : .listening)
+    }
+  }
+
   func update(snapshot: SessionSnapshot, previousPhase: SessionPhase) {
     hideTask?.cancel()
     switch snapshot.phase {
     case .listening:
-      show(snapshot.isRecordingLimitApproaching ? .recordingLimitWarning : .listening)
+      show(
+        snapshot.isRecordingLimitApproaching
+          ? .recordingLimitWarning : handsFree ? .handsFree : .listening)
     case .transcribing, .inserting:
       show(.processing)
     case .recoverableError:
@@ -158,6 +170,7 @@ enum OverlayState: Equatable {
   case hidden
   case listening
   case recordingLimitWarning
+  case handsFree
   case processing
   case success
   case captureTruncated
@@ -165,13 +178,16 @@ enum OverlayState: Equatable {
   case lastTranscriptCopied
   case failure(String)
 
-  var isRecording: Bool { self == .listening || self == .recordingLimitWarning }
+  var isRecording: Bool {
+    self == .listening || self == .handsFree || self == .recordingLimitWarning
+  }
 
   var label: String {
     switch self {
     case .hidden: ""
     case .listening: "Listening"
     case .recordingLimitWarning: "1 minute remaining"
+    case .handsFree: "Hands-free"
     case .processing: "Transcribing…"
     case .success: "Inserted"
     case .captureTruncated: "Inserted captured portion"
@@ -235,6 +251,8 @@ struct OverlayView: View {
       Image(systemName: "waveform.circle.fill").foregroundStyle(VaniTheme.accent)
     case .recordingLimitWarning:
       Image(systemName: "hourglass.circle.fill").foregroundStyle(VaniTheme.accent)
+    case .handsFree:
+      Image(systemName: "lock.circle.fill").foregroundStyle(VaniTheme.accent)
     case .processing:
       Image(systemName: "text.bubble.fill").foregroundStyle(.secondary)
     case .success:
