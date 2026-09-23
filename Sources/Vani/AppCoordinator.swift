@@ -19,6 +19,8 @@ final class AppCoordinator: ObservableObject {
   @Published private(set) var learnedCorrections: [LearnedCorrection] = []
   @Published private(set) var hasStoredHistoryData = false
   @Published private(set) var settingsError: String?
+  /// True only while the global event tap is installed and receiving the hold shortcut.
+  @Published private(set) var shortcutActive = false
   @Published var settings: VaniSettings = .default
 
   private let settingsStore: SettingsStore
@@ -781,6 +783,7 @@ final class AppCoordinator: ObservableObject {
 
     if !accessibilityPermission.isGranted || !inputMonitoringPermission.isGranted {
       hotkeyMonitor.stop()
+      shortcutActive = false
     }
   }
 
@@ -799,13 +802,14 @@ final class AppCoordinator: ObservableObject {
   private func configureHotkey() {
     guard accessibilityPermission.isGranted, inputMonitoringPermission.isGranted else {
       hotkeyMonitor.stop()
+      shortcutActive = false
       return
     }
     do {
       try hotkeyMonitor.start(shortcut: settings.shortcut)
-      settingsError = nil
+      shortcutActive = true
     } catch {
-      settingsError = "The global shortcut could not start. Recheck Input Monitoring."
+      shortcutActive = false
       recordDiagnostic(category: .permission, code: "hotkey_monitor_start_failed")
     }
   }
