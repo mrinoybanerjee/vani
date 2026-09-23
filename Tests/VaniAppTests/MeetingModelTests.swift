@@ -8,11 +8,17 @@ import VaniCore
 private actor MeetingTestRecognizer: SpeechRecognizing {
   var fails = false
   var count = 0
+  var contexts: [SpeechRecognitionContext] = []
   func setFailure(_ value: Bool) { fails = value }
   func modelsAreInstalled() -> Bool { true }
   func prepare(progress: @escaping @Sendable (Double) -> Void) { progress(1) }
   func transcribe(_ audio: CapturedAudio) throws -> SpeechResult {
+    try transcribe(audio, context: .empty)
+  }
+  func transcribe(_ audio: CapturedAudio, context: SpeechRecognitionContext) throws -> SpeechResult
+  {
     count += 1
+    contexts.append(context)
     if fails { throw MeetingError.capture("Fixture transcription failed") }
     return SpeechResult(
       text: "We agreed to launch on Monday.", confidence: 1, audioDuration: audio.duration,
@@ -36,11 +42,17 @@ private actor ControlledMeetingSummary: MeetingSummarizing {
   private var continuation: CheckedContinuation<String, Error>?
   private var started: CheckedContinuation<Void, Never>?
   private var didStart = false
+  private(set) var received: MeetingRecord?
   func summarize(_ meeting: MeetingRecord) async throws -> String {
+    received = meeting
     didStart = true
     started?.resume()
     started = nil
-    return try await withCheckedThrowingContinuation { continuation = $0 }
+    return try await withTaskCancellationHandler {
+      try await withCheckedThrowingContinuation { continuation = $0 }
+    } onCancel: {
+      Task { await self.finish(.failure(CancellationError())) }
+    }
   }
   func waitUntilStarted() async {
     if didStart { return }
@@ -63,6 +75,10 @@ private final class MeetingTestCapture: MeetingAudioRecording {
   var failFlush = false
   var startCallbackFailure = false
   var failureCallback: (@Sendable (String) -> Void)?
+  /// Chunks written by the final flush: source, offset and samples.
+  var finalChunks: [(MeetingAudioSource, TimeInterval, [Float])] = [
+    (.system, 0, [Float](repeating: 0.1, count: 16_000))
+  ]
   func start(
     directory: URL, onChunk: @escaping @Sendable () -> Void,
     onFailure: @escaping @Sendable (String) -> Void
@@ -80,13 +96,14 @@ private final class MeetingTestCapture: MeetingAudioRecording {
     isCapturing = false
     if failFlush { throw MeetingError.storage("Final flush failed") }
     guard let directory else { return }
-    let chunk = MeetingAudioChunk(
-      source: .system, offset: 0, samples: [Float](repeating: 0.1, count: 16_000))
     let encoder = PropertyListEncoder()
     encoder.outputFormat = .binary
-    try encoder.encode(chunk).write(
-      to: directory.appendingPathComponent(chunk.id.uuidString).appendingPathExtension("vani-audio")
-    )
+    for (source, offset, samples) in finalChunks {
+      let chunk = MeetingAudioChunk(source: source, offset: offset, samples: samples)
+      try encoder.encode(chunk).write(
+        to: directory.appendingPathComponent(chunk.id.uuidString).appendingPathExtension(
+          "vani-audio"))
+    }
   }
 }
 
@@ -184,8 +201,8 @@ struct MeetingModelTests {
       reserveSpeech: { true }, releaseSpeech: {})
     await model.load()
     await model.select(meeting)
-    let cancellation = model.$phase.sink { phase in
-      if phase == .summarizing { model.cancelSummary() }
+    let cancellation = model.$summarizingID.sink { id in
+      if id != nil { model.cancelSummary() }
     }
     await model.generateSummary()
     cancellation.cancel()
@@ -399,7 +416,7 @@ struct MeetingModelTests {
   }
 
   @Test func failedCancelledAndStaleGenerationKeepPreviousSummaryAndNotes() async throws {
-    for mode in ["failure", "cancel", "edit"] {
+    for mode in ["failure", "cancel", "transcript"] {
       let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
         UUID().uuidString)
       defer { try? FileManager.default.removeItem(at: directory) }
@@ -423,13 +440,18 @@ struct MeetingModelTests {
       if mode == "failure" {
         await summary.finish(.failure(MeetingError.summary("Unavailable")))
       } else {
-        if mode == "cancel" { model.cancelSummary() } else { model.draft?.notes = "My newer note" }
+        if mode == "cancel" {
+          model.cancelSummary()
+        } else {
+          model.draft?.transcript.append(
+            .init(id: UUID(), source: .microphone, offset: 20, duration: 1, text: "Late."))
+        }
         await summary.finish(.success("New summary"))
       }
       await generation.value
       #expect(model.phase == .idle && model.error != nil)
       #expect(model.draft?.summary == "Previous summary")
-      #expect(model.draft?.notes == (mode == "edit" ? "My newer note" : "My own note"))
+      #expect(model.draft?.notes == "My own note")
       #expect(try await store.load().first?.summary == "Previous summary")
     }
   }
@@ -450,4 +472,337 @@ struct MeetingModelTests {
     #expect(model.draft?.summary.isEmpty == true && model.error == "Stopped for sleep")
   }
 
+  private func temporaryDirectory() -> URL {
+    FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+  }
+
+  private func audioFiles(_ store: MeetingStore, _ meeting: MeetingRecord) async throws -> [URL] {
+    try FileManager.default.contentsOfDirectory(
+      at: try await store.audioDirectory(for: meeting.id), includingPropertiesForKeys: nil
+    ).filter { $0.pathExtension == "vani-audio" }
+  }
+
+  @Test func meetingChunksUseTheUsersVocabularyAndKeepQuietSpeech() async throws {
+    let directory = temporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let recognizer = MeetingTestRecognizer()
+    let capture = MeetingTestCapture()
+    var quiet = [Float](repeating: 0, count: 20 * 16_000)
+    for index in 80_000..<88_000 { quiet[index] = 0.012 * Float(sin(Double(index) * 0.07)) }
+    capture.finalChunks = [
+      (.microphone, 20, quiet),
+      (.system, 0, [Float](repeating: 0.001, count: 20 * 16_000)),
+    ]
+    let correction = LearnedCorrection(
+      spoken: "on monday", replacement: "on Tuesday", confirmationCount: 2)
+    let model = MeetingModel(
+      store: MeetingStore(directory: directory), recognizer: recognizer,
+      summarizer: MeetingTestSummarizer(), makeCapture: { capture }, reserveSpeech: { true },
+      releaseSpeech: {},
+      vocabulary: {
+        MeetingVocabulary(
+          dictionary: [DictionaryEntry(spoken: "launch", replacement: "ship")],
+          learnedCorrections: [correction], personalizationEnabled: true)
+      })
+    await model.start()
+    await model.stop(summarize: false)
+    // The half-second quiet phrase is transcribed; the faint noise chunk is skipped as silence.
+    #expect(await recognizer.count == 1)
+    #expect(
+      await recognizer.contexts.first?.personalizedTerms.map(\.canonical) == ["on Tuesday"])
+    let transcript = try #require(model.draft?.transcript)
+    #expect(transcript.map(\.offset) == [0, 20])
+    #expect(transcript.first?.text == "")
+    #expect(transcript.last?.text == "We agreed to ship on Tuesday.")
+    #expect(model.visibleTranscript.map(\.offset) == [20])
+  }
+
+  @Test func micEchoIsHiddenButKept() async throws {
+    let directory = temporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let capture = MeetingTestCapture()
+    capture.finalChunks = [
+      (.microphone, 0.5, [Float](repeating: 0.1, count: 16_000)),
+      (.system, 0, [Float](repeating: 0.1, count: 16_000)),
+    ]
+    let model = MeetingModel(
+      store: MeetingStore(directory: directory), recognizer: MeetingTestRecognizer(),
+      summarizer: MeetingTestSummarizer(), makeCapture: { capture }, reserveSpeech: { true },
+      releaseSpeech: {})
+    await model.start()
+    await model.stop(summarize: false)
+    let transcript = try #require(model.draft?.transcript)
+    #expect(transcript.count == 2)
+    #expect(transcript.first { $0.source == .microphone }?.isEcho == true)
+    #expect(model.visibleTranscript.map(\.source) == [.system])
+    #expect(model.echoCount == 1)
+    model.showingEchoes = true
+    #expect(model.visibleTranscript.map(\.source) == [.system, .microphone])
+    #expect(
+      try await MeetingStore(directory: directory).load().first?.transcript.filter(\.isEcho).count
+        == 1)
+  }
+
+  @Test func repeatedlyFailingChunkBecomesAVisibleFailureWithAudioKept() async throws {
+    let directory = temporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let store = MeetingStore(directory: directory)
+    let recognizer = MeetingTestRecognizer()
+    await recognizer.setFailure(true)
+    let model = MeetingModel(
+      store: store, recognizer: recognizer, summarizer: MeetingTestSummarizer(),
+      makeCapture: { MeetingTestCapture() }, reserveSpeech: { true }, releaseSpeech: {})
+    await model.start()
+    await model.stop()
+    #expect(model.transcriptionFailed && model.draft?.transcript.isEmpty == true)
+    await model.recoverTranscript()
+    #expect(model.transcriptionFailed)
+    await model.recoverTranscript()
+    // The third failure is recorded truthfully and no longer blocks the meeting.
+    #expect(!model.transcriptionFailed && model.failedSegmentCount == 1)
+    let meeting = try #require(model.draft)
+    #expect(try await store.record(id: meeting.id)?.transcript.first?.isFailed == true)
+    #expect(model.visibleTranscript.first?.timeRange == "0:00–0:01")
+    await model.clearAudio()
+    #expect(model.error?.contains("couldn’t be transcribed") == true)
+    #expect(try await audioFiles(store, meeting).count == 1)
+    await model.generateSummary()
+    #expect(model.draft?.summary == "Launch on Monday.")
+    // Recover transcript retries the kept audio once more.
+    await recognizer.setFailure(false)
+    await model.recoverTranscript()
+    #expect(model.failedSegmentCount == 0)
+    #expect(model.draft?.transcript.first?.text == "We agreed to launch on Monday.")
+    await model.clearAudio()
+    #expect(try await audioFiles(store, meeting).isEmpty)
+  }
+
+  @Test func confirmedRemovalDeletesAudioOfFailedChunks() async throws {
+    let directory = temporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let store = MeetingStore(directory: directory)
+    let recognizer = MeetingTestRecognizer()
+    await recognizer.setFailure(true)
+    let model = MeetingModel(
+      store: store, recognizer: recognizer, summarizer: MeetingTestSummarizer(),
+      makeCapture: { MeetingTestCapture() }, reserveSpeech: { true }, releaseSpeech: {})
+    await model.start()
+    await model.stop(summarize: false)
+    await model.recoverTranscript()
+    await model.recoverTranscript()
+    let meeting = try #require(model.draft)
+    #expect(try await audioFiles(store, meeting).count == 1)
+    await model.clearAudio(includingFailed: true)
+    #expect(try await audioFiles(store, meeting).isEmpty)
+    #expect(model.draft?.transcript.first?.isFailed == true)
+  }
+
+  @Test func summaryRunsInTheBackgroundAndIsSavedToItsOwnMeeting() async throws {
+    let directory = temporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let store = MeetingStore(directory: directory)
+    var first = MeetingRecord(title: "First")
+    first.notes = "Launch matters most"
+    first.transcript = [.init(id: UUID(), source: .system, offset: 0, duration: 1, text: "Agreed.")]
+    let second = MeetingRecord(title: "Second", createdAt: Date(timeIntervalSinceNow: -60))
+    try await store.save(first)
+    try await store.save(second)
+    let summary = ControlledMeetingSummary()
+    let capture = MeetingTestCapture()
+    let model = MeetingModel(
+      store: store, recognizer: MeetingTestRecognizer(), summarizer: summary,
+      makeCapture: { capture }, reserveSpeech: { true }, releaseSpeech: {})
+    await model.load()
+    await model.select(first)
+    let generation = Task { await model.generateSummary() }
+    await summary.waitUntilStarted()
+    // The user's notes are passed to the summarizer, and the library stays usable.
+    #expect(await summary.received?.notes == "Launch matters most")
+    #expect(!model.busy && model.summarizingID == first.id)
+    await model.select(second)
+    #expect(model.draft?.id == second.id)
+    model.draft?.notes = "Editing another meeting"
+    await model.start()
+    #expect(model.phase == .recording)
+    await model.stop(summarize: false)
+    let recorded = try #require(model.draft)
+    await summary.finish(.success("Background summary"))
+    await generation.value
+    #expect(model.error == nil && model.summarizingID == nil)
+    #expect(model.draft?.id == recorded.id && model.draft?.summary.isEmpty == true)
+    #expect(try await store.record(id: first.id)?.summary == "Background summary")
+    #expect(try await store.record(id: first.id)?.notes == "Launch matters most")
+    #expect(try await store.record(id: second.id)?.notes == "Editing another meeting")
+    #expect(model.meetings.first { $0.id == first.id }?.summary == "Background summary")
+    await model.select(try #require(model.meetings.first { $0.id == first.id }))
+    #expect(model.draft?.summary == "Background summary" && !model.dirty)
+  }
+
+  @Test func notesEditedWhileSummarizingAreKeptWithTheNewSummary() async throws {
+    let directory = temporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let store = MeetingStore(directory: directory)
+    var meeting = MeetingRecord(title: "Notes")
+    meeting.transcript = [
+      .init(id: UUID(), source: .system, offset: 0, duration: 1, text: "Agreed.")
+    ]
+    try await store.save(meeting)
+    let summary = ControlledMeetingSummary()
+    let model = MeetingModel(
+      store: store, recognizer: MeetingTestRecognizer(), summarizer: summary,
+      reserveSpeech: { true }, releaseSpeech: {})
+    await model.load()
+    await model.select(meeting)
+    let generation = Task { await model.generateSummary() }
+    await summary.waitUntilStarted()
+    model.draft?.notes = "Written during the summary"
+    await summary.finish(.success("Fresh summary"))
+    await generation.value
+    #expect(model.error == nil && !model.dirty)
+    #expect(try await store.record(id: meeting.id)?.summary == "Fresh summary")
+    #expect(try await store.record(id: meeting.id)?.notes == "Written during the summary")
+  }
+
+  @Test func quittingCancelsASummaryInsteadOfRefusing() async throws {
+    let directory = temporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let store = MeetingStore(directory: directory)
+    var meeting = MeetingRecord(title: "Quit")
+    meeting.summary = "Previous summary"
+    meeting.transcript = [
+      .init(id: UUID(), source: .system, offset: 0, duration: 1, text: "Agreed.")
+    ]
+    try await store.save(meeting)
+    let summary = ControlledMeetingSummary()
+    let model = MeetingModel(
+      store: store, recognizer: MeetingTestRecognizer(), summarizer: summary,
+      reserveSpeech: { true }, releaseSpeech: {})
+    await model.load()
+    await model.select(meeting)
+    let generation = Task { await model.generateSummary() }
+    await summary.waitUntilStarted()
+    #expect(await model.prepareToQuit())
+    await generation.value
+    #expect(try await store.record(id: meeting.id)?.summary == "Previous summary")
+  }
+
+  @Test func refusedActionsExplainThemselves() async throws {
+    let directory = temporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    var reservable = true
+    let capture = MeetingTestCapture()
+    let model = MeetingModel(
+      store: MeetingStore(directory: directory), recognizer: MeetingTestRecognizer(),
+      summarizer: MeetingTestSummarizer(), makeCapture: { capture },
+      reserveSpeech: { reservable }, releaseSpeech: {})
+    await model.start()
+    let recording = try #require(model.draft)
+    await model.select(MeetingRecord())
+    #expect(model.error == "Stop the current meeting before opening another.")
+    #expect(model.draft?.id == recording.id)
+    await model.stop(summarize: false)
+    reservable = false
+    await model.recoverTranscript()
+    #expect(model.error == "Finish dictating, then try again.")
+    let unsupported = MeetingModel(
+      store: MeetingStore(directory: directory), recognizer: MeetingTestRecognizer(),
+      makeCapture: { capture }, reserveSpeech: { true }, releaseSpeech: {},
+      captureSupported: false)
+    await unsupported.start()
+    #expect(unsupported.error?.contains("macOS 15") == true && capture.starts == 1)
+  }
+
+  @Test func quitWhileTranscribingSaysWhy() async throws {
+    let directory = temporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let model = MeetingModel(
+      store: MeetingStore(directory: directory), recognizer: MeetingTestRecognizer(),
+      summarizer: MeetingTestSummarizer(), makeCapture: { MeetingTestCapture() },
+      reserveSpeech: { true }, releaseSpeech: {})
+    await model.start()
+    var quit: Task<Bool, Never>?
+    let observer = model.$phase.sink { phase in
+      if phase == .transcribing && quit == nil { quit = Task { await model.prepareToQuit() } }
+    }
+    await model.stop(summarize: false)
+    observer.cancel()
+    #expect(await quit?.value == false)
+    #expect(model.error?.contains("finishing this meeting’s transcript") == true)
+  }
+
+  @Test func captureThatNeverStartsLeavesNoEmptyMeeting() async throws {
+    let directory = temporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let store = MeetingStore(directory: directory)
+    let capture = MeetingTestCapture()
+    capture.failStart = true
+    let model = MeetingModel(
+      store: store, recognizer: MeetingTestRecognizer(), summarizer: MeetingTestSummarizer(),
+      makeCapture: { capture }, reserveSpeech: { true }, releaseSpeech: {})
+    await model.start()
+    #expect(model.error == "Start failed")
+    #expect(model.draft == nil && model.meetings.isEmpty)
+    #expect(try await store.load().isEmpty)
+  }
+
+  @Test func transcriptionFailedDuringSleepIsRetriedAfterWake() async throws {
+    let directory = temporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let recognizer = MeetingTestRecognizer()
+    await recognizer.setFailure(true)
+    let model = MeetingModel(
+      store: MeetingStore(directory: directory), recognizer: recognizer,
+      summarizer: MeetingTestSummarizer(), makeCapture: { MeetingTestCapture() },
+      reserveSpeech: { true }, releaseSpeech: {}, recoveryRetryDelay: .milliseconds(20))
+    await model.start()
+    await model.interrupt("Meeting stopped for sleep.")
+    #expect(model.transcriptionFailed)
+    await recognizer.setFailure(false)
+    for _ in 0..<200 where model.transcriptionFailed || model.busy {
+      try await Task.sleep(for: .milliseconds(10))
+    }
+    #expect(!model.transcriptionFailed)
+    #expect(model.draft?.transcript.first?.text == "We agreed to launch on Monday.")
+  }
+
+  @Test func deletedMeetingsMoveToRecentlyDeletedAndCanBeRestored() async throws {
+    let directory = temporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let store = MeetingStore(directory: directory)
+    let meeting = MeetingRecord(title: "Retro")
+    try await store.save(meeting)
+    let model = MeetingModel(
+      store: store, recognizer: MeetingTestRecognizer(), reserveSpeech: { true },
+      releaseSpeech: {})
+    await model.load()
+    await model.select(meeting)
+    await model.setDeleted(true)
+    #expect(model.draft == nil && model.visibleMeetings.isEmpty)
+    #expect(try await store.record(id: meeting.id)?.deletedAt != nil)
+    await model.showDeleted(true)
+    #expect(model.visibleMeetings.map(\.id) == [meeting.id])
+    await model.select(try #require(model.visibleMeetings.first))
+    await model.setDeleted(false)
+    await model.showDeleted(false)
+    #expect(model.visibleMeetings.map(\.id) == [meeting.id])
+    #expect(try await store.record(id: meeting.id)?.deletedAt == nil)
+  }
+
+  @Test func summaryAvailabilityIsAHintThatNeverBlocksRecording() async throws {
+    struct Missing: MeetingSummarizing {
+      func summarize(_ meeting: MeetingRecord) -> String { "" }
+      func availability() -> MeetingSummaryAvailability { .modelMissing }
+    }
+    let directory = temporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let model = MeetingModel(
+      store: MeetingStore(directory: directory), recognizer: MeetingTestRecognizer(),
+      summarizer: Missing(), makeCapture: { MeetingTestCapture() }, reserveSpeech: { true },
+      releaseSpeech: {})
+    await model.start()
+    #expect(model.phase == .recording)
+    await model.refreshSummaryAvailability()
+    #expect(model.summaryAvailability == .modelMissing)
+    await model.stop(summarize: false)
+  }
 }

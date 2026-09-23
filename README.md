@@ -121,8 +121,9 @@ The quick notebook stays separate from **Meetings**, the live meeting note taker
 On macOS 15 or later, choose **Meetings → Start a meeting**, review the capture disclosure,
 and allow macOS Screen & System Audio Recording access when prompted. Vani records your
 microphone and other Mac audio; let participants know and use headphones. Keep your own
-notes while the transcript updates roughly every 20 seconds. **Stop meeting** finishes
-transcription and generates a local summary with decisions, action items and source quotes.
+notes while the transcript updates every 15–24 seconds, at a pause. **Stop meeting** finishes
+transcription and generates a local summary with decisions, action items and source quotes,
+guided by your notes.
 Closing the window keeps recording; return through the menu to stop it.
 
 Summaries require [Ollama](https://ollama.com/) running locally with `qwen3:4b` installed:
@@ -135,8 +136,8 @@ The model download is about 2.5 GB. There is no cloud fallback. If the service i
 your notes and transcript remain available; start Ollama and choose **Generate summary** again.
 A failed transcript can be retried through **Meeting actions → Recover transcript**.
 **Remove saved audio** permanently removes captured chunks only after their transcript is saved.
-Meetings last up to two hours; transcript labels identify microphone versus Mac audio, not
-individual speakers. Review AI output before relying on it. See [meeting design and limits](docs/MEETINGS_DESIGN.md).
+Meetings last up to two hours; transcript labels "Me" (microphone) and "Others" (Mac audio)
+identify sources, not individual speakers. Microphone echo of Mac audio is hidden by default. Review AI output before relying on it. See [meeting design and limits](docs/MEETINGS_DESIGN.md).
 
 ## Updating Vani
 
