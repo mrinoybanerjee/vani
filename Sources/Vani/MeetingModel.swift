@@ -230,6 +230,12 @@ final class MeetingModel: ObservableObject {
           "Meeting storage is unavailable. Your existing meetings have been preserved.")
       }
       let capture = try makeCapture()
+      capture.setWarningHandler { [weak self] message in
+        Task { @MainActor in
+          guard let self, self.activeCaptureID == captureID else { return }
+          self.error = message
+        }
+      }
       guard await recognizer.modelsAreInstalled() else {
         throw MeetingError.capture("Download the local speech model from the Vani menu first.")
       }

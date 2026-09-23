@@ -9,19 +9,30 @@ struct MeetingAudioTests {
     guard #available(macOS 15.0, *) else { return }
     let output = MeetingStreamOutput(
       directory: FileManager.default.temporaryDirectory, onChunk: {}, onFailure: { _ in },
-      onStopped: { _ in })
-    let first = NSObject()
-    let second = NSObject()
-    output.beginStream(ObjectIdentifier(first), continuingAt: 0)
-    #expect(output.timelineOffset(for: 9_000) == 0)
-    #expect(output.timelineOffset(for: 9_004.5) == 4.5)
-    // The replacement stream's clock starts elsewhere; the meeting timeline does not.
-    output.beginStream(ObjectIdentifier(second), continuingAt: 6)
-    #expect(output.timelineOffset(for: 12) == 6)
-    #expect(output.timelineOffset(for: 15) == 9)
-    // An early base never moves the timeline backwards.
-    output.beginStream(ObjectIdentifier(first), continuingAt: 2)
-    #expect(output.timelineOffset(for: 100) == 9)
+      onStopped: { _, _ in })
+    // Keep the stand-in streams alive so their identities stay distinct.
+    let streams = (NSObject(), NSObject(), NSObject())
+    let first = ObjectIdentifier(streams.0)
+    let second = ObjectIdentifier(streams.1)
+    let failed = ObjectIdentifier(streams.2)
+    defer { withExtendedLifetime(streams) {} }
+    output.registerStream(first, continuingAt: 0)
+    #expect(output.timelineOffset(for: 9_000, stream: first) == 0)
+    #expect(output.timelineOffset(for: 9_004.5, stream: first) == 4.5)
+
+    // A replacement that fails to start is forgotten and never shadows the live stream.
+    output.registerStream(failed, continuingAt: 5)
+    output.forgetStream(failed)
+    #expect(output.timelineOffset(for: 9_006, stream: first) == 6)
+    #expect(output.timelineOffset(for: 1, stream: failed) == nil)
+
+    // The replacement registers early (base 5) but first delivers after the live stream
+    // reached 6 s: it continues from 6, and the replaced stream is ignored from then on.
+    output.registerStream(second, continuingAt: 5)
+    #expect(output.timelineOffset(for: 9_006.5, stream: first) == 6.5)
+    #expect(output.timelineOffset(for: 40, stream: second) == 6.5)
+    #expect(output.timelineOffset(for: 43, stream: second) == 9.5)
+    #expect(output.timelineOffset(for: 9_010, stream: first) == nil)
   }
 
   @Test func repeatedCallbacksPreserveBothSourcesAndFinalTails() throws {
@@ -30,7 +41,7 @@ struct MeetingAudioTests {
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     defer { try? FileManager.default.removeItem(at: directory) }
     let output = MeetingStreamOutput(
-      directory: directory, onChunk: {}, onFailure: { _ in }, onStopped: { _ in })
+      directory: directory, onChunk: {}, onFailure: { _ in }, onStopped: { _, _ in })
     for index in 0..<1_010 {
       for source in [MeetingAudioSource.microphone, .system] {
         let value = Float(index % 10) / 10 * (source == .microphone ? 1 : -1)
@@ -66,7 +77,7 @@ struct MeetingAudioTests {
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     defer { try? FileManager.default.removeItem(at: directory) }
     let output = MeetingStreamOutput(
-      directory: directory, onChunk: {}, onFailure: { _ in }, onStopped: { _ in })
+      directory: directory, onChunk: {}, onFailure: { _ in }, onStopped: { _, _ in })
     try output.append(
       [Float](repeating: 0.1, count: 16_000), rate: 16_000, offset: 0, source: .microphone)
     try output.append(
@@ -191,7 +202,7 @@ struct MeetingAudioTests {
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     defer { try? FileManager.default.removeItem(at: directory) }
     let output = MeetingStreamOutput(
-      directory: directory, onChunk: {}, onFailure: { _ in }, onStopped: { _ in })
+      directory: directory, onChunk: {}, onFailure: { _ in }, onStopped: { _, _ in })
     // Speech-like tone, with a pause at 10 s (too early to cut) and at 17.0–17.5 s.
     let input = try record(seconds: 22, offset: 3, into: output) { index in
       let time = Double(index) / 16_000
@@ -213,7 +224,7 @@ struct MeetingAudioTests {
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     defer { try? FileManager.default.removeItem(at: directory) }
     let output = MeetingStreamOutput(
-      directory: directory, onChunk: {}, onFailure: { _ in }, onStopped: { _ in })
+      directory: directory, onChunk: {}, onFailure: { _ in }, onStopped: { _, _ in })
     // Continuous speech with a softer (not silent) 200 ms at 20.0 s, then 30 s total.
     let input = try record(seconds: 30, into: output) { index in
       let time = Double(index) / 16_000

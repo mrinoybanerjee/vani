@@ -261,7 +261,7 @@ struct LongMeetingSoakTests {
       let turns = conversation(duration: soakDuration, seed: 11, brisk: brisk)
       let remote = turns.filter { $0.source == .system }
       let output = MeetingStreamOutput(
-        directory: directory, onChunk: {}, onFailure: { _ in }, onStopped: { _ in })
+        directory: directory, onChunk: {}, onFailure: { _ in }, onStopped: { _, _ in })
       try await Task.detached {
         // No callbacks between remote turns (0.2 s release tail), as if nothing played.
         var silences: [(start: TimeInterval, end: TimeInterval)] = []

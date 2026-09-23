@@ -71,6 +71,7 @@ public actor AVAudioEngineCapture: AudioCapturing {
     {
       return true
     }
+    deliveryRetries = 0
     return restartSegment()
   }
 
@@ -120,7 +121,15 @@ public actor AVAudioEngineCapture: AudioCapturing {
     guard deliveryRetries < Self.maximumDeliveryRetries else { return }
     deliveryRetries += 1
     VaniLog.event(category: .capture, code: "capture_segment_silent_restart")
-    _ = restartSegment()
+    if !restartSegment() { interruptionHandler?() }
+  }
+
+  /// Called when capture ends on its own (no input could be resumed), so the session can
+  /// keep what was recorded and tell the user.
+  private var interruptionHandler: (@Sendable () -> Void)?
+
+  public func setInterruptionHandler(_ handler: @escaping @Sendable () -> Void) {
+    interruptionHandler = handler
   }
 
   /// The input route changed while no recording is active.
@@ -237,7 +246,15 @@ public actor AVAudioEngineCapture: AudioCapturing {
     // An explicit device stops the engine from following default-input changes, which
     // otherwise reconfigure it and silently end the tap's audio.
     if let device { try? input.auAudioUnit.setDeviceID(device) }
-    let format = input.outputFormat(forBus: 0)
+    // After re-binding, build the tap format from the bound hardware's rate and channels,
+    // so a device with a different rate cannot trip AVAudioEngine's format assertion.
+    let hardware = input.inputFormat(forBus: 0)
+    guard hardware.sampleRate > 0, hardware.channelCount > 0,
+      let format = AVAudioFormat(
+        standardFormatWithSampleRate: hardware.sampleRate, channels: hardware.channelCount)
+    else {
+      throw VaniFailure.audioDeviceUnavailable
+    }
     guard format.channelCount > 0 else {
       throw VaniFailure.audioDeviceUnavailable
     }

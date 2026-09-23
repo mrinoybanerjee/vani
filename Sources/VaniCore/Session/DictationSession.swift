@@ -38,6 +38,7 @@ public actor DictationSession {
   private var isRecordingLimitApproaching = false
   private var didUnexpectedlyTruncateCurrentAudio = false
   private var historyRevision: UInt64 = 0
+  private var interruptionHandlerInstalled = false
 
   public init(
     audioCapture: any AudioCapturing,
@@ -188,6 +189,12 @@ public actor DictationSession {
     failure = nil
     insertionFeedback = nil
     didUnexpectedlyTruncateCurrentAudio = false
+    if !interruptionHandlerInstalled {
+      interruptionHandlerInstalled = true
+      await audioCapture.setInterruptionHandler { [weak self] in
+        Task { await self?.captureEndedUnexpectedly() }
+      }
+    }
 
     do {
       let captureStartedAt = ContinuousClock().now
@@ -500,6 +507,13 @@ public actor DictationSession {
     } catch {
       await recordIgnored("audio_route_change", phase: machine.phase)
     }
+  }
+
+  /// Capture stopped on its own (every input vanished); keep the take for Retry.
+  private func captureEndedUnexpectedly() async {
+    guard machine.phase == .listening else { return }
+    cancelRecordingLimitTimer()
+    await preserveInterruptedDictation(diagnosticCode: "capture_input_lost")
   }
 
   public func systemWillSleep() async {

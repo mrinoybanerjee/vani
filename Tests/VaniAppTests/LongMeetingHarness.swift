@@ -96,7 +96,8 @@ final class SyntheticMeetingCapture: MeetingAudioRecording {
   ) throws {
     self.directory = directory
     output = MeetingStreamOutput(
-      directory: directory, onChunk: onChunk, onFailure: onFailure, onStopped: onFailure)
+      directory: directory, onChunk: onChunk, onFailure: onFailure,
+      onStopped: { _, message in onFailure(message) })
   }
 
   /// The producer has finished before `stop`, as ScreenCaptureKit's queue drains before `finish`.

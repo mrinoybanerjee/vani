@@ -20,6 +20,14 @@ private actor MockAudioCapture: AudioCapturing {
 
   func setContinuesAfterRouteChange(_ value: Bool) { continuesAfterRouteChange = value }
 
+  private var interruptionHandler: (@Sendable () -> Void)?
+
+  func setInterruptionHandler(_ handler: @escaping @Sendable () -> Void) {
+    interruptionHandler = handler
+  }
+
+  func simulateCaptureLost() { interruptionHandler?() }
+
   func continueOnCurrentInput() async -> Bool {
     continueCount += 1
     return continuesAfterRouteChange
@@ -1730,4 +1738,28 @@ func losingEveryInputDuringDictationKeepsTheCapturedSpeechForRetry() async throw
   #expect(snapshot.phase == .recoverableError)
   #expect(snapshot.failure == .recordingInterrupted)
   #expect(await audio.continueCount == 1)
+}
+
+@Test @MainActor
+func captureThatEndsOnItsOwnKeepsTheTakeForRetry() async throws {
+  let audio = MockAudioCapture()
+  let session = DictationSession(
+    audioCapture: audio,
+    speechRecognizer: MockSpeechRecognizer(results: [.success(speechResult("kept"))]),
+    textInserter: MockTextInserter(results: [.success(.verified)]),
+    focusProvider: MockFocusProvider(),
+    diagnostics: DiagnosticStore()
+  )
+
+  #expect(await session.prepareModels(allowDownload: false))
+  await session.beginDictation()
+  await audio.simulateCaptureLost()
+  for _ in 0..<200 where await session.snapshot().phase == .listening {
+    try await Task.sleep(for: .milliseconds(5))
+  }
+
+  let snapshot = await session.snapshot()
+  #expect(snapshot.phase == .recoverableError)
+  #expect(snapshot.failure == .recordingInterrupted)
+  #expect(await audio.stopCount == 1)
 }
