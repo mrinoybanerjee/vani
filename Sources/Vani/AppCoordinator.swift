@@ -47,7 +47,7 @@ final class AppCoordinator: ObservableObject {
   private var settingsRevision: UInt64 = 0
   private var personalizationRevision: UInt64 = 0
   private var startCueWasPreplayed = false
-  private var holdGesture: HoldGesture = .idle
+  private var holdGesture = HoldGesture()
   private var secondTapTask: Task<Void, Never>?
   private var isTerminating = false
   private var quitPreflight = false
@@ -134,8 +134,13 @@ final class AppCoordinator: ObservableObject {
       guard let self, settings.escapeCancelsEnabled else { return }
       cancelDictation(reason: "escape")
     }
+    hotkeyMonitor.onYieldToChord = { [weak self] in
+      guard let self else { return }
+      resetHoldGesture()
+      if recordingInProgress { cancelDictation(reason: "command_chord") }
+    }
     hotkeyMonitor.onKeyDuringHold = { [weak self] in
-      guard let self, case .holding = holdGesture else { return }
+      guard let self, holdGesture.isHolding else { return }
       cancelDictation(reason: "chord")
     }
     let binding = settings.lastTranscriptBinding
@@ -721,71 +726,46 @@ final class AppCoordinator: ObservableObject {
     updateRecordingActive()
   }
 
-  private enum HoldGesture: Equatable {
-    case idle
-    case holding(since: ContinuousClock.Instant)
-    case awaitingSecondTap
-    /// Locked on; the press that locked it has not been released yet.
-    case lockedWhilePressed
-    case locked
-    /// The press that stopped a locked recording has not been released yet.
-    case stoppingWhilePressed
-  }
-
-  /// A press released sooner than this may be the first half of a double-tap.
-  private static let quickTapThreshold: Duration = .milliseconds(300)
-  private static let secondTapWindow: Duration = .milliseconds(300)
-
   private var recordingInProgress: Bool {
     captureStartTask != nil || snapshot.phase == .listening
   }
 
   private func shortcutPressed() {
-    switch holdGesture {
-    case .locked:
-      holdGesture = .stoppingWhilePressed
-      setHandsFreeLocked(false)
-      endDictation()
-    case .awaitingSecondTap:
-      secondTapTask?.cancel()
-      secondTapTask = nil
-      guard recordingInProgress else {
-        holdGesture = .idle
-        return
-      }
-      holdGesture = .lockedWhilePressed
-      setHandsFreeLocked(true)
-      VaniLog.event(category: .capture, code: "hands_free_locked")
-    case .idle, .holding, .lockedWhilePressed, .stoppingWhilePressed:
-      holdGesture = .holding(since: ContinuousClock().now)
-      beginDictation()
-    }
+    perform(holdGesture.press(at: ContinuousClock().now, recordingInProgress: recordingInProgress))
   }
 
   private func shortcutReleased() {
-    switch holdGesture {
-    case .holding(let since):
-      let quickTap = ContinuousClock().now - since < Self.quickTapThreshold
-      guard settings.handsFreeEnabled, quickTap, recordingInProgress else {
-        holdGesture = .idle
-        endDictation()
-        return
-      }
-      // Keep recording briefly: a second press within the window locks hands-free mode.
-      holdGesture = .awaitingSecondTap
-      secondTapTask = Task { [weak self] in
-        try? await Task.sleep(for: Self.secondTapWindow)
-        guard let self, !Task.isCancelled, holdGesture == .awaitingSecondTap else { return }
-        secondTapTask = nil
-        holdGesture = .idle
-        endDictation()
-      }
-    case .lockedWhilePressed:
-      holdGesture = .locked
-    case .stoppingWhilePressed:
-      holdGesture = .idle
-    case .idle, .awaitingSecondTap, .locked:
+    perform(
+      holdGesture.release(
+        at: ContinuousClock().now,
+        handsFreeEnabled: settings.handsFreeEnabled,
+        recordingInProgress: recordingInProgress))
+  }
+
+  private func perform(_ action: HoldGesture.Action) {
+    setHandsFreeLocked(holdGesture.isHandsFreeLocked)
+    switch action {
+    case .none:
+      break
+    case .beginRecording:
+      secondTapTask?.cancel()
+      secondTapTask = nil
+      beginDictation()
+    case .finishRecording:
+      secondTapTask?.cancel()
+      secondTapTask = nil
       endDictation()
+    case .lockHandsFree:
+      secondTapTask?.cancel()
+      secondTapTask = nil
+      VaniLog.event(category: .capture, code: "hands_free_locked")
+    case .waitForSecondTap:
+      secondTapTask = Task { [weak self] in
+        try? await Task.sleep(for: HoldGesture.secondTapWindow)
+        guard let self, !Task.isCancelled else { return }
+        secondTapTask = nil
+        perform(holdGesture.secondTapWindowElapsed())
+      }
     }
   }
 
@@ -807,7 +787,7 @@ final class AppCoordinator: ObservableObject {
   private func resetHoldGesture() {
     secondTapTask?.cancel()
     secondTapTask = nil
-    holdGesture = .idle
+    holdGesture.reset()
     setHandsFreeLocked(false)
   }
 
@@ -877,7 +857,7 @@ final class AppCoordinator: ObservableObject {
     updateRecordingActive()
     if previous == .listening, newSnapshot.phase != .listening, captureStartTask == nil {
       // Limit, interruption or failure can end a locked recording without a key press.
-      if handsFreeLocked || holdGesture == .awaitingSecondTap { resetHoldGesture() }
+      if holdGesture.state != .idle, !holdGesture.isHolding { resetHoldGesture() }
     }
     overlay.update(snapshot: newSnapshot, previousPhase: previous)
     if let cue = DictationCueResolver.cue(

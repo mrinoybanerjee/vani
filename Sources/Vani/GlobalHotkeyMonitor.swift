@@ -18,6 +18,9 @@ final class GlobalHotkeyMonitor {
   /// Any other key pressed while the hold shortcut is down: the user is typing a
   /// chord such as Fn-Delete or Control-C, not dictating.
   var onKeyDuringHold: (() -> Void)?
+  /// The hold key became part of a Command chord (Left Control + Command). This is
+  /// never a dictation gesture, so it must not be read as the first tap of a double-tap.
+  var onYieldToChord: (() -> Void)?
 
   /// Read from the event-tap callback, which is not actor-isolated.
   nonisolated let lastTranscriptBinding = OSAllocatedUnfairLock(
@@ -185,7 +188,7 @@ final class GlobalHotkeyMonitor {
       if isPressed {
         isPressed = false
         VaniLog.event(category: .capture, code: "shortcut_yielded_to_command_chord")
-        onRelease?()
+        if let onYieldToChord { onYieldToChord() } else { onRelease?() }
       }
       return
     }
