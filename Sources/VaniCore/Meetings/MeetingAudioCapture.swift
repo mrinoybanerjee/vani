@@ -196,8 +196,7 @@ final class MeetingStreamOutput: NSObject, SCStreamOutput, SCStreamDelegate, @un
     let chunk = MeetingAudioChunk(source: source, offset: buffer.offset, samples: samples)
     let encoder = PropertyListEncoder()
     encoder.outputFormat = .binary
-    let file = directory.appendingPathComponent(chunk.id.uuidString).appendingPathExtension(
-      "vani-audio")
+    let file = directory.appendingPathComponent(chunk.fileName)
     try MeetingStore.write(encoder.encode(chunk), to: file)
     pending[source]?.removeFirst(cut)
     onChunk()

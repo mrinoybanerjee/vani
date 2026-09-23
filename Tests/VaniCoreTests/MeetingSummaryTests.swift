@@ -186,7 +186,9 @@ struct MeetingSummaryTests {
     ])
     let result = try await summarizer.summarize(longMeeting())
     #expect(result.contains("• The launch is on Monday. [0:00, 10:00]"))
-    #expect(result.contains("Source: “agreed to launch on Monday”"))
+    // Every cited quote is shown with its own time.
+    #expect(result.contains("  Source: “agreed to launch on Monday” [0:00]"))
+    #expect(result.contains("  Source: “launch is on Monday” [10:00]"))
     #expect(result.contains("• Priya sends results by Friday. [10:00]"))
     // Source 2 is an action, so it cannot support a summary statement.
     #expect(!result.contains("Invented"))
@@ -218,6 +220,73 @@ struct MeetingSummaryTests {
     let result = try await summarizer.summarize(longMeeting())
     #expect(result.components(separatedBy: "Launch on Monday.").count == 2)
     #expect(result.contains("• Results by Friday. [10:00]"))
+  }
+
+  private func twoBatches(_ second: [String: Any]) throws -> [Data] {
+    [
+      try envelope([
+        "summary": [item("Launch on Monday.", 0, "agreed to launch on Monday")], "decisions": [],
+        "actions": [],
+      ]),
+      try envelope(second),
+    ]
+  }
+
+  @Test func consolidationKeepsEveryVerifiedItemAndRejectsNewFacts() async throws {
+    MeetingSummaryProtocol.reset(
+      try twoBatches([
+        "summary": [item("Results come by Friday.", 1, "Priya will send results by Friday")],
+        "decisions": [],
+        "actions": [item("Priya sends results by Friday.", 1, "Priya will send results by Friday")],
+      ]) + [
+        try envelope([
+          // Adds a number and a name absent from the cited item: rejected.
+          "summary": [["text": "Launch on Monday with 3 teams led by Sam.", "sources": [0]]],
+          "decisions": [],
+          // Item 1 (a summary item) is never cited.
+          "actions": [["text": "Priya sends the results by Friday.", "sources": [2]]],
+        ])
+      ])
+    let result = try await summarizer.summarize(longMeeting())
+    #expect(!result.contains("Sam") && !result.contains("3 teams"))
+    #expect(result.contains("• Launch on Monday. [0:00]"))
+    #expect(result.contains("• Results come by Friday. [10:00]"))
+    #expect(result.contains("• Priya sends the results by Friday. [10:00]"))
+    #expect(MeetingSummaryProtocol.bodies.count == 3)
+  }
+
+  @Test func consolidationThatWouldOverflowTheContextIsSkipped() async throws {
+    let long = String(repeating: "Launch planning detail. ", count: 47)
+    let many = (0..<12).map { item("\($0) " + long, 1, "Priya will send results by Friday") }
+    MeetingSummaryProtocol.reset(
+      try twoBatches(["summary": many, "decisions": [], "actions": many]))
+    let result = try await summarizer.summarize(longMeeting())
+    #expect(result.components(separatedBy: "• ").count == 26)
+    // Two batch requests, then an explicit unload instead of a consolidation prompt.
+    #expect(MeetingSummaryProtocol.bodies.count == 3)
+    #expect(MeetingSummaryProtocol.bodies.last?["prompt"] == nil)
+    #expect(MeetingSummaryProtocol.bodies.last?["keep_alive"] as? Int == 0)
+  }
+
+  @Test func failureOrCancellationDuringBatchesUnloadsTheModel() async throws {
+    MeetingSummaryProtocol.reset(try twoBatches([:]).prefix(1) + [Data("not json".utf8)])
+    await #expect(throws: MeetingError.self) { try await summarizer.summarize(longMeeting()) }
+    #expect(MeetingSummaryProtocol.bodies.map { $0["keep_alive"] as? String } == ["5m", "5m", nil])
+    #expect(MeetingSummaryProtocol.bodies.last?["keep_alive"] as? Int == 0)
+    MeetingSummaryProtocol.reset(try twoBatches([:]))
+    let task = Task { try await summarizer.summarize(longMeeting()) }
+    task.cancel()
+    _ = try? await task.value
+    #expect(MeetingSummaryProtocol.bodies.last?["keep_alive"] as? Int == 0)
+  }
+
+  @Test func quotesMustBeSpecificEnoughToLocate() async throws {
+    for quote in ["on Monday", "launch"] {
+      MeetingSummaryProtocol.reset([try response(quote: quote)])
+      await #expect(throws: MeetingError.self) { try await summarizer.summarize(meeting()) }
+    }
+    MeetingSummaryProtocol.reset([try response(quote: "launch on Monday")])
+    #expect(try await summarizer.summarize(meeting()).contains("Launch on Monday."))
   }
 
   @Test func availabilityChecksTheInstalledModelOverLoopback() async throws {

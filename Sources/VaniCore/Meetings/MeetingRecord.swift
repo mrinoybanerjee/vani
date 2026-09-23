@@ -125,6 +125,40 @@ public struct MeetingAudioChunk: Codable, Identifiable, Sendable {
     pcm = samples.withUnsafeBytes { Data($0) }
   }
 
+  /// What a chunk's file name says about it. New names carry the source and offset, so pending
+  /// audio can be ordered, and an unreadable chunk reported, without decoding the audio.
+  /// Older names are the bare chunk ID.
+  public struct Identity: Sendable, Equatable {
+    public let id: UUID
+    public let source: MeetingAudioSource?
+    public let offset: TimeInterval?
+  }
+
+  public static let fileExtension = "vani-audio"
+
+  /// `<UUID>_<mic|sys>_<offset in milliseconds>.vani-audio`
+  public var fileName: String {
+    "\(id.uuidString)_\(source == .microphone ? "mic" : "sys")_\(Int((offset * 1000).rounded()))."
+      + Self.fileExtension
+  }
+
+  public static func identity(fromFileName name: String) -> Identity? {
+    guard name.hasSuffix("." + fileExtension) else { return nil }
+    let parts = name.dropLast(fileExtension.count + 1).split(
+      separator: "_", omittingEmptySubsequences: false)
+    guard let first = parts.first, let id = UUID(uuidString: String(first)) else { return nil }
+    if parts.count == 1 { return Identity(id: id, source: nil, offset: nil) }
+    guard parts.count == 3, let milliseconds = Int(parts[2]), (0...7_200_000).contains(milliseconds)
+    else { return nil }
+    let source: MeetingAudioSource
+    switch parts[1] {
+    case "mic": source = .microphone
+    case "sys": source = .system
+    default: return nil
+    }
+    return Identity(id: id, source: source, offset: Double(milliseconds) / 1000)
+  }
+
   public func audio() throws -> CapturedAudio {
     guard sampleRate == CapturedAudio.targetSampleRate, pcm.count % 4 == 0,
       pcm.count <= 4 * sampleRate * 25, offset.isFinite, offset >= 0, offset <= 7200

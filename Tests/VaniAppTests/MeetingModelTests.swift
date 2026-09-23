@@ -7,9 +7,13 @@ import VaniCore
 
 private actor MeetingTestRecognizer: SpeechRecognizing {
   var fails = false
+  var failuresRemaining = 0
   var count = 0
+  var text = "We agreed to launch on Monday."
   var contexts: [SpeechRecognitionContext] = []
   func setFailure(_ value: Bool) { fails = value }
+  func failNext(_ count: Int) { failuresRemaining = count }
+  func setText(_ value: String) { text = value }
   func modelsAreInstalled() -> Bool { true }
   func prepare(progress: @escaping @Sendable (Double) -> Void) { progress(1) }
   func transcribe(_ audio: CapturedAudio) throws -> SpeechResult {
@@ -20,8 +24,12 @@ private actor MeetingTestRecognizer: SpeechRecognizing {
     count += 1
     contexts.append(context)
     if fails { throw MeetingError.capture("Fixture transcription failed") }
+    if failuresRemaining > 0 {
+      failuresRemaining -= 1
+      throw MeetingError.capture("Fixture transcription failed once")
+    }
     return SpeechResult(
-      text: "We agreed to launch on Monday.", confidence: 1, audioDuration: audio.duration,
+      text: text, confidence: 1, audioDuration: audio.duration,
       processingDuration: 0)
   }
 }
@@ -75,6 +83,17 @@ private final class MeetingTestCapture: MeetingAudioRecording {
   var failFlush = false
   var startCallbackFailure = false
   var failureCallback: (@Sendable (String) -> Void)?
+  var chunkCallback: (@Sendable () -> Void)?
+  /// Writes one chunk during recording and reports it, as live capture does.
+  func emitChunk(offset: TimeInterval) throws {
+    guard let directory else { return }
+    let chunk = MeetingAudioChunk(
+      source: .system, offset: offset, samples: [Float](repeating: 0.1, count: 16_000))
+    let encoder = PropertyListEncoder()
+    encoder.outputFormat = .binary
+    try encoder.encode(chunk).write(to: directory.appendingPathComponent(chunk.fileName))
+    chunkCallback?()
+  }
   /// Chunks written by the final flush: source, offset and samples.
   var finalChunks: [(MeetingAudioSource, TimeInterval, [Float])] = [
     (.system, 0, [Float](repeating: 0.1, count: 16_000))
@@ -85,6 +104,7 @@ private final class MeetingTestCapture: MeetingAudioRecording {
   ) throws {
     starts += 1
     failureCallback = onFailure
+    chunkCallback = onChunk
     if startCallbackFailure { onFailure("Capture interrupted during startup") }
     if failStart { throw MeetingError.capture("Start failed") }
     self.directory = directory
@@ -279,14 +299,16 @@ struct MeetingModelTests {
     let capture = MeetingTestCapture()
     let model = MeetingModel(
       store: store, recognizer: recognizer, summarizer: MeetingTestSummarizer(),
-      makeCapture: { capture }, reserveSpeech: { true }, releaseSpeech: {})
+      makeCapture: { capture }, reserveSpeech: { true }, releaseSpeech: {},
+      transcriptionRetryDelay: .zero)
     await model.start()
     await recognizer.setFailure(true)
     await model.stop()
-    #expect(model.transcriptionFailed)
+    // Failure is recorded as a segment; no summary is attempted without transcribed speech.
+    #expect(!model.transcriptionFailed && model.failedSegmentCount == 1)
     #expect(model.draft?.summary.isEmpty == true)
     let meeting = try #require(model.draft)
-    #expect(try await store.pendingAudioFiles(for: meeting).count == 1)
+    #expect(try await audioFiles(store, meeting).count == 1)
     await recognizer.setFailure(false)
     await model.recoverTranscript()
     #expect(model.draft?.transcript.count == 1)
@@ -525,8 +547,11 @@ struct MeetingModelTests {
       (.microphone, 0.5, [Float](repeating: 0.1, count: 16_000)),
       (.system, 0, [Float](repeating: 0.1, count: 16_000)),
     ]
+    let recognizer = MeetingTestRecognizer()
+    await recognizer.setText(
+      "We agreed to launch the beta on Monday and Priya sends the results by Friday.")
     let model = MeetingModel(
-      store: MeetingStore(directory: directory), recognizer: MeetingTestRecognizer(),
+      store: MeetingStore(directory: directory), recognizer: recognizer,
       summarizer: MeetingTestSummarizer(), makeCapture: { capture }, reserveSpeech: { true },
       releaseSpeech: {})
     await model.start()
@@ -551,14 +576,12 @@ struct MeetingModelTests {
     await recognizer.setFailure(true)
     let model = MeetingModel(
       store: store, recognizer: recognizer, summarizer: MeetingTestSummarizer(),
-      makeCapture: { MeetingTestCapture() }, reserveSpeech: { true }, releaseSpeech: {})
+      makeCapture: { MeetingTestCapture() }, reserveSpeech: { true }, releaseSpeech: {},
+      transcriptionRetryDelay: .zero)
     await model.start()
     await model.stop()
-    #expect(model.transcriptionFailed && model.draft?.transcript.isEmpty == true)
-    await model.recoverTranscript()
-    #expect(model.transcriptionFailed)
-    await model.recoverTranscript()
-    // The third failure is recorded truthfully and no longer blocks the meeting.
+    // Three attempts in place, then a truthful failure segment that no longer blocks the meeting.
+    #expect(await recognizer.count == 3)
     #expect(!model.transcriptionFailed && model.failedSegmentCount == 1)
     let meeting = try #require(model.draft)
     #expect(try await store.record(id: meeting.id)?.transcript.first?.isFailed == true)
@@ -585,11 +608,10 @@ struct MeetingModelTests {
     await recognizer.setFailure(true)
     let model = MeetingModel(
       store: store, recognizer: recognizer, summarizer: MeetingTestSummarizer(),
-      makeCapture: { MeetingTestCapture() }, reserveSpeech: { true }, releaseSpeech: {})
+      makeCapture: { MeetingTestCapture() }, reserveSpeech: { true }, releaseSpeech: {},
+      transcriptionRetryDelay: .zero)
     await model.start()
     await model.stop(summarize: false)
-    await model.recoverTranscript()
-    await model.recoverTranscript()
     let meeting = try #require(model.draft)
     #expect(try await audioFiles(store, meeting).count == 1)
     await model.clearAudio(includingFailed: true)
@@ -753,15 +775,16 @@ struct MeetingModelTests {
     let model = MeetingModel(
       store: MeetingStore(directory: directory), recognizer: recognizer,
       summarizer: MeetingTestSummarizer(), makeCapture: { MeetingTestCapture() },
-      reserveSpeech: { true }, releaseSpeech: {}, recoveryRetryDelay: .milliseconds(20))
+      reserveSpeech: { true }, releaseSpeech: {}, recoveryRetryDelay: .milliseconds(20),
+      transcriptionRetryDelay: .zero)
     await model.start()
     await model.interrupt("Meeting stopped for sleep.")
-    #expect(model.transcriptionFailed)
+    #expect(model.failedSegmentCount == 1)
     await recognizer.setFailure(false)
-    for _ in 0..<200 where model.transcriptionFailed || model.busy {
+    for _ in 0..<200 where model.failedSegmentCount > 0 || model.busy {
       try await Task.sleep(for: .milliseconds(10))
     }
-    #expect(!model.transcriptionFailed)
+    #expect(!model.transcriptionFailed && model.failedSegmentCount == 0)
     #expect(model.draft?.transcript.first?.text == "We agreed to launch on Monday.")
   }
 
@@ -804,5 +827,80 @@ struct MeetingModelTests {
     await model.refreshSummaryAvailability()
     #expect(model.summaryAvailability == .modelMissing)
     await model.stop(summarize: false)
+  }
+
+  @Test func aTransientFailureIsRetriedInPlaceAndLaterChunksContinue() async throws {
+    let directory = temporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let capture = MeetingTestCapture()
+    capture.finalChunks = [
+      (.system, 0, [Float](repeating: 0.1, count: 16_000)),
+      (.system, 20, [Float](repeating: 0.1, count: 16_000)),
+      (.system, 40, [Float](repeating: 0.1, count: 16_000)),
+    ]
+    let recognizer = MeetingTestRecognizer()
+    await recognizer.failNext(4)
+    let model = MeetingModel(
+      store: MeetingStore(directory: directory), recognizer: recognizer,
+      summarizer: MeetingTestSummarizer(), makeCapture: { capture }, reserveSpeech: { true },
+      releaseSpeech: {}, transcriptionRetryDelay: .zero)
+    await model.start()
+    await model.stop(summarize: false)
+    // Chunk 0:00 fails three times and is recorded; chunk 0:20 fails once, then succeeds.
+    let transcript = try #require(model.draft?.transcript).sorted { $0.offset < $1.offset }
+    #expect(transcript.map(\.isFailed) == [true, false, false])
+    #expect(transcript.dropFirst().allSatisfy { $0.text == "We agreed to launch on Monday." })
+    #expect(!model.transcriptionFailed && model.error == nil)
+    #expect(await recognizer.count == 6)
+  }
+
+  @Test func stopRetriesTranscriptionAfterALivePause() async throws {
+    let directory = temporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let store = MeetingStore(directory: directory)
+    let capture = MeetingTestCapture()
+    let model = MeetingModel(
+      store: store, recognizer: MeetingTestRecognizer(), summarizer: MeetingTestSummarizer(),
+      makeCapture: { capture }, reserveSpeech: { true }, releaseSpeech: {})
+    await model.start()
+    let meeting = try #require(model.draft)
+    let file = try await store.audioDirectory(for: meeting.id).appendingPathComponent(
+      "meeting.json")
+    let original = try Data(contentsOf: file)
+    try Data("corrupt".utf8).write(to: file)
+    try capture.emitChunk(offset: 0)
+    for _ in 0..<200 where !model.transcriptionFailed {
+      try await Task.sleep(for: .milliseconds(10))
+    }
+    #expect(model.transcriptionFailed)
+    try original.write(to: file)
+    await model.stop(summarize: false)
+    #expect(!model.transcriptionFailed)
+    #expect(try await store.record(id: meeting.id)?.transcript.count == 2)
+  }
+
+  @Test func unreadableChunkBecomesAFailureInsteadOfBlocking() async throws {
+    let directory = temporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let store = MeetingStore(directory: directory)
+    let capture = MeetingTestCapture()
+    let model = MeetingModel(
+      store: store, recognizer: MeetingTestRecognizer(), summarizer: MeetingTestSummarizer(),
+      makeCapture: { capture }, reserveSpeech: { true }, releaseSpeech: {},
+      transcriptionRetryDelay: .zero)
+    await model.start()
+    let id = UUID()
+    let folder = try #require(capture.directory)
+    try Data("damaged".utf8).write(
+      to: folder.appendingPathComponent("\(id.uuidString)_mic_40000.vani-audio"))
+    await model.stop(summarize: false)
+    let failed = try #require(model.draft?.transcript.first { $0.id == id })
+    #expect(failed.isFailed && failed.source == .microphone && failed.offset == 40)
+    #expect(failed.duration == 0)
+    #expect(model.draft?.transcript.contains { $0.isSpeech } == true)
+    #expect(!model.transcriptionFailed)
+    #expect(
+      FileManager.default.fileExists(
+        atPath: folder.appendingPathComponent("\(id.uuidString)_mic_40000.vani-audio").path))
   }
 }

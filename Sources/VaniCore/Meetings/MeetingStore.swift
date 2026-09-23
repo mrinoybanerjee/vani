@@ -17,8 +17,11 @@ public actor MeetingStore {
     let modified: Date
   }
   private var lastWritten: Written?
-  /// Chunk files are write-once, so their offsets can be remembered after one read.
+  /// Chunk files are write-once, so offsets of older chunks (whose names carry no offset) can be
+  /// remembered by file name after one read.
   private var chunkOffsets: [String: TimeInterval] = [:]
+  /// Hidden temporary files older than this are crash leftovers, never an in-progress write.
+  static let staleTemporaryFileAge: TimeInterval = 60 * 60
 
   public init(directory: URL? = nil) {
     self.directory =
@@ -34,6 +37,8 @@ public actor MeetingStore {
       at: directory, includingPropertiesForKeys: nil)
     var records: [MeetingRecord] = []
     for folder in folders where UUID(uuidString: folder.lastPathComponent) != nil {
+      try Self.validateDirectory(folder)
+      Self.removeStaleTemporaryFiles(in: folder)
       if let record = try Self.readRecord(in: folder) { records.append(record) }
     }
     return records.sorted { $0.createdAt > $1.createdAt }
@@ -94,31 +99,33 @@ public actor MeetingStore {
 
   public func audioDirectory(for id: UUID) throws -> URL { try folder(for: id) }
 
-  /// Saved audio without a transcript segment (failure placeholders count as segments), in
-  /// recording order: offset, then ID. Unreadable chunks sort last, so they cannot hold back
-  /// the rest of the meeting.
+  /// Saved chunks without a transcript segment (failure segments count as segments), in
+  /// recording order: offset, then ID. Offsets come from the file name; only older chunks are
+  /// decoded, once. Unreadable older chunks sort last. Files not named as Vani chunks are
+  /// ignored and left untouched.
   public func pendingAudioFiles(for meeting: MeetingRecord) throws -> [URL] {
     let folder = try folder(for: meeting.id)
-    let completed = Set(meeting.transcript.map { $0.id.uuidString })
+    let completed = Set(meeting.transcript.map(\.id))
     let files = try FileManager.default.contentsOfDirectory(
       at: folder, includingPropertiesForKeys: nil
     )
-    .filter { $0.pathExtension == "vani-audio" }
+    .filter { $0.pathExtension == MeetingAudioChunk.fileExtension }
     guard files.count <= 1440 else { throw MeetingError.invalidData }
-    let pending = files.filter { !completed.contains($0.deletingPathExtension().lastPathComponent) }
-    var offsets: [String: TimeInterval] = [:]
-    for file in pending {
-      offsets[file.lastPathComponent] = chunkOffset(file, meetingID: meeting.id)
+    var pending: [(file: URL, offset: TimeInterval)] = []
+    for file in files {
+      guard let identity = MeetingAudioChunk.identity(fromFileName: file.lastPathComponent),
+        !completed.contains(identity.id)
+      else { continue }
+      pending.append((file, identity.offset ?? legacyOffset(file, meetingID: meeting.id)))
     }
     return pending.sorted {
-      let left = offsets[$0.lastPathComponent] ?? .infinity
-      let right = offsets[$1.lastPathComponent] ?? .infinity
-      return left == right ? $0.lastPathComponent < $1.lastPathComponent : left < right
-    }
+      $0.offset == $1.offset
+        ? $0.file.lastPathComponent < $1.file.lastPathComponent : $0.offset < $1.offset
+    }.map(\.file)
   }
 
-  private func chunkOffset(_ file: URL, meetingID: UUID) -> TimeInterval {
-    let key = file.standardizedFileURL.path
+  private func legacyOffset(_ file: URL, meetingID: UUID) -> TimeInterval {
+    let key = file.lastPathComponent
     if let offset = chunkOffsets[key] { return offset }
     guard let offset = try? readAudio(file, meetingID: meetingID).offset else { return .infinity }
     chunkOffsets[key] = offset
@@ -135,7 +142,10 @@ public actor MeetingStore {
     }
     let chunk = try PropertyListDecoder().decode(
       MeetingAudioChunk.self, from: Self.read(file, limit: 2_000_000))
-    guard chunk.id.uuidString == file.deletingPathExtension().lastPathComponent else {
+    guard let identity = MeetingAudioChunk.identity(fromFileName: file.lastPathComponent),
+      identity.id == chunk.id, identity.source ?? chunk.source == chunk.source,
+      abs((identity.offset ?? chunk.offset) - chunk.offset) < 0.001
+    else {
       throw MeetingError.invalidData
     }
     return chunk
@@ -145,10 +155,30 @@ public actor MeetingStore {
     let folder = try folder(for: id)
     for file in try FileManager.default.contentsOfDirectory(
       at: folder, includingPropertiesForKeys: nil)
-    where file.pathExtension == "vani-audio" {
+    where MeetingAudioChunk.identity(fromFileName: file.lastPathComponent) != nil {
       try Self.validateRegularFile(file, limit: 2_000_000)
       try FileManager.default.removeItem(at: file)
-      chunkOffsets[file.standardizedFileURL.path] = nil
+      chunkOffsets[file.lastPathComponent] = nil
+    }
+  }
+
+  /// Best effort: removes hidden `.tmp` files left by a crash more than an hour ago. Recent ones
+  /// may belong to a write in progress and are kept.
+  static func removeStaleTemporaryFiles(in folder: URL, now: Date = Date()) {
+    guard
+      let files = try? FileManager.default.contentsOfDirectory(
+        at: folder, includingPropertiesForKeys: [.contentModificationDateKey, .isRegularFileKey],
+        options: [])
+    else { return }
+    for file in files where isTemporaryFileName(file.lastPathComponent) {
+      guard
+        let values = try? file.resourceValues(forKeys: [
+          .contentModificationDateKey, .isRegularFileKey,
+        ]),
+        values.isRegularFile == true, let modified = values.contentModificationDate,
+        now.timeIntervalSince(modified) > staleTemporaryFileAge
+      else { continue }
+      try? FileManager.default.removeItem(at: file)
     }
   }
 
@@ -165,7 +195,7 @@ public actor MeetingStore {
     let file = folder.appendingPathComponent("meeting.json")
     guard FileManager.default.fileExists(atPath: file.path) else {
       // A crash during the first atomic write leaves only a hidden temporary file, which never
-      // became a record. It is ignored, not deleted: a live capture may be writing beside it.
+      // became a record. It is ignored here; `load` removes it once it is over an hour old.
       let names = try FileManager.default.contentsOfDirectory(atPath: folder.path)
       if names.allSatisfy(isTemporaryFileName) { return nil }
       throw MeetingError.invalidData

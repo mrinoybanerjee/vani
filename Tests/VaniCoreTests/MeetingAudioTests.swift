@@ -137,7 +137,16 @@ struct MeetingAudioTests {
   private func savedChunks(in directory: URL) throws -> [MeetingAudioChunk] {
     try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
       .filter { $0.pathExtension == "vani-audio" }
-      .map { try PropertyListDecoder().decode(MeetingAudioChunk.self, from: Data(contentsOf: $0)) }
+      .map { file in
+        let chunk = try PropertyListDecoder().decode(
+          MeetingAudioChunk.self, from: Data(contentsOf: file))
+        // New chunk names carry the ID, source and offset used to order pending audio.
+        #expect(file.lastPathComponent == chunk.fileName)
+        let identity = MeetingAudioChunk.identity(fromFileName: file.lastPathComponent)
+        #expect(identity?.id == chunk.id && identity?.source == chunk.source)
+        #expect(abs((identity?.offset ?? -1) - chunk.offset) < 0.001)
+        return chunk
+      }
       .sorted { $0.offset < $1.offset }
   }
 

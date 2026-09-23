@@ -10,44 +10,88 @@ struct MeetingTranscriptionTests {
     .init(id: UUID(), source: source, offset: offset, duration: duration, text: text)
   }
 
-  @Test func micSegmentRepeatingNearbyMacAudioIsMarkedAsEcho() {
-    let remote = "We should ship the beta on Monday, and Priya will send the results by Friday."
+  /// Adds segments in arrival order, as live transcription does.
+  private func mark(_ segments: [MeetingTranscriptSegment]) -> [MeetingTranscriptSegment] {
+    var detector = MeetingEchoDetector()
+    return segments.reduce(into: []) { transcript, segment in
+      transcript = detector.adding(segment, to: transcript)
+    }
+  }
+
+  private let remote =
+    "Okay so the quarterly plan is mostly settled. We should ship the beta on Monday, and Priya will send the test results by Friday. After that we review the onboarding flow together."
+
+  @Test func longMicSegmentRepeatingConcurrentMacAudioIsMarkedAsEcho() {
     let echo = segment(
-      .microphone, 0.4, "we should ship the beta on monday and priya will send results by friday")
-    let own = segment(
-      .microphone, 20, "I think Monday works for me, but let me check with legal first.")
-    let marked = MeetingEchoDetector.marking([echo, own, segment(.system, 0, remote)])
-    #expect(marked[0].isEcho)
-    #expect(!marked[1].isEcho && marked[1].echoOfSystemAudio == nil)
-    #expect(marked[2].echoOfSystemAudio == nil)
+      .microphone, 0.3,
+      "we should ship the beta on monday and priya will send the test results by friday after that we review the onboarding flow together"
+    )
+    let marked = mark([segment(.system, 0, remote), echo])
+    #expect(marked[1].isEcho && marked[0].echoOfSystemAudio == nil)
     // Echo marking hides text from display; it never changes or removes it.
-    #expect(marked[0].text == echo.text && marked.count == 3)
+    #expect(marked[1].text == echo.text && marked.count == 2)
   }
 
   @Test func echoIsDetectedWhenMacAudioArrivesAfterTheMicSegment() {
-    let mic = segment(
-      .microphone, 2, "Thanks everyone, the launch review is moved to Thursday afternoon.")
-    var transcript = MeetingEchoDetector.marking([mic])
+    let echo = segment(
+      .microphone, 0.3,
+      "the quarterly plan is mostly settled we should ship the beta on monday and priya will send the test results by friday"
+    )
+    var detector = MeetingEchoDetector()
+    var transcript = detector.adding(echo, to: [])
     #expect(!transcript[0].isEcho)
-    transcript = MeetingEchoDetector.marking(
-      transcript + [
-        segment(.system, 0, "Thanks everyone. The launch review is moved to Thursday afternoon.")
-      ])
+    transcript = detector.adding(segment(.system, 0, remote), to: transcript)
     #expect(transcript[0].isEcho)
   }
 
-  @Test func echoDetectionIsConservative() {
-    let remote = segment(.system, 0, "The budget for next quarter is approved by finance today.")
-    // Distant in time, mixed with the user's own speech, or too short to judge.
-    let distant = segment(
-      .microphone, 40, "The budget for next quarter is approved by finance today.")
+  @Test func shortRepliesThatRepeatAQuestionStayVisible() {
+    let cases = [
+      (
+        "Can you send the deck by Friday? We need it before the board meeting next week.",
+        "I'll send the deck by Friday."
+      ),
+      (
+        "So to confirm, we ship it on Tuesday, right? Unless QA finds something.",
+        "Yes, ship it on Tuesday."
+      ),
+      (
+        "I think we will cut the pricing page from this release and revisit it in May.",
+        "Agreed. We will cut the pricing page."
+      ),
+    ]
+    for (question, reply) in cases {
+      let marked = mark([segment(.system, 0, question), segment(.microphone, 2, reply)])
+      #expect(!marked[1].isEcho, "\(reply)")
+    }
+  }
+
+  @Test func userWordsMixedWithEchoAndMisalignedChunksStayVisible() {
+    // A chunk holding the user's own sentence plus 20 seconds of echo is never hidden.
     let mixed = segment(
       .microphone, 0,
-      "Great news. The budget for next quarter is approved. I want to hire two engineers and plan the offsite for May."
+      "Hang on, I disagree about the date. we should ship the beta on monday and priya will send the test results by friday"
     )
-    let short = segment(.microphone, 0, "Approved today.")
-    let marked = MeetingEchoDetector.marking([remote, distant, mixed, short])
+    // The same words from a Mac-audio chunk that does not overlap in time are not echo.
+    let later = segment(
+      .microphone, 40,
+      "we should ship the beta on monday and priya will send the test results by friday")
+    let marked = mark([segment(.system, 0, remote), mixed, later])
     #expect(marked.filter(\.isEcho).isEmpty)
+  }
+
+  @Test func addingSegmentsStaysFastForTwoHourMeetings() {
+    var detector = MeetingEchoDetector()
+    var transcript: [MeetingTranscriptSegment] = []
+    let start = ContinuousClock.now
+    for index in 0..<720 {
+      let offset = Double(index) * 10
+      transcript = detector.adding(segment(.system, offset, remote, duration: 10), to: transcript)
+      transcript = detector.adding(
+        segment(.microphone, offset + 0.2, "unrelated words from me number \(index) today okay"),
+        to: transcript)
+    }
+    #expect(transcript.count == 1_440)
+    #expect(ContinuousClock.now - start < .seconds(5))
   }
 
   @Test func vocabularyAppliesDictionaryAndOnlyEnabledPersonalization() {

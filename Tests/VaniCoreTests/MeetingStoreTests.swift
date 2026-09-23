@@ -134,6 +134,64 @@ struct MeetingStoreTests {
     try Data("partial".utf8).write(to: leftover)
     #expect(try await store.load() == [meeting])
     #expect(FileManager.default.fileExists(atPath: leftover.path))
+    // Leftovers older than an hour are removed when meetings load; recent ones may be in use.
+    let old = saved.appendingPathComponent(".\(UUID().uuidString).tmp")
+    try Data("old".utf8).write(to: old)
+    try FileManager.default.setAttributes(
+      [.modificationDate: Date(timeIntervalSinceNow: -7_200)], ofItemAtPath: old.path)
+    try FileManager.default.setAttributes(
+      [.modificationDate: Date(timeIntervalSinceNow: -7_200)], ofItemAtPath: leftover.path)
+    #expect(try await store.load() == [meeting])
+    #expect(!FileManager.default.fileExists(atPath: old.path))
+    #expect(!FileManager.default.fileExists(atPath: leftover.path))
+    #expect(
+      try FileManager.default.contentsOfDirectory(atPath: saved.path).filter {
+        $0.hasSuffix(".tmp")
+      }.count == 1)
+  }
+
+  @Test func chunkFileNamesOrderPendingAudioWithoutDecoding() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let store = MeetingStore(directory: directory)
+    let meeting = MeetingRecord()
+    try await store.save(meeting)
+    let folder = try await store.audioDirectory(for: meeting.id)
+    let chunk = MeetingAudioChunk(source: .microphone, offset: 12.5, samples: [0.1])
+    #expect(chunk.fileName == "\(chunk.id.uuidString)_mic_12500.vani-audio")
+    let encoder = PropertyListEncoder()
+    encoder.outputFormat = .binary
+    try MeetingStore.write(encoder.encode(chunk), to: folder.appendingPathComponent(chunk.fileName))
+    // Damaged content still sorts by the offset in its name; foreign files are ignored.
+    let damaged = UUID()
+    try Data("damaged".utf8).write(
+      to: folder.appendingPathComponent("\(damaged.uuidString)_sys_5000.vani-audio"))
+    let foreign = folder.appendingPathComponent("notes.vani-audio")
+    try Data("not a chunk".utf8).write(to: foreign)
+    let pending = try await store.pendingAudioFiles(for: meeting)
+    #expect(
+      pending.map(\.lastPathComponent) == [
+        "\(damaged.uuidString)_sys_5000.vani-audio", chunk.fileName,
+      ])
+    #expect(try await store.readAudio(pending[1], meetingID: meeting.id).id == chunk.id)
+    // A name that disagrees with the content is rejected.
+    let renamed = folder.appendingPathComponent("\(chunk.id.uuidString)_sys_12500.vani-audio")
+    try FileManager.default.copyItem(at: pending[1], to: renamed)
+    await #expect(throws: MeetingError.self) {
+      try await store.readAudio(renamed, meetingID: meeting.id)
+    }
+    try FileManager.default.removeItem(at: renamed)
+    for name in [
+      "x.vani-audio", "\(chunk.id.uuidString)_mic_-1.vani-audio",
+      "\(chunk.id.uuidString)_cam_1.vani-audio", "\(chunk.id.uuidString).txt",
+    ] {
+      #expect(MeetingAudioChunk.identity(fromFileName: name) == nil)
+    }
+    #expect(
+      MeetingAudioChunk.identity(fromFileName: "\(chunk.id.uuidString).vani-audio")?.offset == nil)
+    try await store.deleteAudio(for: meeting.id)
+    #expect(try await store.pendingAudioFiles(for: meeting).isEmpty)
+    #expect(FileManager.default.fileExists(atPath: foreign.path))
   }
 
   @Test func repeatedSavesKeepAValidPreviousCopyAndDetectOutsideChanges() async throws {
