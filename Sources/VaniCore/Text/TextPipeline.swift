@@ -227,6 +227,10 @@ public struct TextPipeline: Sendable {
     result = capitalizeSentenceStarts(
       in: cleanSpacing(in: result, preserveBoundaryNewlines: true)
     )
+    let tidier = SpeechTidier()
+    result = result.split(separator: "\n", omittingEmptySubsequences: false)
+      .map { tidier.tidy(String($0)) }
+      .joined(separator: "\n")
     for replacement in protected.replacements {
       result = result.replacingOccurrences(of: replacement.token, with: replacement.value)
     }
@@ -275,11 +279,16 @@ public struct TextPipeline: Sendable {
 
     let source = text as NSString
     let mutable = NSMutableString(string: text)
+    let quoteMarkOffsets = (0..<source.length).filter {
+      Self.doubleQuoteMarks.contains(source.character(at: $0))
+    }
     let matches = expression.matches(
       in: text,
       range: NSRange(location: 0, length: source.length)
     )
     for match in matches.reversed() {
+      // Quoted speech stays verbatim: He said "um, no".
+      if quoteMarkOffsets.count(where: { $0 < match.range.location }) % 2 == 1 { continue }
       let previousCharacter = character(
         in: source,
         atUTF16Offset: match.range.location - 1
@@ -532,6 +541,7 @@ public struct TextPipeline: Sendable {
   private static let snippetBoundaryPunctuation: Set<Character> = [
     ",", ".", ";", ":", "!", "?", "…",
   ]
+  private static let doubleQuoteMarks: Set<unichar> = [0x22, 0x201C, 0x201D]
   private static let sentenceTerminators: Set<Character> = [".", "!", "?"]
   private static let openingSentenceDelimiters: Set<Character> = [
     "\"", "'", "“", "‘", "(", "[", "{",
