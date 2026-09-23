@@ -37,8 +37,8 @@ Apple notarization.
   Control-Command-C copy shortcuts (Option-Command, Control-Option or off in Settings)
 - Consecutive dictations are separated by a space automatically
 - Voice-triggered snippets with multiline expansions
-- Opt-in local Smart Formatting for conservative fillers, spoken punctuation,
-  sentence casing, and line breaks
+- Opt-in local Smart Formatting for spoken punctuation, line breaks, sentence casing,
+  spoken lists, and deletion-only cleanup of fillers, false starts, and stumbles
 - Optional bounded history, disabled by default
 - Local Notes with editing, search, plain-text export, and recoverable deletion
 - Explicit meeting capture, live transcript, personal notes and local summaries (macOS 15+)
@@ -84,13 +84,18 @@ The first source build can take several minutes. After Vani opens in the menu ba
 Snippets and Smart Formatting are available in Settings. Smart Formatting is off by
 default; enabling it recognizes `comma`, `period` or `full stop`, `question mark`,
 `exclamation mark` or `exclamation point`, `colon`, `semicolon`, `new line` or
-`next line`, and `new paragraph` or `next paragraph`. It removes only standalone `um`,
-`uh`, and `erm` fillers and leaves links, email addresses, and snippet expansions
-unchanged. Saying `scratch that` or `delete that`, set off by a pause or punctuation,
-removes the sentence (or comma-separated clause) you just said. "Period" and "colon"
-used as nouns ("the grace period", "a colon") stay words. Spoken command words are
-otherwise interpreted as commands while the setting is on; turn it off when you need
-them literally.
+`next line`, and `new paragraph` or `next paragraph`. It also tidies speech with fixed,
+local rules that only delete words: fillers (`um`, `uh`, `er`, and `like` or `you know`
+set off by commas), explicit self-corrections ("on Monday, no wait, Tuesday" becomes
+"on Tuesday"), restarts ("we need to, we have to"), and stumbled repetitions ("I I think").
+It always keeps interjections such as "ah" and "hmm", emphasis ("day after day after
+day"), numbers, quoted text, links, email addresses, and snippet expansions, and it never
+adds punctuation. Lists you dictate with explicit cues ("first", "number one", "bullet
+point") become numbered or bulleted lines. Saying `scratch that` or `delete that`, set
+off by a pause or punctuation, removes the sentence (or comma-separated clause) you just
+said. "Period" and "colon" used as nouns ("the grace period", "a colon") stay words.
+Spoken command words are otherwise interpreted as commands while the setting is on; turn
+it off when you need them literally.
 
 Learning is also off by default. After dictation, **Teach** opens a focused window for
 correcting the last transcript. If that window is already open, Vani brings it forward

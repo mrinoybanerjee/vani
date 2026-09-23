@@ -75,7 +75,11 @@ and loading, it verifies the exact file set, sizes, and SHA-256 digests. `TextPi
 performs conservative whitespace cleanup, user-defined exact phrase replacement,
 one-pass snippet expansion, and optional deterministic Smart Formatting. Formatting
 recognizes a small fixed English command set; it does not use an LLM, surrounding
-application context, or network access.
+application context, or network access. Its last step, `SpeechTidier`, runs on each line
+while links, email addresses and snippet expansions are still protected tokens. Its
+rules only delete words (fillers, explicit self-corrections, restarts and stumbled
+repetitions), except for rendering explicitly spoken lists and fixing casing; they keep
+interjections, emphasis, numbers and quoted text and never add punctuation.
 
 Opt-in personalization stores only confirmed correction spans in a separate versioned,
 bounded, atomic local profile. The profile actor serializes teach, delete, and reset

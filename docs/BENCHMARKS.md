@@ -263,3 +263,27 @@ nothing for over 3 s (2.1 of 5.4 s kept); a default change silently stopped the 
 audio ended at 3.3 s). Limits: the aggregate input shares the built-in microphone's clock, so
 a true sample-rate mismatch between two physical microphones was not exercised; Bluetooth
 headsets, sleep during a meeting and multi-hour live calls were not tested on hardware.
+
+## Speech cleanup — September 23, 2026
+
+Smart Formatting's deletion-only cleanup (`SpeechTidier`) was chosen on DisfluencySpeech
+real audio: Parakeet Unified transcribed each recording, Smart Formatting and then the
+cleanup ran on the result, and word error is measured against the human fluent reference.
+The rules were frozen before the fresh set was scored, once. Lower is better.
+
+| Set | Items | Smart Formatting | With cleanup | Meant words removed | Negations lost | Words added |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| DisfluencySpeech held-out test | 250 | 11.0% | **7.4%** | 1.7 per 1k | 0 | 0 |
+| DisfluencySpeech train sample, untouched | 250 | 12.2% | **8.1%** | 1.0 per 1k | 0 | — |
+
+On LibriSpeech test-clean fluent read speech (300 utterances), the cleanup changed 0.3%
+of utterances. The rules ran in about 0.6 ms p50 per utterance in the Python reference.
+The Swift port matches that reference byte for byte on 1,825 inputs (Parakeet
+transcripts after Smart Formatting, LibriSpeech and synthetic dictation cases) and measured
+0.17–0.18 ms p50 and 0.54–0.75 ms p99 per line over two release test builds on an Apple M4 (16 GB,
+macOS 26.6.2, Swift 6.1.2).
+
+Rejected alternatives: a local LLM (qwen3 1.7B) reached 11.2%, altered 5.7% of items,
+added words in 2% and took about 1 s per utterance; a DistilBERT disfluency tagger reached
+7.5% but removed 17.7 meant words per 1k, lost negations and was trained on
+non-commercial data. These sets do not measure dictated lists or spoken commands.
