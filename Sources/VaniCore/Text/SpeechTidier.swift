@@ -49,7 +49,7 @@ struct SpeechTidier: Sendable {
         index += 1
         continue
       }
-      if Self.fillers.contains(word.norm) {
+      if Self.isFiller(word.norm) {
         words = delete(index..<index + 1, from: words)
         continue
       }
@@ -522,6 +522,12 @@ struct SpeechTidier: Sendable {
 
   // "ah", "hmm" and "mm" are interjections that carry tone ("Ah, I see"), not fillers.
   private static let fillers: Set<String> = ["um", "umm", "uh", "uhh", "uhm", "er", "erm"]
+
+  /// Also covers drawn-out fillers ("ummm", "uhhh", "ermmm").
+  private static func isFiller(_ norm: String) -> Bool {
+    fillers.contains(norm)
+      || norm.range(of: #"^(?:u+m+|u+h+|u+h+m+|e+r+m+)$"#, options: .regularExpression) != nil
+  }
 
   // Words that can end a complete clause ("we like that,", "I can,"). A restart ending in
   // one is only a stumble when it is at most two words ("can you, could you").

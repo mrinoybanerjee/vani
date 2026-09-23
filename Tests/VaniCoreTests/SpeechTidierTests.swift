@@ -23,6 +23,16 @@ func speechCleanupRemovesFillersAndRepairsTheirCommas() {
 }
 
 @Test
+func speechCleanupRepairsCommasAndSentencesAroundUmAndUh() {
+  #expect(formatted("It was, um, fine.") == "It was fine.")
+  #expect(formatted("Well, um, I think so.") == "Well, I think so.")
+  #expect(formatted("Um, I think so.") == "I think so.")
+  #expect(formatted("It's, uh, it's fine.") == "It's fine.")
+  #expect(formatted("Ummm, sure.") == "Sure.")
+  #expect(formatted("That's it, um.") == "That's it.")
+}
+
+@Test
 func speechCleanupKeepsMeaningfulLikeAndYouKnow() {
   #expect(formatted("I like it.") == "I like it.")
   #expect(formatted("You know the answer.") == "You know the answer.")

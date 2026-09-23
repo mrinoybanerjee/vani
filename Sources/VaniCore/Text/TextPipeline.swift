@@ -192,7 +192,7 @@ public struct TextPipeline: Sendable {
 
   private func applySmartFormatting(to text: String) -> String {
     let protected = protectTechnicalTokens(in: text)
-    var result = removeFillers(in: protected.text)
+    var result = removeGluedFillers(in: protected.text)
 
     let structuralCommands: [(phrase: String, replacement: String)] = [
       ("new paragraph", "\n\n"),
@@ -228,9 +228,13 @@ public struct TextPipeline: Sendable {
       in: cleanSpacing(in: result, preserveBoundaryNewlines: true)
     )
     let tidier = SpeechTidier()
-    result = result.split(separator: "\n", omittingEmptySubsequences: false)
-      .map { tidier.tidy(String($0)) }
-      .joined(separator: "\n")
+    // A line that held only a filler is now empty; collapse the extra line breaks.
+    result = cleanSpacing(
+      in: result.split(separator: "\n", omittingEmptySubsequences: false)
+        .map { tidier.tidy(String($0)) }
+        .joined(separator: "\n"),
+      preserveBoundaryNewlines: true
+    )
     for replacement in protected.replacements {
       result = result.replacingOccurrences(of: replacement.token, with: replacement.value)
     }
@@ -269,7 +273,9 @@ public struct TextPipeline: Sendable {
     return (String(mutable), replacements)
   }
 
-  private func removeFillers(in text: String) -> String {
+  /// Removes fillers glued to punctuation ("well,um,maybe"), which `SpeechTidier` cannot
+  /// see as words. Standalone fillers are left to it so it can repair their commas.
+  private func removeGluedFillers(in text: String) -> String {
     let pattern =
       #"(?i)(?<!["# + Self.lexicalCharacterPattern + #"])(?:um+|uh+|erm+)"#
       + #"(?!["# + Self.lexicalCharacterPattern + #"])(?:[ \t]*[,.;:!?…]+)?"#
@@ -297,6 +303,9 @@ public struct TextPipeline: Sendable {
         in: source,
         atUTF16Offset: NSMaxRange(match.range)
       )
+      if previousCharacter?.isWhitespace ?? true, nextCharacter?.isWhitespace ?? true {
+        continue
+      }
       let replacement =
         if let previousCharacter, let nextCharacter,
           nextCharacter.isLetter || nextCharacter.isNumber,
