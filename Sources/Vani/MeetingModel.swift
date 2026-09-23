@@ -539,7 +539,7 @@ final class MeetingModel: ObservableObject {
         var text = ""
         var failed = false
         if audio.duration >= Self.minimumSpeechDuration,
-          loudestFrameRMS(audio.samples) >= Self.silenceThreshold
+          audio.loudestFrameRootMeanSquare >= Self.silenceThreshold
         {
           let vocabulary = vocabulary()
           do {

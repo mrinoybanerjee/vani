@@ -219,8 +219,10 @@ struct MeetingAudioTests {
     for index in 100_000..<108_000 { samples[index] = 0.012 * Float(sin(Double(index) * 0.07)) }
     let audio = CapturedAudio(samples: samples)
     #expect(audio.rootMeanSquare < 0.0015)
-    #expect(loudestFrameRMS(samples) > 0.008)
-    #expect(loudestFrameRMS([Float](repeating: 0.001, count: 16_000)) < 0.004)
-    #expect(loudestFrameRMS([]) == 0)
+    #expect(CapturedAudio(samples: samples).loudestFrameRootMeanSquare > 0.008)
+    #expect(
+      CapturedAudio(samples: [Float](repeating: 0.001, count: 16_000)).loudestFrameRootMeanSquare
+        < 0.004)
+    #expect(CapturedAudio(samples: []).loudestFrameRootMeanSquare == 0)
   }
 }

@@ -34,24 +34,6 @@ public struct MeetingVocabulary: Sendable, Equatable {
   }
 }
 
-/// Loudest RMS across non-overlapping 30 ms frames. A whole-chunk average hides a short quiet
-/// phrase inside 20 seconds of silence; one frame of speech energy is enough to transcribe.
-public func loudestFrameRMS(_ samples: [Float], sampleRate: Int = CapturedAudio.targetSampleRate)
-  -> Float
-{
-  let frame = max(1, sampleRate * 30 / 1000)
-  var loudest: Float = 0
-  var start = 0
-  while start < samples.count {
-    let end = min(start + frame, samples.count)
-    var sum: Float = 0
-    for index in start..<end { sum += samples[index] * samples[index] }
-    loudest = max(loudest, (sum / Float(end - start)).squareRoot())
-    start = end
-  }
-  return loudest
-}
-
 /// Text-based, conservative speaker-echo detection. Without headphones the microphone hears
 /// remote speech that ScreenCaptureKit also captures as Mac audio, so the same words appear twice.
 public enum MeetingEchoDetector {
