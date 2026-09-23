@@ -92,7 +92,8 @@ struct DesignStateTests {
     #expect(arguments.count == 3)
     #expect(arguments[0] == "-c")
     #expect(arguments[1].contains("kill -0 4242"))
-    #expect(arguments[1].contains("exec /usr/bin/open -n \"$0\""))
+    #expect(arguments[1].contains("exec /usr/bin/open \"$0\""))
+    #expect(!arguments[1].contains("open -n"))
     // The path is passed as an argument, never interpolated into the script.
     #expect(!arguments[1].contains("Vani Beta"))
     #expect(arguments[2] == "/Applications/Vani Beta.app")

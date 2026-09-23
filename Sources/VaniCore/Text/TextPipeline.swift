@@ -304,8 +304,9 @@ public struct TextPipeline: Sendable {
   }
 
   /// "Scratch that" deletes the sentence or clause spoken just before it. It counts as a
-  /// command only when set off by punctuation or at the end, so "please scratch that
-  /// item" stays literal. Nothing before the previous sentence boundary is touched.
+  /// command only when it stands alone: it starts the text, a sentence or a clause, and is
+  /// followed by punctuation or the end. "I told him to delete that." and "Please scratch
+  /// that item" stay literal. Nothing before the previous sentence boundary is touched.
   private func applyScratchThat(in text: String) -> String {
     let lexical = Self.lexicalCharacterPattern
     let pattern =
@@ -322,10 +323,10 @@ public struct TextPipeline: Sendable {
       else { return result }
       let before = source.substring(to: match.range.location)
       let trimmedBefore = before.trimmingCharacters(in: .whitespaces)
-      let setOffBefore = trimmedBefore.last.map { ",.;:!?…\n".contains($0) } ?? true
-      let setOffAfter =
+      let startsUnit = trimmedBefore.last.map { ",.;:!?…\n".contains($0) } ?? true
+      let endsUnit =
         match.range(at: 1).length > 0 || NSMaxRange(match.range) == source.length
-      guard setOffBefore || setOffAfter else {
+      guard startsUnit, endsUnit else {
         searchStart = NSMaxRange(match.range)
         continue
       }

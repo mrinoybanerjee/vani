@@ -352,13 +352,29 @@ enum AppRelauncher {
   static func shellArguments(bundlePath: String, processIdentifier: Int32) -> [String] {
     let script =
       "i=0; while kill -0 \(processIdentifier) 2>/dev/null; do i=$((i+1)); "
-      + "[ $i -gt 300 ] && exit 0; sleep 0.1; done; exec /usr/bin/open -n \"$0\""
+      + "[ $i -gt 300 ] && exit 0; sleep 0.1; done; exec /usr/bin/open \"$0\""
     return ["-c", script, bundlePath]
+  }
+
+  /// The helper waiting for this process to exit. One at a time, so repeated clicks cannot
+  /// schedule several reopens; `open` without `-n` never starts a second instance.
+  @MainActor private static var pending: Process?
+
+  /// Called when a quit is cancelled (for example, a note could not be saved), so a later,
+  /// ordinary quit does not unexpectedly reopen Vani.
+  @MainActor
+  static func cancelPendingRelaunch() {
+    if let pending, pending.isRunning { pending.terminate() }
+    pending = nil
   }
 
   /// Schedules the reopen, then quits. Returns false without quitting if scheduling failed.
   @MainActor
   static func relaunch(quit: () -> Void) -> Bool {
+    if let pending, pending.isRunning {
+      quit()
+      return true
+    }
     let process = Process()
     process.executableURL = URL(fileURLWithPath: "/bin/sh")
     process.arguments = shellArguments(
@@ -369,6 +385,7 @@ enum AppRelauncher {
     } catch {
       return false
     }
+    pending = process
     quit()
     return true
   }

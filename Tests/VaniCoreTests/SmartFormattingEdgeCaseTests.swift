@@ -323,7 +323,11 @@ private struct DeterministicGenerator {
 @Test(arguments: [
   ("Send it Friday. scratch that. Send it Monday.", "Send it Monday."),
   ("Hello team, send the deck, scratch that, send the notes", "Hello team, send the notes"),
-  ("Book the room scratch that", ""),
+  ("Book the room. scratch that", ""),
+  ("I told him to delete that.", "I told him to delete that."),
+  ("Can you delete that, then send it?", "Can you delete that, then send it?"),
+  ("Delete that file now. OK", "Delete that file now. OK"),
+  ("Hi Sam. Please scratch that. Thanks!", "Hi Sam. Please scratch that. Thanks!"),
   ("First point. Second point. delete that", "First point."),
   ("Please scratch that item off the list", "Please scratch that item off the list"),
   ("Draft one. scratch that. Draft two. scratch that. Draft three.", "Draft three."),

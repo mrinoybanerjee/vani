@@ -800,11 +800,21 @@ final class AppCoordinator: ObservableObject {
   /// Discards the recording that is starting or active. Never inserts text.
   private func cancelDictation(reason: String) {
     guard recordingInProgress else { return }
-    resetHoldGesture()
+    // While the key is still down, its release belongs to the discarded recording and must
+    // not finish anything; otherwise the gesture simply resets.
+    if holdGesture.isHolding {
+      secondTapTask?.cancel()
+      secondTapTask = nil
+      holdGesture.cancelWhilePressed()
+      setHandsFreeLocked(false)
+    } else {
+      resetHoldGesture()
+    }
     let startTask = captureStartTask
     captureStartGeneration &+= 1
-    let generation = captureStartGeneration
     startTask?.cancel()
+    // A new press may start immediately; the session rejects it until this start settles.
+    captureStartTask = nil
     VaniLog.event(category: .capture, code: "capture_cancel_\(reason)")
     Task { [weak self] in
       guard let self else { return }
@@ -813,7 +823,6 @@ final class AppCoordinator: ObservableObject {
       await session.cancelDictation()
       await startTask?.value
       await session.cancelDictation()
-      if captureStartGeneration == generation { captureStartTask = nil }
       updateRecordingActive()
     }
   }
@@ -859,6 +868,7 @@ final class AppCoordinator: ObservableObject {
 
   private func apply(_ newSnapshot: SessionSnapshot) {
     let previous = snapshot.phase
+    let previousHistoryRevision = snapshot.historyRevision
     snapshot = newSnapshot
     updateRecordingActive()
     if previous == .listening, newSnapshot.phase != .listening, captureStartTask == nil {
@@ -877,7 +887,7 @@ final class AppCoordinator: ObservableObject {
         cuePlayer.play(cue)
       }
     }
-    if previous == .inserting, newSnapshot.phase == .ready {
+    if newSnapshot.historyRevision != previousHistoryRevision {
       Task { [weak self] in
         await self?.refreshHistory()
       }

@@ -11,6 +11,8 @@ struct HoldGesture: Equatable {
     case locked
     /// The press that stopped a locked recording has not been released yet.
     case stoppingWhilePressed
+    /// The recording was cancelled while the key was held; its release does nothing.
+    case cancelledWhilePressed
   }
 
   enum Action: Equatable {
@@ -41,12 +43,14 @@ struct HoldGesture: Equatable {
       return .finishRecording
     case .awaitingSecondTap:
       guard recordingInProgress else {
-        state = .idle
-        return .none
+        // The first tap's recording already ended (it failed or was cancelled): this press
+        // is a fresh hold, not the second half of a double-tap.
+        state = .holding(since: now)
+        return .beginRecording
       }
       state = .lockedWhilePressed
       return .lockHandsFree
-    case .idle, .holding, .lockedWhilePressed, .stoppingWhilePressed:
+    case .idle, .holding, .lockedWhilePressed, .stoppingWhilePressed, .cancelledWhilePressed:
       state = .holding(since: now)
       return .beginRecording
     }
@@ -66,7 +70,7 @@ struct HoldGesture: Equatable {
     case .lockedWhilePressed:
       state = .locked
       return .none
-    case .stoppingWhilePressed:
+    case .stoppingWhilePressed, .cancelledWhilePressed:
       state = .idle
       return .none
     case .idle, .awaitingSecondTap, .locked:
@@ -82,4 +86,7 @@ struct HoldGesture: Equatable {
   }
 
   mutating func reset() { state = .idle }
+
+  /// Escape or a key chord discarded the recording while the key is still held.
+  mutating func cancelWhilePressed() { state = .cancelledWhilePressed }
 }

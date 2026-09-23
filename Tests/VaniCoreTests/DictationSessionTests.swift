@@ -1650,3 +1650,27 @@ func anEmptyTranscriptDismissesItselfAndDoesNotBlockTheNextDictation() async thr
   await session.endDictation()
   #expect(insertion.insertedTexts == ["next"])
 }
+
+@Test @MainActor
+func historyRevisionAdvancesOnlyAfterTheHistoryWriteLands() async throws {
+  let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+  defer { try? FileManager.default.removeItem(at: directory) }
+  let history = TranscriptHistoryStore(directory: directory)
+  let session = DictationSession(
+    audioCapture: MockAudioCapture(),
+    speechRecognizer: MockSpeechRecognizer(results: [.success(speechResult("kept"))]),
+    textInserter: MockTextInserter(results: [.success(.verified)]),
+    focusProvider: MockFocusProvider(),
+    history: history,
+    diagnostics: DiagnosticStore(),
+    settings: VaniSettings(historyEnabled: true)
+  )
+
+  #expect(await session.prepareModels(allowDownload: false))
+  #expect(await session.snapshot().historyRevision == 0)
+  await session.beginDictation()
+  await session.endDictation()
+
+  #expect(await session.snapshot().historyRevision == 1)
+  #expect(try await history.load().map(\.text) == ["kept"])
+}

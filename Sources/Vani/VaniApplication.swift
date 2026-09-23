@@ -97,6 +97,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     terminationInProgress = true
     Task {
       guard await coordinator.saveNotesBeforeTermination() else {
+        AppRelauncher.cancelPendingRelaunch()
         terminationInProgress = false
         sender.reply(toApplicationShouldTerminate: false)
         return

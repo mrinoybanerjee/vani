@@ -37,6 +37,7 @@ public actor DictationSession {
   private var recordingLimitGeneration: UInt64 = 0
   private var isRecordingLimitApproaching = false
   private var didUnexpectedlyTruncateCurrentAudio = false
+  private var historyRevision: UInt64 = 0
 
   public init(
     audioCapture: any AudioCapturing,
@@ -684,6 +685,8 @@ public actor DictationSession {
     if let historyLimit {
       do {
         try await history.append(TranscriptHistoryEntry(text: transcript), limit: historyLimit)
+        historyRevision &+= 1
+        await publishSnapshot()
       } catch {
         await diagnostics.record(
           DiagnosticEvent(category: .storage, code: "history_write_failed")
@@ -773,7 +776,8 @@ public actor DictationSession {
       hasRecoverableTranscript: payload?.transcript != nil,
       recoverableTranscript: payload?.transcript,
       insertionFeedback: insertionFeedback,
-      isRecordingLimitApproaching: isRecordingLimitApproaching
+      isRecordingLimitApproaching: isRecordingLimitApproaching,
+      historyRevision: historyRevision
     )
   }
 

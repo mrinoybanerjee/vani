@@ -69,8 +69,8 @@ private let start = ContinuousClock().now
     recordingInProgress: true)
   #expect(
     gesture.press(at: start.advanced(by: .milliseconds(200)), recordingInProgress: false)
-      == .none)
-  #expect(gesture.state == .idle)
+      == .beginRecording)
+  #expect(gesture.isHolding)
 }
 
 @Test func quickTapWithoutARecordingDoesNotWaitForASecondTap() {
@@ -80,4 +80,18 @@ private let start = ContinuousClock().now
     gesture.release(
       at: start.advanced(by: .milliseconds(100)), handsFreeEnabled: true,
       recordingInProgress: false) == .finishRecording)
+}
+
+@Test func releasingAfterACancelledHoldFinishesNothing() {
+  var gesture = HoldGesture()
+  _ = gesture.press(at: start, recordingInProgress: false)
+  gesture.cancelWhilePressed()
+  #expect(
+    gesture.release(
+      at: start.advanced(by: .seconds(2)), handsFreeEnabled: true, recordingInProgress: true)
+      == .none)
+  #expect(gesture.state == .idle)
+  #expect(
+    gesture.press(at: start.advanced(by: .seconds(3)), recordingInProgress: false)
+      == .beginRecording)
 }
