@@ -17,12 +17,25 @@ someone who wants private English voice typing without an account or cloud servi
 
 ## Experience direction
 
-- Native system typography, materials, colors, controls, and accessibility behavior
-- Compact menu-bar popover and one settings window
+- Warm native visual system defined in [DESIGN.md](../DESIGN.md), with adaptive light/dark paper surfaces and restrained green accents
+- Compact menu-bar popover, one shared [Meetings, Notes and Settings workspace](WORKSPACE_DESIGN.md),
+  and a focused correction window shown only when the user chooses Teach
+- Optional Notes uses the shared sidebar and a spacious editor with search, title/text previews,
+  keyboard creation/find/save, export, and Recently Deleted.
+  Category changes save first; persistence status and save failures remain visible.
 - Non-activating upper-right overlay with listening, processing, success, and error
   states, positioned below the menu bar so it does not cover common text composers
 - Restrained 120 to 180 ms state transitions with Reduce Motion support
-- No onboarding carousel, dashboard, editor, decorative cards, or hidden background work
+- No onboarding carousel, dashboard, document editor inside the dictation popover,
+  decorative cards, or hidden background work
+
+## Meetings
+
+The user-approved all-local meeting workspace has a searchable library and three separate
+views: My notes, Transcript and Summary. Recording starts only after an explicit disclosure.
+The microphone and Mac audio are captured together; dictation pauses while meetings own
+the shared speech recognizer. Stop finishes pending transcription before summary generation.
+Failures retain source material and provide a retry. See [MEETINGS_DESIGN.md](MEETINGS_DESIGN.md).
 
 ## Reliability baseline
 
@@ -38,3 +51,6 @@ someone who wants private English voice typing without an account or cloud servi
 The app feels invisible when it works and explicit when it cannot. It is faster to
 understand than built-in dictation, easier to trust than a cloud product, and
 reliable enough that a user does not check whether every sentence survived.
+
+The full presentation redesign and competitor research are recorded in
+[REDESIGN_2026-09-12.md](REDESIGN_2026-09-12.md).

@@ -9,6 +9,7 @@ struct ModelArtifact: Sendable, Equatable {
 
 struct ModelIntegrityVerifier: Sendable {
   static let parakeetV2Revision = "ee09c569f73759e6d44c9bd16766f477b2b36d39"
+  static let parakeetCtc110MRevision = "accdafd8cf8a2ff1cabe3c11e54416b405d409aa"
 
   static let parakeetV2 = ModelIntegrityVerifier(artifacts: [
     ModelArtifact(
@@ -77,6 +78,45 @@ struct ModelIntegrityVerifier: Sendable {
     ModelArtifact(
       path: "parakeet_vocab.json", byteCount: 18_762,
       sha256: "57019fe3c745772ca83a1b048a4bb951cd51329504ea33d4d83316b96e279a97"),
+  ])
+
+  static let parakeetCtc110M = ModelIntegrityVerifier(artifacts: [
+    ModelArtifact(
+      path: "AudioEncoder.mlmodelc/analytics/coremldata.bin", byteCount: 243,
+      sha256: "8906c823e9bb3bf6b16d9f0308f98cd70573526333ad85dd767dc3f9ae6b25fa"),
+    ModelArtifact(
+      path: "AudioEncoder.mlmodelc/coremldata.bin", byteCount: 505,
+      sha256: "a88b002b58193b4c31211754cdfdf220a85f9651dc61caf336ab84400cbc191a"),
+    ModelArtifact(
+      path: "AudioEncoder.mlmodelc/metadata.json", byteCount: 3_456,
+      sha256: "4f288bfe5cbe867ef1e592cdae33578b2fe59ada69182fc12209879558f985c2"),
+    ModelArtifact(
+      path: "AudioEncoder.mlmodelc/model.mil", byteCount: 1_060_924,
+      sha256: "2f84ef93a69115e55f3b5d8ce695b3c937de1833d4d229620634fae967cd587e"),
+    ModelArtifact(
+      path: "AudioEncoder.mlmodelc/weights/weight.bin", byteCount: 100_778_304,
+      sha256: "af0734b4a5d7465ad9e8bb170f0c53c5e6b91ebb75a9bdf88d3f59ae4ad6aebd"),
+    ModelArtifact(
+      path: "MelSpectrogram.mlmodelc/analytics/coremldata.bin", byteCount: 243,
+      sha256: "22f2a8cba1de25c984050566b534a1d8caf22a82f9fe6c1c6f3149a0dd7e8ae3"),
+    ModelArtifact(
+      path: "MelSpectrogram.mlmodelc/coremldata.bin", byteCount: 330,
+      sha256: "3a32ec67c76aa0aa2faef518413c311493e89aeb7fa11289fa4b8653ab8a160c"),
+    ModelArtifact(
+      path: "MelSpectrogram.mlmodelc/metadata.json", byteCount: 1_962,
+      sha256: "5e11d21a65c02bcfc37db43e941978e5d60d59e0efeadfda08e41f33b4f835d3"),
+    ModelArtifact(
+      path: "MelSpectrogram.mlmodelc/model.mil", byteCount: 12_584,
+      sha256: "0a7cb5693b39667295218bac5c7c09053f6bcd4b32699a83d06ac35d14ac6b79"),
+    ModelArtifact(
+      path: "MelSpectrogram.mlmodelc/weights/weight.bin", byteCount: 567_712,
+      sha256: "0a89c055bfde9022029d3cc59a23e949385e063974460d8eaec3a7614c3eaaa8"),
+    ModelArtifact(
+      path: "tokenizer.json", byteCount: 360_106,
+      sha256: "9f7c517c0bf644b1b690ab037bab4d4c53aecd38e047e7154d011013ab9160db"),
+    ModelArtifact(
+      path: "vocab.json", byteCount: 16_086,
+      sha256: "319d386eead79aadc80df9c3ecc8340d1a727efb7c02a8847eb940380dd61e1f"),
   ])
 
   let artifacts: [ModelArtifact]

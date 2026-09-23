@@ -6,6 +6,37 @@ import Testing
 private let textPipeline = TextPipeline()
 
 @Test @MainActor
+func malformedAccessibilityRangesAndCountsCannotOverflowInsertionVerification() {
+  for (location, length) in [(-1, 0), (0, -1), (NSNotFound, 0), (Int.max - 1, 2)] {
+    #expect(TextInsertionObservation.validatedRange(location: location, length: length) == nil)
+  }
+  #expect(
+    TextInsertionObservation.validatedRange(location: 3, length: 2)
+      == NSRange(location: 3, length: 2))
+
+  let after = TextInsertionObservation(
+    value: nil, selectedRange: NSRange(location: 4, length: 0), characterCount: nil)
+  // A valid existing range can still overflow when the inserted length is added.
+  let nearLimit = TextInsertionObservation(
+    value: nil, selectedRange: NSRange(location: Int.max - 1, length: 0), characterCount: nil)
+  #expect(
+    !SystemTextInserter.verifyInsertion("word", before: nearLimit, after: after, insertedText: nil))
+
+  let countAtLimit = TextInsertionObservation(
+    value: nil, selectedRange: NSRange(location: 0, length: 0), characterCount: Int.max)
+  let countedAfter = TextInsertionObservation(
+    value: nil, selectedRange: NSRange(location: 4, length: 0), characterCount: Int.max)
+  #expect(
+    !SystemTextInserter.verifyInsertion(
+      "word", before: countAtLimit, after: countedAfter, insertedText: nil))
+  let invalid = TextInsertionObservation(
+    value: nil, selectedRange: NSRange(location: NSNotFound, length: 0), characterCount: -1)
+  #expect(invalid.selectedRange == nil && invalid.characterCount == nil)
+  #expect(
+    !SystemTextInserter.verifyInsertion("word", before: invalid, after: after, insertedText: nil))
+}
+
+@Test @MainActor
 func readsPlainAndAttributedAccessibilityText() {
   #expect(SystemTextInserter.readableString(from: "plain") == "plain")
   #expect(

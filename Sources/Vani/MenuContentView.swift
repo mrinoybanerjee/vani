@@ -7,31 +7,30 @@ struct MenuContentView: View {
   var body: some View {
     VStack(alignment: .leading, spacing: 0) {
       header
-        .padding(16)
+        .padding(20)
       Divider()
       content
-        .padding(16)
+        .padding(24)
       Divider()
       footer
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
     }
-    .frame(width: 340)
+    .frame(width: 360)
+    .background(VaniTheme.paper)
+    .tint(VaniTheme.accent)
   }
 
   private var header: some View {
     HStack(spacing: 10) {
-      VaniStatusMark(phase: coordinator.snapshot.phase, size: 22)
-        .foregroundStyle(.teal)
-        .frame(width: 28, height: 28)
-        .accessibilityHidden(true)
-      VStack(alignment: .leading, spacing: 2) {
-        Text("Vani")
-          .font(.headline)
-        Text(statusLabel)
-          .font(.caption)
-          .foregroundStyle(.secondary)
-      }
+      VaniWordmark(size: 24)
+      Spacer()
+      Label(
+        statusLabel,
+        systemImage: coordinator.canDictate ? "checkmark.circle" : "circle.dotted"
+      )
+      .font(.caption)
+      .foregroundStyle(.secondary)
       Spacer()
       if coordinator.snapshot.phase == .listening {
         Circle()
@@ -51,6 +50,14 @@ struct MenuContentView: View {
       PreparationView()
     case .ready where coordinator.setupIncomplete:
       SetupView()
+    case .ready where coordinator.meetingOwnsSpeech:
+      VStack(alignment: .leading, spacing: 12) {
+        Text("Meeting in progress").font(.system(size: 25, design: .serif))
+        Text("Meeting audio is being captured or transcribed. Dictation returns when it finishes.")
+          .font(.caption).foregroundStyle(.secondary)
+        Button("Open meeting", systemImage: "waveform") { coordinator.showMeetings() }
+          .buttonStyle(.borderedProminent)
+      }
     case .ready, .listening, .transcribing, .inserting:
       ReadyView()
     case .setup, .disabled:
@@ -60,12 +67,15 @@ struct MenuContentView: View {
 
   private var footer: some View {
     HStack {
-      SettingsLink {
-        Image(systemName: "gearshape")
-          .frame(width: 24, height: 24)
-      }
-      .buttonStyle(.plain)
-      .help("Settings")
+      Button("Meetings", systemImage: "waveform") { coordinator.showMeetings() }
+        .buttonStyle(.plain).font(.caption).frame(height: 28)
+      Button("Notes", systemImage: "note.text") { coordinator.showNotes() }
+        .buttonStyle(.plain)
+        .font(.caption)
+        .frame(height: 28)
+      Button("Settings", systemImage: "gearshape") { coordinator.showSettings() }
+        .buttonStyle(.plain).font(.caption).frame(height: 28)
+        .help("Settings")
 
       Spacer()
 
@@ -77,10 +87,12 @@ struct MenuContentView: View {
       }
       .buttonStyle(.plain)
       .help("Quit Vani")
+      .accessibilityLabel("Quit Vani")
     }
   }
 
   private var statusLabel: String {
+    if coordinator.meetingOwnsSpeech { return "Meeting in progress" }
     if coordinator.snapshot.phase == .ready, coordinator.setupIncomplete {
       return "Setup"
     }
@@ -101,19 +113,23 @@ private struct SetupView: View {
   @EnvironmentObject private var coordinator: AppCoordinator
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 14) {
+    VStack(alignment: .leading, spacing: 16) {
+      Text("Set up Vani").font(.system(size: 23, design: .serif))
       PermissionRow(
         title: "Microphone",
+        detail: "Hear you while you dictate",
         state: coordinator.microphonePermission,
         action: coordinator.requestMicrophonePermission
       )
       PermissionRow(
         title: "Accessibility",
+        detail: "Insert words where you are writing",
         state: coordinator.accessibilityPermission,
         action: coordinator.requestAccessibilityPermission
       )
       PermissionRow(
         title: "Input Monitoring",
+        detail: "Respond to your dictation shortcut",
         state: coordinator.inputMonitoringPermission,
         action: coordinator.requestInputMonitoringPermission
       )
@@ -140,6 +156,7 @@ private struct SetupView: View {
 
 private struct PermissionRow: View {
   let title: String
+  let detail: String
   let state: PermissionState
   let action: () -> Void
 
@@ -148,8 +165,10 @@ private struct PermissionRow: View {
       Image(systemName: state.isGranted ? "checkmark.circle.fill" : "circle")
         .foregroundStyle(state.isGranted ? .green : .secondary)
         .frame(width: 20)
-      Text(title)
-        .font(.system(size: 13, weight: .medium))
+      VStack(alignment: .leading, spacing: 3) {
+        Text(title).font(.system(size: 13, weight: .medium))
+        Text(detail).font(.caption).foregroundStyle(.secondary)
+      }
       Spacer()
       if !state.isGranted {
         Button("Allow", action: action)
@@ -180,33 +199,34 @@ private struct ReadyView: View {
 
   var body: some View {
     VStack(alignment: .leading, spacing: 12) {
-      HStack(spacing: 12) {
-        Image(systemName: phaseIcon)
-          .font(.system(size: 22, weight: .medium))
-          .foregroundStyle(phaseColor)
-          .frame(width: 32, height: 32)
-        VStack(alignment: .leading, spacing: 3) {
+      VStack(alignment: .leading, spacing: 18) {
+        if coordinator.snapshot.phase == .ready {
+          HStack(spacing: 10) {
+            ShortcutKey(label: coordinator.settings.shortcut.label)
+            Text("Hold to speak · Release to insert")
+              .font(.caption).foregroundStyle(.secondary)
+          }
+        } else {
           Text(phaseTitle)
-            .font(.system(size: 14, weight: .semibold))
-          if coordinator.snapshot.phase == .ready {
-            Text(coordinator.settings.shortcut.label)
-              .font(.caption)
-              .foregroundStyle(.secondary)
+            .font(.system(size: 28, weight: .regular, design: .serif))
+          HStack(spacing: 10) {
+            Image(systemName: phaseIcon).foregroundStyle(phaseColor)
+            Text(
+              coordinator.snapshot.phase == .listening
+                ? "Release your shortcut when you’re done." : "Processing on this Mac…"
+            )
+            .font(.caption).foregroundStyle(.secondary)
+            if coordinator.snapshot.phase != .listening { ProgressView().controlSize(.small) }
           }
         }
-        Spacer()
-        if coordinator.snapshot.phase == .transcribing
-          || coordinator.snapshot.phase == .inserting
-        {
-          ProgressView()
-            .controlSize(.small)
-        }
-      }
+      }.padding(.bottom, 8)
 
       if coordinator.snapshot.phase == .ready,
         coordinator.snapshot.hasLastTranscript
       {
         Divider()
+        Text("LAST DICTATION").font(.system(size: 10, weight: .semibold)).tracking(1.2)
+          .foregroundStyle(.secondary)
         HStack(spacing: 8) {
           Button("Paste Last", systemImage: "arrow.down.doc") {
             coordinator.pasteLastTranscript()
@@ -219,7 +239,22 @@ private struct ReadyView: View {
           }
           .help("Copy last transcript (Control-Command-C)")
 
+          if coordinator.settings.personalizationEnabled {
+            Button("Teach", systemImage: "brain.head.profile") {
+              coordinator.prepareToShowTeachWindow()
+              Task {
+                guard let candidate = await coordinator.correctionCandidate() else { return }
+                coordinator.showTeachWindow(for: candidate)
+              }
+            }
+            .help("Correct the last transcript and teach Vani")
+          }
+
           Spacer()
+        }
+        .controlSize(.small)
+        Button("Save as Note", systemImage: "note.text.badge.plus") {
+          coordinator.showNotes(saveLastTranscript: true)
         }
         .controlSize(.small)
       }
@@ -228,7 +263,6 @@ private struct ReadyView: View {
 
   private var phaseTitle: String {
     switch coordinator.snapshot.phase {
-    case .ready: "Ready"
     case .listening: "Listening"
     case .transcribing: "Transcribing"
     case .inserting: "Inserting text"
@@ -245,7 +279,7 @@ private struct ReadyView: View {
   }
 
   private var phaseColor: Color {
-    coordinator.snapshot.phase == .listening ? .red : .teal
+    coordinator.snapshot.phase == .listening ? .red : VaniTheme.accent
   }
 }
 

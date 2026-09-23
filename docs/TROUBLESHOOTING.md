@@ -19,11 +19,15 @@ privacy access to the exact signed application identity that requested it.
 
 ## Permissions stopped working after an update
 
-Vani needs three separate entries under System Settings > Privacy & Security:
+Dictation needs three separate entries under System Settings > Privacy & Security:
 
 - Microphone
 - Accessibility
 - Input Monitoring
+
+Meetings also need Screen & System Audio Recording permission on macOS 15 or later.
+Starting a meeting requests that permission; the three dictation grants alone do not
+authorize Mac audio capture.
 
 macOS attaches these permissions to the app's signing identity. If the setup doctor
 reported that `Vani Local Development` was missing, the installer used an ad-hoc
@@ -111,6 +115,16 @@ If it is missing, press `Cmd+V`; the transcript remains on the clipboard and Van
 already ready for another recording.
 
 ## Reporting a problem
+
+If saving a learned correction reports a storage error, keep the correction window open
+and retry after restoring disk access. A failed attempt to preserve an unreadable profile
+does not replace the original file with an empty profile.
+
+For meeting problems, keep the saved audio until transcript recovery succeeds. Use
+**Meeting actions → Recover transcript** to retry pending chunks. If summaries fail,
+start the local Ollama service with `qwen3:4b` installed and choose **Generate summary**.
+Notes and transcript remain available without that service. See [meeting setup](../README.md#meeting-notes)
+and [storage and recovery limits](MEETINGS_DESIGN.md#persistence-and-recovery).
 
 Use the GitHub bug template and include the Vani commit, Mac model, macOS version, and
 content-free diagnostic codes. Never attach transcript text, recordings, clipboard

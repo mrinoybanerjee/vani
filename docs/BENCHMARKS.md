@@ -63,6 +63,16 @@ the bounded prefix, and converted it to 16 kHz in 0.251 seconds of test time. A 
 `swift test --skip-build` invocation reported 861,995,008 bytes (about 822 MiB) maximum
 RSS for the test command. This stress case excludes the speech model.
 
+On 2026-08-16, seven repeated release runs of the 5.855-second fixture measured a
+0.0797-second median engine duration at the pre-personalization commit and a
+0.0793-second median with personalization disabled, an effectively unchanged default
+path. Five optional acoustic-personalization runs measured 0.1768 seconds median with
+a matching term and 0.1756 seconds without one. The `swift test` command peaked at
+about 974 MiB for the base fixture and 1,282 MiB with the optional CTC model loaded;
+these are test-process peaks, not installed-app RSS. The acoustic path remains
+experimental because this single fixture validates execution and conservative fallback,
+not an accuracy improvement across representative speakers and terms.
+
 | Metric | Target | Current published result |
 | --- | ---: | --- |
 | Cached-model fixture | Faster than real time | 1.391 s for 5.855 s audio |
@@ -76,3 +86,13 @@ RSS for the test command. This stress case excludes the speech model.
 | 20-minute capture boundary | Bounded and transcribable | 0.251 s test; about 822 MiB command RSS |
 
 Unmeasured rows are release evidence gaps, not implied passes.
+
+## Meeting append microbenchmark — September 12, 2026
+
+On the M4 Mac with Swift 6.1.2 (`swiftc -O`), 20,000 alternating callbacks appended
+320 float samples each across two source buffers, flushing every 320,000 samples.
+Both variants retained exactly 6,400,000 samples. Three runs measured 0.178–0.253 s
+for copy-out/append/write-back, versus 0.00121–0.00131 s for Dictionary's in-place
+modifying subscript. This isolates avoidable Array copy-on-write; it excludes PCM
+conversion, disk writes, capture, transcription and summaries. It is not a whole-app
+speedup or a competitive benchmark. Functional tests separately verify persisted samples.

@@ -5,6 +5,21 @@ struct TextInsertionObservation: Equatable {
   let value: String?
   let selectedRange: NSRange?
   let characterCount: Int?
+
+  init(value: String?, selectedRange: NSRange?, characterCount: Int?) {
+    self.value = value
+    self.selectedRange = selectedRange.flatMap {
+      Self.validatedRange(location: $0.location, length: $0.length)
+    }
+    self.characterCount = characterCount.flatMap { $0 >= 0 ? $0 : nil }
+  }
+
+  static func validatedRange(location: Int, length: Int) -> NSRange? {
+    guard location >= 0, location != NSNotFound, length >= 0,
+      length <= Int.max - location
+    else { return nil }
+    return NSRange(location: location, length: length)
+  }
 }
 
 private enum TextInsertionEvidence: String {
@@ -143,6 +158,11 @@ public final class SystemTextInserter: TextInserting {
           throw VaniFailure.clipboardChanged
         }
       }
+    } catch PasteShortcutError.interruptedAfterDispatch {
+      guard pasteboard.changeCount == transcriptChangeCount else {
+        throw VaniFailure.clipboardChanged
+      }
+      return .unverifiedClipboardPreserved
     } catch {
       if pasteboard.changeCount == transcriptChangeCount {
         _ = original.restore(to: pasteboard)
@@ -273,7 +293,9 @@ public final class SystemTextInserter: TextInserting {
 
     guard let beforeRange = before.selectedRange,
       let afterRange = after.selectedRange,
-      afterRange.location == beforeRange.location + insertedLength,
+      let expectedRange = TextInsertionObservation.validatedRange(
+        location: beforeRange.location, length: insertedLength),
+      afterRange.location == NSMaxRange(expectedRange),
       afterRange.length == 0
     else {
       return nil
@@ -284,6 +306,9 @@ public final class SystemTextInserter: TextInserting {
     else {
       return .cursorMovement
     }
+    guard beforeCount >= beforeRange.length,
+      insertedLength <= Int.max - (beforeCount - beforeRange.length)
+    else { return nil }
     return afterCount == beforeCount - beforeRange.length + insertedLength
       ? .cursorAndCount
       : nil
@@ -343,8 +368,8 @@ public final class SystemTextInserter: TextInserting {
   ) async throws -> TextInsertionEvidence? {
     let clock = ContinuousClock()
     let deadline = clock.now.advanced(by: verificationTimeout)
-    let insertedRange = before.selectedRange.map {
-      NSRange(location: $0.location, length: text.utf16.count)
+    let insertedRange = before.selectedRange.flatMap {
+      TextInsertionObservation.validatedRange(location: $0.location, length: text.utf16.count)
     }
     while true {
       try verifyFocus(target)

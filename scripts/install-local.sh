@@ -39,11 +39,8 @@ CONFIGURATION=release "$ROOT/scripts/build-app.sh"
 if pgrep -x Vani >/dev/null 2>&1; then
     osascript -e 'tell application id "com.mrinoy.vani" to quit' >/dev/null 2>&1 || true
     if ! wait_for_vani_exit; then
-        pkill -TERM -x Vani >/dev/null 2>&1 || true
-        if ! wait_for_vani_exit; then
-            echo "error: Vani is still running. Quit it, then run the installer again." >&2
-            exit 1
-        fi
+        echo "error: Vani is still running. Save any unfinished notes, quit Vani, then run the installer again." >&2
+        exit 1
     fi
 fi
 
@@ -96,10 +93,10 @@ printf '%s\n' \
     '2. Allow Microphone, Accessibility, and Input Monitoring access.' \
     '3. Download the verified 443 MiB English speech model.' \
     '4. In System Settings > Keyboard, set "Press Globe key to" to "Do Nothing".' \
-    '5. Hold Left Fn, speak, then release to insert text.'
+    '5. Hold Left Fn, speak, then release to insert text. Other hold keys are available in Settings.'
 
-if ! codesign -dv --verbose=4 "$DESTINATION_APP" 2>&1 \
-    | grep -F 'Authority=Vani Local Development' >/dev/null; then
+if codesign -dv --verbose=4 "$DESTINATION_APP" 2>&1 \
+    | grep -F 'Signature=adhoc' >/dev/null; then
     printf '\nNote: this app is ad-hoc signed. macOS may treat the next rebuilt version as a different app and reset its privacy permissions.\n'
     printf 'Prevent this with the free setup in docs/BUILDING.md#stable-local-signing.\n'
     printf 'If permission switches will not stay enabled, follow docs/TROUBLESHOOTING.md#permissions-stopped-working-after-an-update.\n'

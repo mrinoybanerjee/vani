@@ -7,6 +7,10 @@ struct TextInsertionRead: Equatable {
   let isSecureTextField: Bool
 }
 
+enum PasteShortcutError: Error {
+  case interruptedAfterDispatch
+}
+
 @MainActor
 protocol TextInsertionEnvironment: AnyObject {
   var canPostPaste: Bool { get }
@@ -172,13 +176,19 @@ final class SystemTextInsertionEnvironment: TextInsertionEnvironment {
 
       try beforePaste()
       guard sequence.postKeyDown() else { throw CancellationError() }
-      if interval > .zero {
-        try await Task.sleep(for: interval)
-      }
+      do {
+        if interval > .zero {
+          try await Task.sleep(for: interval)
+        }
 
-      sequence.postKeyUp()
-      if interval > .zero {
-        try await Task.sleep(for: interval)
+        sequence.postKeyUp()
+        if interval > .zero {
+          try await Task.sleep(for: interval)
+        }
+      } catch {
+        // The target may not have consumed the queued paste yet. Its clipboard
+        // payload must survive cancellation once V keyDown has been dispatched.
+        throw PasteShortcutError.interruptedAfterDispatch
       }
 
       sequence.postCommandUp()
@@ -223,7 +233,7 @@ final class SystemTextInsertionEnvironment: TextInsertionEnvironment {
     else {
       return nil
     }
-    return NSRange(location: range.location, length: range.length)
+    return TextInsertionObservation.validatedRange(location: range.location, length: range.length)
   }
 
   private func integerAttribute(_ attribute: CFString, on element: AXUIElement) -> Int? {

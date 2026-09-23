@@ -11,6 +11,7 @@ private func normalizedPhrase(_ phrase: String) -> String {
 }
 
 public enum HoldShortcut: String, Codable, CaseIterable, Sendable, Equatable, Identifiable {
+  case leftControl
   case rightOption
   case rightCommand
   case function
@@ -19,6 +20,7 @@ public enum HoldShortcut: String, Codable, CaseIterable, Sendable, Equatable, Id
 
   public var label: String {
     switch self {
+    case .leftControl: "Left Control"
     case .rightOption: "Right Option"
     case .rightCommand: "Right Command"
     case .function: "Left Fn"
@@ -34,10 +36,20 @@ public enum HoldShortcut: String, Codable, CaseIterable, Sendable, Equatable, Id
 
   public func matchesModifierEvent(keyCode: Int64) -> Bool {
     switch self {
+    case .leftControl: keyCode == 59
     case .rightOption: keyCode == 61
     case .rightCommand: keyCode == 54
     case .function: true
     }
+  }
+
+  public func yieldsToCommandChord(
+    keyCode: Int64,
+    keyStateIsPressed: Bool,
+    commandModifierIsSet: Bool
+  ) -> Bool {
+    guard self == .leftControl, keyStateIsPressed else { return false }
+    return keyCode == 54 || keyCode == 55 || (keyCode == 59 && commandModifierIsSet)
   }
 }
 
@@ -104,6 +116,8 @@ public struct VaniSettings: Codable, Sendable, Equatable {
   public var dictionary: [DictionaryEntry]
   public var snippets: [SnippetEntry]
   public var smartFormattingEnabled: Bool
+  public var personalizationEnabled: Bool
+  public var soundFeedbackEnabled: Bool
 
   public init(
     shortcut: HoldShortcut = .function,
@@ -112,7 +126,9 @@ public struct VaniSettings: Codable, Sendable, Equatable {
     historyLimit: Int = 100,
     dictionary: [DictionaryEntry] = [],
     snippets: [SnippetEntry] = [],
-    smartFormattingEnabled: Bool = false
+    smartFormattingEnabled: Bool = false,
+    personalizationEnabled: Bool = false,
+    soundFeedbackEnabled: Bool = true
   ) {
     self.shortcut = shortcut
     self.launchAtLogin = launchAtLogin
@@ -152,6 +168,8 @@ public struct VaniSettings: Codable, Sendable, Equatable {
     }
     self.snippets = boundedSnippets
     self.smartFormattingEnabled = smartFormattingEnabled
+    self.personalizationEnabled = personalizationEnabled
+    self.soundFeedbackEnabled = soundFeedbackEnabled
   }
 
   public static let `default` = VaniSettings()
@@ -164,6 +182,8 @@ public struct VaniSettings: Codable, Sendable, Equatable {
     case dictionary
     case snippets
     case smartFormattingEnabled
+    case personalizationEnabled
+    case soundFeedbackEnabled
   }
 
   public init(from decoder: any Decoder) throws {
@@ -178,7 +198,15 @@ public struct VaniSettings: Codable, Sendable, Equatable {
       smartFormattingEnabled: try container.decodeIfPresent(
         Bool.self,
         forKey: .smartFormattingEnabled
-      ) ?? false
+      ) ?? false,
+      personalizationEnabled: try container.decodeIfPresent(
+        Bool.self,
+        forKey: .personalizationEnabled
+      ) ?? false,
+      soundFeedbackEnabled: try container.decodeIfPresent(
+        Bool.self,
+        forKey: .soundFeedbackEnabled
+      ) ?? true
     )
   }
 }

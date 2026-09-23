@@ -2,7 +2,110 @@
 
 All notable changes follow semantic versioning.
 
-## Unreleased
+## 0.5.0 - 2026-09-13
+
+### Changed
+
+- Open Meetings, Notes and Settings in [one resizable native window](docs/WORKSPACE_DESIGN.md), with a shared sidebar and contextual libraries.
+- Preserve editor and settings drafts across sections; save before navigation, and reveal failed saves when closing.
+- Keep active meeting status visible while using Notes or Settings, and retain the same window on reopen.
+- Route menu-bar actions and Command-comma into the workspace; replace custom meeting tabs with a native keyboard-accessible picker.
+
+### For contributors
+
+- Remove the separate notebook and meeting window controllers and standalone Settings scene. Audio, inference and persistence engines are unchanged.
+
+## 0.4.1 - 2026-09-12
+
+### Fixed
+
+- Preserve unfinished dictionary entries when switching vocabulary sections.
+- Preserve saved corrections when profile reads or quarantine operations fail, and retain the latest confirmed capitalization.
+- Stop the microphone before publishing interrupted-dictation feedback.
+- Reject malformed Accessibility ranges and preserve the transcript clipboard after an interrupted paste dispatch.
+- Make summary cancellation effective during preflight and offer explicit discard after a failed meeting save.
+- Let uninstall wait for graceful shutdown and abort safely when Vani is still running.
+
+### Changed
+
+- Remove promotional UI copy and the unused status-mark implementation.
+- Append meeting audio in place instead of repeatedly copying the accumulated buffer.
+- Validate every shell script during lint and correctly identify ad-hoc signatures during installation.
+
+## 0.4.0 - 2026-09-12
+
+- [Record a meeting](README.md#meeting-notes) with microphone and Mac audio, follow its incremental transcript, keep personal notes, recover saved audio and generate source-quoted summaries through local Ollama.
+- Keep dictation and meeting recording from overlapping, retain drafts after failed saves, and prevent delayed capture events from interrupting a newer meeting.
+- Redesign dictation, Notes, Settings, Teach and recording feedback with a unified native visual system.
+- Add notebook focus mode, note previews, keyboard creation/search and safe category switching.
+
+### For contributors
+
+- Keep notebook presentation, draft coordination and window lifecycle separate while preserving the existing speech and storage engines.
+
+## 0.3.0 - 2026-09-12
+
+### Added
+
+- [Vani Notes](README.md#run-locally): save a dictation or start a blank note, edit and search locally, export
+  plain text, and recover notes from Recently Deleted.
+- Recover a previous saved notebook copy when the current file cannot be read;
+  private atomic storage preserves the unreadable file during explicit recovery.
+
+### Fixed
+
+- Prevent repeated stop and audio-route events from finalizing the same dictation twice.
+- Preserve global learned corrections when teaching the same correction in another app.
+- Keep an unfinished correction visible after a failed save and support Command-S.
+
+### Changed
+
+- Simplified menu and settings labels, empty states, and native editor spacing.
+- Keep note storage separate from recording, insertion, models, and transcript history.
+
+## 0.2.1 - 2026-08-28
+
+### Changed
+
+- Keep the Teach Vani editor visible and preserve an unfinished correction when Teach is
+  selected again
+- Let the correction window expand for larger accessibility text and wrapped content
+
+### Fixed
+
+- Make the Teach Vani correction field accept keyboard input and restore focus whenever
+  Vani becomes active
+- Keep the Teach UI automation fixture isolated from the real learned-corrections profile
+- Prevent repeated Save clicks from counting one correction more than once
+- Make timing-sensitive session coverage deterministic under parallel test execution
+
+## 0.2.0 - 2026-08-16
+
+### Added
+
+- Add opt-in **Teach Vani** correction learning with a transparent local profile,
+  per-entry deletion, and full reset
+- Add optional experimental acoustic vocabulary boosting through a pinned Parakeet CTC
+  110M model after a term is confirmed twice
+- Add correction-diff, profile-storage, concurrency, model-integrity, false-positive,
+  Debug privacy-gate, and real Release-model integration coverage
+- Add Left Control as a hold-to-dictate shortcut option
+- Add short, locally generated start and stop recording sounds with a Settings toggle
+
+### Changed
+
+- Store learned corrections in a versioned, bounded, private, atomic Application
+  Support file rather than transcript history or preferences
+- Bound model downloads during transfer before verifying exact size and SHA-256 content
+
+### Fixed
+
+- Keep optional vocabulary failures from breaking a successful base transcription
+- Disable FluidAudio acoustic rescoring in Debug builds, where version 0.15.5 enables
+  transcript-bearing dependency logs
+- Cancel a delayed cue-backed recording start when the hold key is released
+- Let Command-Control Last Transcript chords take precedence over the Left Control hold key
+- Prevent learned corrections from composing and expanding a snippet trigger
 
 ## 0.1.4 - 2026-07-31
 
