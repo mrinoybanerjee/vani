@@ -33,8 +33,16 @@ public struct LocalMeetingSummarizer: MeetingSummarizing {
   static let maximumResponseBytes = 262_144
 
   private let protocolClasses: [AnyClass]?
-  public init() { protocolClasses = nil }
-  init(protocolClasses: [AnyClass]) { self.protocolClasses = protocolClasses }
+  /// The installed model to use. Only tests comparing local models choose another one.
+  private let modelName: String
+  public init() {
+    protocolClasses = nil
+    modelName = Self.model
+  }
+  init(protocolClasses: [AnyClass], model: String = LocalMeetingSummarizer.model) {
+    self.protocolClasses = protocolClasses
+    modelName = model
+  }
 
   struct Item: Codable, Sendable {
     let text: String
@@ -497,7 +505,7 @@ public struct LocalMeetingSummarizer: MeetingSummarizing {
     system: String, prompt: String, schema: [String: Any], keepAlive: String
   ) async throws -> Output {
     let body: [String: Any] = [
-      "model": Self.model, "stream": false, "think": false, "format": schema,
+      "model": modelName, "stream": false, "think": false, "format": schema,
       "keep_alive": keepAlive,
       "options": ["temperature": 0, "num_ctx": 8192, "num_predict": 1800],
       "system": system, "prompt": prompt,
@@ -541,7 +549,7 @@ public struct LocalMeetingSummarizer: MeetingSummarizing {
     request.timeoutInterval = 10
     request.setValue("application/json", forHTTPHeaderField: "Content-Type")
     request.httpBody = try? JSONSerialization.data(withJSONObject: [
-      "model": Self.model, "keep_alive": 0,
+      "model": modelName, "keep_alive": 0,
     ])
     _ = try? await fetch(request)
   }
