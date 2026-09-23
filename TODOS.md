@@ -2,13 +2,14 @@
 
 ## Next Candidates
 
-- Extend meeting hardware validation to long real calls, audio-device transitions and
-  VoiceOver. A brief installed v0.4.0 microphone + Mac-audio capture, local summary and
-  post-meeting TextEdit dictation passed on September 12, 2026. The v0.4.1 follow-up
-  uses deterministic regression tests; see [meeting validation](docs/MEETINGS_DESIGN.md#validation-boundaries).
-- Evaluate Parakeet Unified EN 0.6B as the default model (1.91% vs 2.22% WER on
-  LibriSpeech test-clean single utterances; see docs/BENCHMARKS.md) and live
-  streaming preview, including a pinned manifest and personalization path
+- Finish hardware validation that could not be automated on September 23, 2026: Bluetooth
+  headsets connecting mid-recording, sleep during a meeting, multi-hour live calls, a true
+  sample-rate mismatch between two physical microphones, and a full session with a VoiceOver
+  user. Microphone switches and removal are verified; see
+  [hardware checks](docs/BENCHMARKS.md#hardware-checks--september-23-2026) and the opt-in
+  `VANI_RUN_HARDWARE_TESTS` suite.
+- Live transcript preview while dictating, using FluidAudio's streaming Parakeet Unified
+  path (the offline Unified model is the default since v0.7.0)
 - Real-time input level for the recording overlay
 
 ## Longer Term
