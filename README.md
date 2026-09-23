@@ -21,7 +21,9 @@ Apple notarization.
 
 ## What Works
 
-- Hold Left Fn to dictate by default; Left Control, Right Option, and Right Command are available
+- Hold Fn / Globe to dictate by default; Left Control, Right Option, and Right Command are available
+- Double-tap the shortcut for hands-free recording; press it again to insert
+- Escape (or the menu's Cancel) discards a recording without inserting anything
 - Short local sound cues confirm when recording actually starts and stops
 - One-time English Parakeet TDT v2 model download
 - Exact model-revision manifest with per-file SHA-256 verification
@@ -32,7 +34,8 @@ Apple notarization.
 - Native Accessibility refusal for password and secure text fields
 - Clipboard-preserving recovery when focus, insertion, or the clipboard changes
 - Memory-only Last Transcript controls with Control-Command-V paste and
-  Control-Command-C copy shortcuts
+  Control-Command-C copy shortcuts (Option-Command, Control-Option or off in Settings)
+- Consecutive dictations are separated by a space automatically
 - Voice-triggered snippets with multiline expansions
 - Opt-in local Smart Formatting for conservative fillers, spoken punctuation,
   sentence casing, and line breaks
@@ -74,7 +77,8 @@ The first source build can take several minutes. After Vani opens in the menu ba
 2. Download the verified 443 MiB English model once. It is the only required network
    download for dictation after the source dependencies are resolved.
 3. In System Settings > Keyboard, set "Press Globe key to" to "Do Nothing."
-4. Hold Left Fn, speak, then release to insert text. Choose Left Control, Right Option,
+4. Hold Fn / Globe, speak, then release to insert text. Double-tap it to keep recording
+   hands-free, and press Escape to discard a recording. Choose Left Control, Right Option,
    or Right Command in Settings if you prefer, and turn sound feedback off there if needed.
 
 Snippets and Smart Formatting are available in Settings. Smart Formatting is off by
@@ -82,8 +86,11 @@ default; enabling it recognizes `comma`, `period` or `full stop`, `question mark
 `exclamation mark` or `exclamation point`, `colon`, `semicolon`, `new line` or
 `next line`, and `new paragraph` or `next paragraph`. It removes only standalone `um`,
 `uh`, and `erm` fillers and leaves links, email addresses, and snippet expansions
-unchanged. Spoken command words are necessarily interpreted as commands while the
-setting is on; turn it off when you need those words literally.
+unchanged. Saying `scratch that` or `delete that`, set off by a pause or punctuation,
+removes the sentence (or comma-separated clause) you just said. "Period" and "colon"
+used as nouns ("the grace period", "a colon") stay words. Spoken command words are
+otherwise interpreted as commands while the setting is on; turn it off when you need
+them literally.
 
 Learning is also off by default. After dictation, **Teach** opens a focused window for
 correcting the last transcript. If that window is already open, Vani brings it forward
