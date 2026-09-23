@@ -52,6 +52,18 @@ import Testing
     #expect(ProgressMilestone.crossed(from: nil, to: 0.6) == 50)
   }
 
+  @Test func meetingDiskAndDurationNoticesAreAnnouncedOnce() {
+    let recording = State(phase: .recording, summarizing: false, error: nil)
+    let low = State(
+      phase: .recording, summarizing: false, error: nil,
+      notice: "Disk space is low: about 8 min of recording remains.")
+    #expect(
+      MeetingAnnouncement.message(from: recording, to: low)
+        == "Disk space is low: about 8 min of recording remains.")
+    #expect(MeetingAnnouncement.message(from: low, to: low) == nil)
+    #expect(MeetingAnnouncement.message(from: low, to: recording) == nil)
+  }
+
   @Test func overlayAnnouncesHandsFreeLockExplicitly() {
     #expect(OverlayState.handsFree.label == "Hands-free")
     #expect(OverlayState.handsFree.announcement == "Hands-free recording locked")

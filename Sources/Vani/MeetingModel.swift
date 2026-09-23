@@ -14,6 +14,13 @@ final class MeetingModel: ObservableObject {
   static let minimumSpeechDuration: TimeInterval = 0.18
   /// A chunk is tried this many times in a row before it is saved as a visible failure segment.
   static let maximumTranscriptionAttempts = 3
+  /// Disk space left untouched for meeting records, transcripts and the rest of the system.
+  nonisolated static let diskReserveBytes: Int64 = 256 * 1_048_576
+  /// A meeting does not start with less recordable time than this, and warns when it drops
+  /// below it while recording.
+  nonisolated static let minimumRecordableTime: TimeInterval = 10 * 60
+  /// How long before the four-hour limit the user is told recording will stop.
+  nonisolated static let durationLimitWarning: TimeInterval = 10 * 60
 
   @Published private(set) var meetings: [MeetingRecord] = []
   @Published var draft: MeetingRecord? {
@@ -25,6 +32,8 @@ final class MeetingModel: ObservableObject {
   }
   @Published private(set) var phase: Phase = .idle
   @Published private(set) var error: String?
+  /// A non-fatal heads-up while preparing or recording: low disk space or the time limit.
+  @Published private(set) var notice: String?
   @Published private(set) var loaded = false
   @Published private(set) var saving = false
   @Published private(set) var transcriptionFailed = false
@@ -59,6 +68,13 @@ final class MeetingModel: ObservableObject {
   private var recoveryTask: Task<Void, Never>?
   private var echoDetector = MeetingEchoDetector()
   private let transcriptionRetryDelay: Duration
+  private let availableDiskSpace: @Sendable (URL) -> Int64?
+  private let monitorInterval: Duration
+  private let now: @MainActor () -> ContinuousClock.Instant
+  private var monitorTask: Task<Void, Never>?
+  private var recordingStartedAt: ContinuousClock.Instant?
+  private var warnedAboutDisk = false
+  private var warnedAboutDuration = false
 
   static var systemSupportsCapture: Bool {
     if #available(macOS 15.0, *) { return true }
@@ -76,7 +92,12 @@ final class MeetingModel: ObservableObject {
     vocabulary: @escaping @MainActor () -> MeetingVocabulary = { .empty },
     captureSupported: Bool = MeetingModel.systemSupportsCapture,
     recoveryRetryDelay: Duration = .seconds(15),
-    transcriptionRetryDelay: Duration = .milliseconds(500)
+    transcriptionRetryDelay: Duration = .milliseconds(500),
+    availableDiskSpace: @escaping @Sendable (URL) -> Int64? = {
+      MeetingModel.availableDiskSpace(at: $0)
+    },
+    monitorInterval: Duration = .seconds(30),
+    now: @escaping @MainActor () -> ContinuousClock.Instant = { ContinuousClock.now }
   ) {
     self.store = store
     self.recognizer = recognizer
@@ -88,6 +109,9 @@ final class MeetingModel: ObservableObject {
     self.captureSupported = captureSupported
     self.recoveryRetryDelay = recoveryRetryDelay
     self.transcriptionRetryDelay = transcriptionRetryDelay
+    self.availableDiskSpace = availableDiskSpace
+    self.monitorInterval = monitorInterval
+    self.now = now
   }
 
   var busy: Bool { phase != .idle }
@@ -220,6 +244,7 @@ final class MeetingModel: ObservableObject {
     activeCaptureID = captureID
     captureStartFailure = nil
     error = nil
+    notice = nil
     transcriptionFailed = false
     Task { await refreshSummaryAvailability() }
     var created: UUID?
@@ -236,6 +261,8 @@ final class MeetingModel: ObservableObject {
           self.error = message
         }
       }
+      // Check space before anything is written, so a full disk is explained up front.
+      notice = try diskPreflight()
       guard await recognizer.modelsAreInstalled() else {
         throw MeetingError.capture("Download the local speech model from the Vani menu first.")
       }
@@ -267,9 +294,11 @@ final class MeetingModel: ObservableObject {
         })
       recorder = capture
       phase = .recording
+      startMonitoring()
       if captureStartFailure != nil { await stop(summarize: false) }
     } catch {
       self.error = error.localizedDescription
+      notice = nil
       activeCaptureID = nil
       phase = .idle
       releaseSpeech()
@@ -302,6 +331,7 @@ final class MeetingModel: ObservableObject {
     }
     self.recorder = nil
     activeCaptureID = nil
+    stopMonitoring()
     draft?.endedAt = Date()
     phase = .transcribing
     await drainTask?.value
@@ -509,6 +539,111 @@ final class MeetingModel: ObservableObject {
       }
       try await store.deleteAudio(for: draft.id)
     } catch { self.error = error.localizedDescription }
+  }
+
+  // MARK: - Disk space and duration
+
+  /// Space available for new files on the volume holding `url` (or its nearest existing
+  /// parent), counting space macOS can reclaim for important use.
+  nonisolated static func availableDiskSpace(at url: URL) -> Int64? {
+    var candidate = url.standardizedFileURL
+    while !FileManager.default.fileExists(atPath: candidate.path),
+      candidate.pathComponents.count > 1
+    {
+      candidate.deleteLastPathComponent()
+    }
+    guard
+      let values = try? candidate.resourceValues(forKeys: [
+        .volumeAvailableCapacityForImportantUsageKey, .volumeAvailableCapacityKey,
+      ])
+    else { return nil }
+    return values.volumeAvailableCapacityForImportantUsage
+      ?? values.volumeAvailableCapacity.map(Int64.init)
+  }
+
+  /// Seconds of two-source meeting audio that fit in `free` bytes above the reserve.
+  static func recordableTime(freeBytes free: Int64) -> TimeInterval {
+    Double(max(0, free - diskReserveBytes)) / Double(MeetingLimits.audioBytesPerSecond)
+  }
+
+  static func formatted(bytes: Int64) -> String {
+    ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
+  }
+
+  static func formatted(duration: TimeInterval) -> String {
+    let minutes = Int(duration / 60)
+    return minutes >= 60
+      ? "\(minutes / 60) h \(String(format: "%02d", minutes % 60)) min" : "\(minutes) min"
+  }
+
+  /// Refuses to start when the disk cannot hold ten minutes of audio; otherwise returns a
+  /// notice when the disk cannot hold a full four-hour meeting. Unknown space is not an error.
+  private func diskPreflight() throws -> String? {
+    guard let free = availableDiskSpace(store.directory) else { return nil }
+    let recordable = Self.recordableTime(freeBytes: free)
+    let hour = Int64(MeetingLimits.audioBytesPerSecond) * 3600
+    guard recordable >= Self.minimumRecordableTime else {
+      throw MeetingError.storage(
+        "Only \(Self.formatted(bytes: free)) is free on this Mac. Free up disk space before recording: each hour of meeting audio needs about \(Self.formatted(bytes: hour))."
+      )
+    }
+    guard recordable < MeetingLimits.maximumDuration else { return nil }
+    return
+      "Free disk space holds about \(Self.formatted(duration: recordable)) of meeting audio (\(Self.formatted(bytes: free)) free). Vani stops recording safely before the disk fills."
+  }
+
+  private func startMonitoring() {
+    recordingStartedAt = now()
+    warnedAboutDisk = false
+    warnedAboutDuration = false
+    monitorTask?.cancel()
+    let interval = monitorInterval
+    monitorTask = Task { [weak self] in
+      while !Task.isCancelled {
+        do { try await Task.sleep(for: interval) } catch { return }
+        guard let self, !Task.isCancelled else { return }
+        await self.checkDiskAndDuration()
+      }
+    }
+  }
+
+  private func stopMonitoring() {
+    monitorTask?.cancel()
+    monitorTask = nil
+    recordingStartedAt = nil
+    notice = nil
+  }
+
+  /// Warns before the disk fills or the four-hour limit is reached, and stops recording
+  /// cleanly, keeping everything captured, when only the reserve is left.
+  func checkDiskAndDuration() async {
+    guard phase == .recording else { return }
+    if let free = availableDiskSpace(store.directory) {
+      let recordable = Self.recordableTime(freeBytes: free)
+      if recordable <= 0 {
+        // Stopping cancels this monitor; finish the stop outside it so transcription of the
+        // final chunks is not cancelled with it.
+        await Task { await self.stop(summarize: false) }.value
+        error =
+          "Recording stopped because the disk is almost full (\(Self.formatted(bytes: free)) free). Everything captured so far is saved."
+        return
+      }
+      if recordable < Self.minimumRecordableTime, !warnedAboutDisk {
+        warnedAboutDisk = true
+        notice =
+          "Disk space is low: about \(Self.formatted(duration: recordable)) of recording remains. Free up space, or stop the meeting; captured audio is saved."
+        return
+      }
+    }
+    if let started = recordingStartedAt, !warnedAboutDuration {
+      let elapsed = (now() - started) / .seconds(1)
+      let remaining = MeetingLimits.maximumDuration - elapsed
+      if remaining <= Self.durationLimitWarning {
+        warnedAboutDuration = true
+        notice =
+          "This meeting reaches the four-hour limit in about \(Self.formatted(duration: max(60, remaining))). Recording then stops and everything captured is saved."
+      }
+    }
   }
 
   private func refreshTranscript() {

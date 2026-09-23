@@ -365,6 +365,13 @@ struct MeetingView: View {
 
   private var status: some View {
     VStack(alignment: .leading, spacing: 8) {
+      if let notice = model.notice {
+        Label {
+          Text(notice).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+        } icon: {
+          Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+        }
+      }
       if let error = model.error {
         Label(error, systemImage: "exclamationmark.circle").foregroundStyle(.red)
           .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
@@ -393,7 +400,7 @@ struct MeetingView: View {
   private var statusText: String {
     switch model.phase {
     case .preparing: "Preparing local meeting capture…"
-    case .recording: "Recording · Dictation paused · Up to 2 hours"
+    case .recording: "Recording · Dictation paused · Up to 4 hours"
     case .stopping, .finishing: "Finishing audio capture…"
     case .transcribing: "Finishing local transcription…"
     case .summarizing: "Generating a local summary…"
@@ -617,15 +624,19 @@ enum MeetingAnnouncement {
     let phase: MeetingModel.Phase
     let summarizing: Bool
     let error: String?
+    let notice: String?
 
     @MainActor init(_ model: MeetingModel) {
-      self.init(phase: model.phase, summarizing: model.summarizingID != nil, error: model.error)
+      self.init(
+        phase: model.phase, summarizing: model.summarizingID != nil, error: model.error,
+        notice: model.notice)
     }
 
-    init(phase: MeetingModel.Phase, summarizing: Bool, error: String?) {
+    init(phase: MeetingModel.Phase, summarizing: Bool, error: String?, notice: String? = nil) {
       self.phase = phase
       self.summarizing = summarizing
       self.error = error
+      self.notice = notice
     }
   }
 
@@ -640,6 +651,7 @@ enum MeetingAnnouncement {
       return new.error == nil ? "Summary ready" : "Summary not generated. \(new.error ?? "")"
     }
     if let error = new.error, error != old.error { return "Meeting error: \(error)" }
+    if let notice = new.notice, notice != old.notice { return notice }
     return nil
   }
 }
