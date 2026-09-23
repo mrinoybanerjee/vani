@@ -319,3 +319,29 @@ private struct DeterministicGenerator {
     return Int(state % UInt64(upperBound))
   }
 }
+
+@Test(arguments: [
+  ("Send it Friday. scratch that. Send it Monday.", "Send it Monday."),
+  ("Hello team, send the deck, scratch that, send the notes", "Hello team, send the notes"),
+  ("Book the room scratch that", ""),
+  ("First point. Second point. delete that", "First point."),
+  ("Please scratch that item off the list", "Please scratch that item off the list"),
+  ("Draft one. scratch that. Draft two. scratch that. Draft three.", "Draft three."),
+])
+func scratchThatRetractsOnlyThePrecedingSentence(input: String, expected: String) {
+  #expect(
+    TextPipeline().process(input, dictionary: [], smartFormattingEnabled: true) == expected)
+}
+
+@Test(arguments: [
+  ("the grace period ended", "The grace period ended"),
+  ("the trial period of the license", "The trial period of the license"),
+  ("a period of calm", "A period of calm"),
+  ("we agreed period next steps", "We agreed. Next steps"),
+  ("add a colon here", "Add a colon here"),
+  ("items colon apples", "Items: apples"),
+])
+func punctuationWordsKeepTheirNounReading(input: String, expected: String) {
+  #expect(
+    TextPipeline().process(input, dictionary: [], smartFormattingEnabled: true) == expected)
+}
