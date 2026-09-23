@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import SwiftUI
 import VaniCore
 
@@ -59,6 +60,10 @@ final class TeachWindowController: NSObject, NSWindowDelegate {
   private(set) var window: NSWindow?
   private let activateApplication: () -> Void
   private var activationObserver: NSObjectProtocol?
+  /// Set when Teach asks macOS to activate Vani; the next activation refocuses Teach once.
+  private var activationRequestedAt: Date?
+  private let focusRequests = PassthroughSubject<Void, Never>()
+  static let activationRequestLifetime: TimeInterval = 5
 
   init(
     activateApplication: @escaping () -> Void = {
@@ -89,13 +94,23 @@ final class TeachWindowController: NSObject, NSWindowDelegate {
     let content = TeachVaniView(
       candidate: candidate,
       dismiss: { [weak self] in self?.dismiss() },
-      save: save
+      save: save,
+      focusRequests: focusRequests.eraseToAnyPublisher()
     )
     present(rootView: content)
   }
 
   func requestActivation() {
+    activationRequestedAt = Date()
     activateApplication()
+  }
+
+  /// True once for a recent activation that Teach requested. Other activations (for example,
+  /// the user switching back to the workspace window) must not steal focus.
+  private func consumeActivationRequest() -> Bool {
+    guard let requested = activationRequestedAt else { return false }
+    activationRequestedAt = nil
+    return Date().timeIntervalSince(requested) < Self.activationRequestLifetime
   }
 
   func present<Content: View>(rootView: Content) {
@@ -145,7 +160,9 @@ final class TeachWindowController: NSObject, NSWindowDelegate {
     ) { [weak self, weak window] _ in
       Task { @MainActor in
         guard let self, let window, self.window === window else { return }
+        guard self.consumeActivationRequest() || window.isKeyWindow else { return }
         window.makeKeyAndOrderFront(nil)
+        self.focusRequests.send()
       }
     }
 
@@ -171,6 +188,7 @@ final class TeachWindowController: NSObject, NSWindowDelegate {
       NotificationCenter.default.removeObserver(activationObserver)
       self.activationObserver = nil
     }
+    activationRequestedAt = nil
     closingWindow.contentViewController = nil
     window = nil
   }
@@ -179,16 +197,19 @@ final class TeachWindowController: NSObject, NSWindowDelegate {
 struct TeachVaniView: View {
   let dismiss: () -> Void
   let save: @MainActor (String) async -> Bool
+  let focusRequests: AnyPublisher<Void, Never>
   @StateObject private var model: TeachVaniViewModel
   @FocusState private var editorFocused: Bool
 
   init(
     candidate: CorrectionCandidate,
     dismiss: @escaping () -> Void,
-    save: @escaping @MainActor (String) async -> Bool
+    save: @escaping @MainActor (String) async -> Bool,
+    focusRequests: AnyPublisher<Void, Never> = Empty().eraseToAnyPublisher()
   ) {
     self.dismiss = dismiss
     self.save = save
+    self.focusRequests = focusRequests
     _model = StateObject(wrappedValue: TeachVaniViewModel(original: candidate.transcript))
   }
 
@@ -196,7 +217,7 @@ struct TeachVaniView: View {
     VStack(alignment: .leading, spacing: 16) {
       Text("Correct dictation")
         .font(.system(size: 26, weight: .regular, design: .serif))
-      Text("Fix only what Vani got wrong. The correction is saved locally for future dictation.")
+      Text("Fix only what Vani got wrong. Vani saves the correction on this Mac.")
         .font(.subheadline)
         .foregroundStyle(.secondary)
       TextEditor(text: $model.corrected)
@@ -220,7 +241,7 @@ struct TeachVaniView: View {
           systemImage: "exclamationmark.circle"
         )
         .font(.caption)
-        .foregroundStyle(.orange)
+        .foregroundStyle(.red)
         .fixedSize(horizontal: false, vertical: true)
       }
       Text("Text already inserted in another app stays as it is.")
@@ -247,7 +268,7 @@ struct TeachVaniView: View {
         .keyboardShortcut("s", modifiers: .command)
       }
     }
-    .padding(28)
+    .padding(24)
     .tint(VaniTheme.accent)
     .frame(minWidth: TeachWindowMetrics.width, maxWidth: .infinity, maxHeight: .infinity)
     .background(VaniTheme.paper)
@@ -255,9 +276,7 @@ struct TeachVaniView: View {
       await Task.yield()
       editorFocused = true
     }
-    .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification))
-    {
-      _ in
+    .onReceive(focusRequests) { _ in
       editorFocused = true
     }
   }
