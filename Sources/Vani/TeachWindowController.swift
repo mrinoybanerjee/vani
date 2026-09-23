@@ -217,6 +217,7 @@ struct TeachVaniView: View {
     VStack(alignment: .leading, spacing: 16) {
       Text("Correct dictation")
         .font(.system(size: 26, weight: .regular, design: .serif))
+        .accessibilityAddTraits(.isHeader)
       Text("Fix only what Vani got wrong. Vani saves the correction on this Mac.")
         .font(.subheadline)
         .foregroundStyle(.secondary)
@@ -249,7 +250,7 @@ struct TeachVaniView: View {
         .foregroundStyle(.secondary)
       HStack {
         if model.isSaving {
-          ProgressView().controlSize(.small)
+          ProgressView().controlSize(.small).accessibilityHidden(true)
           Text("Saving correction…")
             .font(.caption)
             .foregroundStyle(.secondary)
@@ -260,7 +261,12 @@ struct TeachVaniView: View {
           .keyboardShortcut(.cancelAction)
         Button("Save Learning") {
           Task {
-            await model.commit(save: save, dismiss: dismiss)
+            await model.commit(save: save) {
+              // The window closes on success, so VoiceOver would otherwise hear nothing.
+              VoiceOverAnnouncer.announce("Correction saved")
+              dismiss()
+            }
+            if model.saveFailed { VoiceOverAnnouncer.announce("Correction not saved") }
           }
         }
         .buttonStyle(.borderedProminent)

@@ -1,7 +1,7 @@
 import SwiftUI
 import VaniCore
 
-private enum SettingsSection: String, CaseIterable, Identifiable {
+enum SettingsSection: String, CaseIterable, Identifiable {
   case general = "General"
   case vocabulary = "Vocabulary"
   case snippets = "Snippets"
@@ -18,13 +18,19 @@ struct SettingsView: View {
   /// here, but the selected pane and its lists are not built, so hidden Settings does little
   /// work when the coordinator publishes dictation state.
   var active = true
-  @State private var selection = SettingsSection.general
+  @State private var selection: SettingsSection
   @State private var vocabulary = VocabularyDraft()
   @State private var snippet = SnippetDraft()
+
+  init(active: Bool = true, section: SettingsSection = .general) {
+    self.active = active
+    _selection = State(initialValue: section)
+  }
 
   var body: some View {
     VStack(alignment: .leading, spacing: 0) {
       Text("Settings").font(.system(size: 28, weight: .regular, design: .serif))
+        .accessibilityAddTraits(.isHeader)
         .padding(.horizontal, 24).padding(.top, 24).padding(.bottom, 16)
       Picker("Settings section", selection: $selection) {
         ForEach(SettingsSection.allCases) { section in
@@ -39,6 +45,7 @@ struct SettingsView: View {
             Text(error).fixedSize(horizontal: false, vertical: true)
           } icon: {
             Image(systemName: "exclamationmark.circle.fill").foregroundStyle(.red)
+              .accessibilityHidden(true)
           }
           .font(.system(size: 12))
           Spacer()
@@ -64,6 +71,10 @@ struct SettingsView: View {
 
     }.frame(maxWidth: .infinity, maxHeight: .infinity).background(VaniTheme.paper)
       .tint(VaniTheme.accent)
+      .onChange(of: coordinator.settingsError) { _, error in
+        // The menu shows the same banner; only visible Settings speaks it.
+        if active, let error { VoiceOverAnnouncer.announce("Settings: \(error)") }
+      }
   }
 
 }
@@ -124,17 +135,45 @@ private struct VocabularySettingsView: View {
 
 private struct PersonalizationSettingsView: View {
   @EnvironmentObject private var coordinator: AppCoordinator
+
+  var body: some View {
+    LearningSettingsContent(
+      corrections: coordinator.learnedCorrections,
+      enabled: Binding(
+        get: { coordinator.settings.personalizationEnabled },
+        set: { coordinator.setPersonalizationEnabled($0) }
+      ),
+      modelInstalled: coordinator.personalizationModelInstalled,
+      modelProgress: coordinator.personalizationModelProgress,
+      download: coordinator.downloadPersonalizationModel,
+      remove: remove,
+      removeOffsets: coordinator.removeLearnedCorrections(at:),
+      reset: coordinator.clearLearnedCorrections)
+  }
+
+  private func remove(_ id: UUID) {
+    guard let index = coordinator.learnedCorrections.firstIndex(where: { $0.id == id }) else {
+      return
+    }
+    coordinator.removeLearnedCorrections(at: IndexSet(integer: index))
+  }
+}
+
+/// The Learning pane, driven by values so every state can be rendered and audited.
+struct LearningSettingsContent: View {
+  let corrections: [LearnedCorrection]
+  @Binding var enabled: Bool
+  let modelInstalled: Bool
+  let modelProgress: Double?
+  let download: () -> Void
+  let remove: (UUID) -> Void
+  let removeOffsets: (IndexSet) -> Void
+  let reset: () -> Void
   @State private var confirmsReset = false
 
   var body: some View {
     VStack(alignment: .leading, spacing: 12) {
-      Toggle(
-        "Learn from corrections",
-        isOn: Binding(
-          get: { coordinator.settings.personalizationEnabled },
-          set: { coordinator.setPersonalizationEnabled($0) }
-        )
-      )
+      Toggle("Learn from corrections", isOn: $enabled)
 
       Text("Corrections stay on this Mac. Vani never stores correction audio.")
         .font(.caption)
@@ -144,32 +183,33 @@ private struct PersonalizationSettingsView: View {
         HStack {
           VStack(alignment: .leading, spacing: 4) {
             Text(
-              coordinator.personalizationModelInstalled
+              modelInstalled
                 ? "Installed on this Mac."
                 : "Optional local model for hard names and terms."
             )
             .font(.caption)
             .foregroundStyle(.secondary)
-            if let progress = coordinator.personalizationModelProgress {
+            if let progress = modelProgress {
               ProgressView(value: progress)
                 .frame(maxWidth: 220)
+                .accessibilityLabel("Downloading acoustic vocabulary model")
                 .accessibilityValue("\(Int(progress * 100)) percent")
             }
           }
           Spacer()
-          if !coordinator.personalizationModelInstalled {
-            Button("Download", systemImage: "arrow.down") {
-              coordinator.downloadPersonalizationModel()
-            }
-            .disabled(coordinator.personalizationModelProgress != nil)
+          if !modelInstalled {
+            Button("Download", systemImage: "arrow.down", action: download)
+              .disabled(modelProgress != nil)
+              .accessibilityLabel("Download acoustic vocabulary model")
           }
         }
         .padding(4)
       }
+      .announcesProgressMilestones(modelProgress, subject: "Acoustic vocabulary download")
 
       Divider()
 
-      if coordinator.learnedCorrections.isEmpty {
+      if corrections.isEmpty {
         ContentUnavailableView(
           "Nothing Learned Yet",
           systemImage: "brain.head.profile",
@@ -178,7 +218,7 @@ private struct PersonalizationSettingsView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
       } else {
         List {
-          ForEach(coordinator.learnedCorrections) { correction in
+          ForEach(corrections) { correction in
             HStack(spacing: 8) {
               VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 8) {
@@ -211,24 +251,24 @@ private struct PersonalizationSettingsView: View {
               Button("Delete Correction", role: .destructive) { remove(correction.id) }
             }
           }
-          .onDelete { coordinator.removeLearnedCorrections(at: $0) }
+          .onDelete(perform: removeOffsets)
         }
       }
 
       HStack {
         Text(
-          "\(coordinator.learnedCorrections.count)/\(PersonalizationEngine.maximumCorrectionCount)"
+          "\(corrections.count)/\(PersonalizationEngine.maximumCorrectionCount)"
         )
         .font(.caption.monospacedDigit())
         .foregroundStyle(.secondary)
         .accessibilityLabel(
-          "\(coordinator.learnedCorrections.count) of \(PersonalizationEngine.maximumCorrectionCount) corrections"
+          "\(corrections.count) of \(PersonalizationEngine.maximumCorrectionCount) corrections"
         )
         Spacer()
         Button("Reset Learning…", role: .destructive) {
           confirmsReset = true
         }
-        .disabled(coordinator.learnedCorrections.isEmpty)
+        .disabled(corrections.isEmpty)
       }
     }
     .padding(20)
@@ -238,19 +278,12 @@ private struct PersonalizationSettingsView: View {
       titleVisibility: .visible
     ) {
       Button("Reset Learning", role: .destructive) {
-        coordinator.clearLearnedCorrections()
+        reset()
       }
       Button("Cancel", role: .cancel) {}
     } message: {
       Text("This cannot be undone. Your manual dictionary is not affected.")
     }
-  }
-
-  private func remove(_ id: UUID) {
-    guard let index = coordinator.learnedCorrections.firstIndex(where: { $0.id == id }) else {
-      return
-    }
-    coordinator.removeLearnedCorrections(at: IndexSet(integer: index))
   }
 }
 
@@ -345,20 +378,15 @@ private struct DictionarySettingsView: View {
   var body: some View {
     VStack(spacing: 12) {
       HStack {
-        TextField("Spoken phrase", text: $spoken)
-        TextField("Replacement", text: $replacement)
-        Button {
-          if coordinator.addDictionaryEntry(spoken: spoken, replacement: replacement) {
-            spoken = ""
-            replacement = ""
-          }
-        } label: {
+        // Return in either field adds the entry, as the Add button does.
+        TextField("Spoken phrase", text: $spoken).onSubmit(add)
+          .accessibilityLabel("Spoken phrase")
+        TextField("Replacement", text: $replacement).onSubmit(add)
+          .accessibilityLabel("Replacement")
+        Button(action: add) {
           Image(systemName: "plus")
         }
-        .disabled(
-          spoken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            || replacement.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        )
+        .disabled(!canAdd)
         .help("Add correction")
         .accessibilityLabel("Add dictionary correction")
       }
@@ -383,7 +411,9 @@ private struct DictionarySettingsView: View {
                 Text(entry.replacement)
               }
               .accessibilityElement(children: .combine)
-              DeleteRowButton(label: "Delete \(entry.spoken)") { remove(entry.id) }
+              DeleteRowButton(label: "Delete dictionary entry \(entry.spoken)") {
+                remove(entry.id)
+              }
             }
             .contextMenu {
               Button("Delete Correction", role: .destructive) { remove(entry.id) }
@@ -394,6 +424,19 @@ private struct DictionarySettingsView: View {
       }
     }
     .padding(20)
+  }
+
+  private var canAdd: Bool {
+    !spoken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+      && !replacement.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+  }
+
+  private func add() {
+    guard canAdd else { return }
+    if coordinator.addDictionaryEntry(spoken: spoken, replacement: replacement) {
+      spoken = ""
+      replacement = ""
+    }
   }
 
   private func remove(_ id: UUID) {
@@ -417,6 +460,7 @@ private struct SnippetSettingsView: View {
   var body: some View {
     VStack(alignment: .leading, spacing: 12) {
       TextField("Voice trigger", text: $draft.trigger)
+        .accessibilityLabel("Voice trigger")
 
       ZStack(alignment: .topLeading) {
         if draft.expansion.isEmpty {
@@ -463,6 +507,7 @@ private struct SnippetSettingsView: View {
           commitDraft()
         }
         .disabled(!draftIsValid)
+        .accessibilityLabel(draft.editingSnippetID == nil ? "Add snippet" : "Save snippet")
       }
 
       Divider()
@@ -487,6 +532,7 @@ private struct SnippetSettingsView: View {
                   .textSelection(.enabled)
               }
               .accessibilityElement(children: .combine)
+              .accessibilityAddTraits(.isStaticText)
               Spacer()
               Button {
                 beginEditing(snippet)
@@ -567,22 +613,36 @@ private struct SnippetSettingsView: View {
 
 private struct HistorySettingsView: View {
   @EnvironmentObject private var coordinator: AppCoordinator
+
+  var body: some View {
+    HistorySettingsContent(
+      entries: coordinator.history, historyEnabled: coordinator.settings.historyEnabled,
+      canClear: coordinator.hasStoredHistoryData, clear: coordinator.clearHistory)
+  }
+}
+
+/// The History pane, driven by values so every state can be rendered and audited.
+struct HistorySettingsContent: View {
+  let entries: [TranscriptHistoryEntry]
+  let historyEnabled: Bool
+  let canClear: Bool
+  let clear: () -> Void
   @State private var confirmsClear = false
 
   var body: some View {
     VStack(spacing: 12) {
-      if coordinator.history.isEmpty {
+      if entries.isEmpty {
         ContentUnavailableView(
           "No Saved Transcripts",
           systemImage: "clock",
           description: Text(
-            coordinator.settings.historyEnabled
+            historyEnabled
               ? "Your next dictation will appear here."
               : "Turn on transcript history in General to keep a local record."
           )
         )
       } else {
-        List(coordinator.history) { entry in
+        List(entries) { entry in
           VStack(alignment: .leading, spacing: 4) {
             Text(entry.text)
               .lineLimit(2)
@@ -592,6 +652,7 @@ private struct HistorySettingsView: View {
               .foregroundStyle(.secondary)
           }
           .accessibilityElement(children: .combine)
+          .accessibilityAddTraits(.isStaticText)
         }
       }
       HStack {
@@ -599,14 +660,14 @@ private struct HistorySettingsView: View {
         Button("Clear History…", role: .destructive) {
           confirmsClear = true
         }
-        .disabled(!coordinator.hasStoredHistoryData)
+        .disabled(!canClear)
       }
     }
     .padding(20)
     .confirmationDialog(
       "Clear transcript history?", isPresented: $confirmsClear, titleVisibility: .visible
     ) {
-      Button("Clear History", role: .destructive) { coordinator.clearHistory() }
+      Button("Clear History", role: .destructive, action: clear)
       Button("Cancel", role: .cancel) {}
     } message: {
       Text("Saved transcripts are deleted from this Mac. This cannot be undone.")
@@ -616,11 +677,24 @@ private struct HistorySettingsView: View {
 
 private struct DiagnosticsSettingsView: View {
   @EnvironmentObject private var coordinator: AppCoordinator
+
+  var body: some View {
+    DiagnosticsSettingsContent(
+      events: coordinator.diagnostics, refresh: coordinator.refreshDiagnostics,
+      clear: coordinator.clearDiagnostics)
+  }
+}
+
+/// The Diagnostics pane, driven by values so every state can be rendered and audited.
+struct DiagnosticsSettingsContent: View {
+  let events: [DiagnosticEvent]
+  let refresh: () -> Void
+  let clear: () -> Void
   @State private var confirmsClear = false
 
   var body: some View {
     VStack(spacing: 12) {
-      if coordinator.diagnostics.isEmpty {
+      if events.isEmpty {
         ContentUnavailableView(
           "No Diagnostics",
           systemImage: "stethoscope",
@@ -629,7 +703,7 @@ private struct DiagnosticsSettingsView: View {
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
       } else {
-        List(coordinator.diagnostics) { event in
+        List(events) { event in
           HStack {
             VStack(alignment: .leading, spacing: 2) {
               Text(event.code)
@@ -649,22 +723,21 @@ private struct DiagnosticsSettingsView: View {
         }
       }
       HStack {
-        Button("Refresh", systemImage: "arrow.clockwise") {
-          coordinator.refreshDiagnostics()
-        }
+        Button("Refresh", systemImage: "arrow.clockwise", action: refresh)
+          .accessibilityLabel("Refresh diagnostics")
         Spacer()
         Button("Clear Diagnostics…", role: .destructive) {
           confirmsClear = true
         }
-        .disabled(coordinator.diagnostics.isEmpty)
+        .disabled(events.isEmpty)
       }
     }
     .padding(20)
-    .task { coordinator.refreshDiagnostics() }
+    .task { refresh() }
     .confirmationDialog(
       "Clear diagnostics?", isPresented: $confirmsClear, titleVisibility: .visible
     ) {
-      Button("Clear Diagnostics", role: .destructive) { coordinator.clearDiagnostics() }
+      Button("Clear Diagnostics", role: .destructive, action: clear)
       Button("Cancel", role: .cancel) {}
     } message: {
       Text("The recent event list is emptied. This cannot be undone.")

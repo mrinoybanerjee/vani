@@ -3,21 +3,116 @@ import SwiftUI
 import VaniCore
 
 /// Presentation-only tokens. System labels and controls retain macOS contrast and focus behavior.
+/// With Increase Contrast, the accent deepens and hairlines become clearly visible.
 enum VaniTheme {
   static let paper = adaptive(light: 0xFAF9F6, dark: 0x202321)
   static let sidebar = adaptive(light: 0xF0F0EA, dark: 0x191C1A)
-  static let accent = adaptive(light: 0x315E48, dark: 0xA4C9AD)
-  static let line = Color.primary.opacity(0.10)
+  static let accent = adaptive(
+    light: 0x315E48, dark: 0xA4C9AD, highContrastLight: 0x1B3A2B, highContrastDark: 0xC8E6CF)
+  static let line = Color(
+    nsColor: NSColor(name: nil) { appearance in
+      let alpha: CGFloat = isHighContrast(appearance) ? 0.45 : 0.10
+      return (isDark(appearance) ? NSColor.white : NSColor.black).withAlphaComponent(alpha)
+    })
 
-  private static func adaptive(light: Int, dark: Int) -> Color {
+  private static let appearances: [NSAppearance.Name] = [
+    .aqua, .darkAqua, .accessibilityHighContrastAqua, .accessibilityHighContrastDarkAqua,
+  ]
+
+  private static func isDark(_ appearance: NSAppearance) -> Bool {
+    let match = appearance.bestMatch(from: appearances)
+    return match == .darkAqua || match == .accessibilityHighContrastDarkAqua
+  }
+
+  private static func isHighContrast(_ appearance: NSAppearance) -> Bool {
+    let match = appearance.bestMatch(from: appearances)
+    return match == .accessibilityHighContrastAqua || match == .accessibilityHighContrastDarkAqua
+  }
+
+  private static func adaptive(
+    light: Int, dark: Int, highContrastLight: Int? = nil, highContrastDark: Int? = nil
+  ) -> Color {
     Color(
       nsColor: NSColor(name: nil) { appearance in
-        let value = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? dark : light
+        let highContrast = isHighContrast(appearance)
+        let value =
+          isDark(appearance)
+          ? (highContrast ? highContrastDark ?? dark : dark)
+          : (highContrast ? highContrastLight ?? light : light)
         return NSColor(
           red: CGFloat((value >> 16) & 255) / 255,
           green: CGFloat((value >> 8) & 255) / 255,
           blue: CGFloat(value & 255) / 255, alpha: 1)
       })
+  }
+}
+
+/// The selected-row treatment shared by navigation, filters and library rows. The fill is
+/// paired with a weight change or accent bar in each row; with Increase Contrast or Differentiate
+/// Without Color, a visible outline is added so selection never depends on a subtle fill.
+struct SelectionHighlight: ViewModifier {
+  let selected: Bool
+  let cornerRadius: CGFloat
+  @Environment(\.colorSchemeContrast) private var contrast
+  @Environment(\.accessibilityDifferentiateWithoutColor) private var differentiateWithoutColor
+
+  func body(content: Content) -> some View {
+    content
+      .background(
+        selected ? VaniTheme.paper : .clear, in: RoundedRectangle(cornerRadius: cornerRadius)
+      )
+      .overlay {
+        if selected, contrast == .increased || differentiateWithoutColor {
+          RoundedRectangle(cornerRadius: cornerRadius)
+            .strokeBorder(VaniTheme.accent, lineWidth: 1.5)
+        }
+      }
+  }
+}
+
+extension View {
+  func selectionHighlight(_ selected: Bool, cornerRadius: CGFloat) -> some View {
+    modifier(SelectionHighlight(selected: selected, cornerRadius: cornerRadius))
+  }
+}
+
+/// Speaks brief state changes that VoiceOver users would otherwise miss. Messages name the state
+/// only; they never include transcript, note or meeting content.
+@MainActor
+enum VoiceOverAnnouncer {
+  /// Replaced in tests to observe announcements.
+  static var post: @MainActor (String) -> Void = { message in
+    NSAccessibility.post(
+      element: NSApplication.shared,
+      notification: .announcementRequested,
+      userInfo: [
+        .announcement: message,
+        .priority: NSAccessibilityPriorityLevel.high.rawValue,
+      ]
+    )
+  }
+
+  static func announce(_ message: String) { post(message) }
+}
+
+/// Download progress is announced at quarter milestones, not on every update.
+enum ProgressMilestone {
+  static func crossed(from old: Double?, to new: Double?) -> Int? {
+    guard let new else { return nil }
+    let previous = Int((old ?? 0) * 4)
+    let current = Int(min(max(new, 0), 1) * 4)
+    guard current > previous, current > 0 else { return nil }
+    return current * 25
+  }
+}
+
+extension View {
+  /// Announces "<subject> 25 percent" and so on as a download progresses.
+  func announcesProgressMilestones(_ progress: Double?, subject: String) -> some View {
+    onChange(of: progress) { old, new in
+      guard let percent = ProgressMilestone.crossed(from: old, to: new) else { return }
+      VoiceOverAnnouncer.announce("\(subject) \(percent) percent")
+    }
   }
 }
 

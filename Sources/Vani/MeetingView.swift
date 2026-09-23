@@ -28,6 +28,11 @@ struct MeetingView: View {
       }
       .task(id: model.draft?.notes) { await autosave() }
       .task(id: model.draft?.title) { await autosave() }
+      .onChange(of: MeetingAnnouncement.State(model)) { old, new in
+        if let message = MeetingAnnouncement.message(from: old, to: new) {
+          VoiceOverAnnouncer.announce(message)
+        }
+      }
       .confirmationDialog(
         "Start a meeting recording?", isPresented: $confirmingCapture, titleVisibility: .visible
       ) {
@@ -66,9 +71,7 @@ struct MeetingView: View {
         "Move this meeting to Recently Deleted?", isPresented: $confirmingDelete,
         titleVisibility: .visible
       ) {
-        Button("Move to Recently Deleted", role: .destructive) {
-          Task { await model.setDeleted(true) }
-        }
+        Button("Move to Recently Deleted", role: .destructive) { setDeleted(true) }
         Button("Cancel", role: .cancel) {}
       } message: {
         Text(
@@ -83,6 +86,17 @@ struct MeetingView: View {
           "Export a copy first to keep your unsaved edits. Saved meeting data and captured audio will remain."
         )
       }
+  }
+
+  /// The selected meeting leaves the list either way, so VoiceOver hears where it went.
+  private func setDeleted(_ deleted: Bool) {
+    Task {
+      guard model.draft != nil else { return }
+      await model.setDeleted(deleted)
+      guard model.draft == nil else { return }
+      VoiceOverAnnouncer.announce(
+        deleted ? "Meeting moved to Recently Deleted" : "Meeting restored")
+    }
   }
 
   private func autosave() async {
@@ -102,6 +116,7 @@ struct MeetingView: View {
     HStack(spacing: 12) {
       Text(model.phase == .recording ? "Meeting in progress" : "Meetings")
         .font(.system(size: 13, weight: .medium))
+        .accessibilityAddTraits(.isHeader)
       Spacer()
       if let meeting = model.draft {
         if copied {
@@ -127,7 +142,7 @@ struct MeetingView: View {
             Button("Move to Recently Deleted…", role: .destructive) { confirmingDelete = true }
               .disabled(model.summarizingSelection)
           } else {
-            Button("Restore meeting") { Task { await model.setDeleted(false) } }
+            Button("Restore meeting") { setDeleted(false) }
           }
         } label: {
           Image(systemName: "ellipsis.circle")
@@ -148,8 +163,11 @@ struct MeetingView: View {
         .tint(.red).buttonStyle(.borderedProminent)
       } else {
         Button("New meeting", systemImage: "plus") { confirmingCapture = true }
+          .keyboardShortcut("n", modifiers: .command)
           .disabled(!model.loaded || model.busy || model.saving || !model.captureSupported)
-          .help(model.captureSupported ? "Start a meeting recording" : unsupportedMessage)
+          .help(
+            model.captureSupported
+              ? "Start a meeting recording (Command-N)" : unsupportedMessage)
       }
     }.padding(.horizontal, 24).frame(height: 60)
   }
@@ -160,7 +178,7 @@ struct MeetingView: View {
         HStack(spacing: 12) {
           Label("This meeting is in Recently Deleted.", systemImage: "trash")
             .foregroundStyle(.secondary)
-          Button("Restore meeting") { Task { await model.setDeleted(false) } }
+          Button("Restore meeting") { setDeleted(false) }
             .disabled(model.busy || model.saving)
         }.font(.callout)
       }
@@ -184,6 +202,7 @@ struct MeetingView: View {
             if model.draft?.notes.isEmpty == true {
               Text("Add notes…")
                 .foregroundStyle(.secondary).padding(.horizontal, 4).allowsHitTesting(false)
+                .accessibilityHidden(true)
             }
             TextEditor(
               text: Binding(get: { model.draft?.notes ?? "" }, set: { model.draft?.notes = $0 })
@@ -257,6 +276,7 @@ struct MeetingView: View {
       }
     }.frame(maxWidth: .infinity, alignment: .leading)
       .accessibilityElement(children: .combine)
+      .accessibilityAddTraits(.isStaticText)
       .accessibilityHint(segment.isFailed ? failedSegmentHint : "")
   }
 
@@ -278,7 +298,7 @@ struct MeetingView: View {
     VStack(alignment: .leading, spacing: 12) {
       if model.summarizingSelection {
         HStack {
-          ProgressView().controlSize(.small)
+          ProgressView().controlSize(.small).accessibilityHidden(true)
           Text("Summarizing on this Mac…")
           Spacer()
           Button("Cancel") { model.cancelSummary() }
@@ -331,6 +351,7 @@ struct MeetingView: View {
         VaniTheme.accent
       ).accessibilityHidden(true)
       Text("Meetings").font(.system(size: 34, design: .serif))
+        .accessibilityAddTraits(.isHeader)
       Button("Start a meeting", systemImage: "mic") { confirmingCapture = true }
         .buttonStyle(.borderedProminent).controlSize(.large)
         .disabled(!model.loaded || model.busy || !model.captureSupported)
@@ -454,13 +475,14 @@ private struct FollowsLatest: ViewModifier {
 
 struct MeetingLibraryView: View {
   @ObservedObject var model: MeetingModel
+  @FocusState private var searchFocused: Bool
 
   var body: some View {
     VStack(alignment: .leading, spacing: 16) {
       HStack {
         Image(systemName: "magnifyingglass").foregroundStyle(.secondary).accessibilityHidden(true)
-        TextField("Search meetings", text: $model.search).textFieldStyle(.plain).accessibilityLabel(
-          "Search meetings")
+        TextField("Search meetings", text: $model.search).textFieldStyle(.plain)
+          .focused($searchFocused).accessibilityLabel("Search meetings")
         if !model.search.isEmpty {
           Button {
             model.search = ""
@@ -471,34 +493,19 @@ struct MeetingLibraryView: View {
         }
       }.padding(12).background(VaniTheme.paper, in: RoundedRectangle(cornerRadius: 8))
       HStack(spacing: 4) {
-        categoryButton("Meetings", deleted: false)
-        categoryButton("Recently Deleted", deleted: true)
+        categoryButton("Meetings", spoken: "All Meetings", deleted: false)
+        categoryButton("Recently Deleted", spoken: "Recently Deleted Meetings", deleted: true)
       }
       ScrollView {
         LazyVStack(alignment: .leading, spacing: 4) {
           ForEach(model.visibleMeetings) { meeting in
-            Button {
-              Task {
-                await model.select(meeting)
-              }
-            } label: {
-              VStack(alignment: .leading, spacing: 8) {
-                Text(meeting.title).font(.system(size: 14, weight: .semibold)).lineLimit(2)
-                Text(meeting.createdAt, format: .dateTime.month(.abbreviated).day().hour().minute())
-                  .font(.caption).foregroundStyle(.secondary)
-                if model.summarizingID == meeting.id {
-                  Label("Summarizing…", systemImage: "sparkles")
-                    .font(.caption).foregroundStyle(.secondary)
-                } else if meeting.endedAt == nil && model.phase == .idle {
-                  Label("Interrupted · recover", systemImage: "arrow.clockwise")
-                    .font(.caption).foregroundStyle(.secondary)
-                }
-              }.frame(maxWidth: .infinity, alignment: .leading).padding(12)
-                .background(
-                  model.draft?.id == meeting.id ? VaniTheme.paper : .clear,
-                  in: RoundedRectangle(cornerRadius: 10))
-            }.buttonStyle(.plain).disabled(model.busy || model.saving)
-              .accessibilityAddTraits(model.draft?.id == meeting.id ? .isSelected : [])
+            MeetingRow(
+              meeting: meeting, selected: model.draft?.id == meeting.id,
+              status: rowStatus(meeting)
+            ) {
+              Task { await model.select(meeting) }
+            }
+            .disabled(model.busy || model.saving)
           }
           if model.visibleMeetings.isEmpty {
             Text(
@@ -514,9 +521,21 @@ struct MeetingLibraryView: View {
         .font(.caption).foregroundStyle(.secondary).padding(.bottom, 20)
     }.padding(.horizontal, 20).padding(.top, 20)
       .background(VaniTheme.sidebar)
+      .background {
+        Button("Find Meetings") { searchFocused = true }
+          .keyboardShortcut("f", modifiers: .command).hidden().accessibilityHidden(true)
+      }
   }
 
-  private func categoryButton(_ title: String, deleted: Bool) -> some View {
+  private func rowStatus(_ meeting: MeetingRecord) -> MeetingRow.Status? {
+    if model.summarizingID == meeting.id { return .summarizing }
+    if meeting.endedAt == nil && model.phase == .idle { return .interrupted }
+    return nil
+  }
+
+  /// `spoken` keeps the visible word first while distinguishing this filter from the sidebar's
+  /// Meetings section for VoiceOver and Voice Control.
+  private func categoryButton(_ title: String, spoken: String, deleted: Bool) -> some View {
     Button {
       Task { await model.showDeleted(deleted) }
     } label: {
@@ -525,10 +544,102 @@ struct MeetingLibraryView: View {
       )
       .foregroundStyle(model.showingDeleted == deleted ? Color.primary : .secondary)
       .padding(.horizontal, 8).padding(.vertical, 8)
-      .background(
-        model.showingDeleted == deleted ? VaniTheme.paper : .clear,
-        in: RoundedRectangle(cornerRadius: 6))
+      .selectionHighlight(model.showingDeleted == deleted, cornerRadius: 6)
     }.buttonStyle(.plain).disabled(model.busy || model.saving)
+      .accessibilityLabel(spoken)
       .accessibilityAddTraits(model.showingDeleted == deleted ? .isSelected : [])
+  }
+}
+
+/// A meeting library row. As with notes, selection adds a leading accent bar besides the fill,
+/// so it is not conveyed by colour alone; VoiceOver receives the selected trait.
+private struct MeetingRow: View {
+  enum Status {
+    case summarizing, interrupted
+
+    var text: String {
+      switch self {
+      case .summarizing: "Summarizing…"
+      case .interrupted: "Interrupted · recover"
+      }
+    }
+    var spoken: String {
+      switch self {
+      case .summarizing: "summarizing"
+      case .interrupted: "interrupted, transcript can be recovered"
+      }
+    }
+    var icon: String { self == .summarizing ? "sparkles" : "arrow.clockwise" }
+  }
+
+  let meeting: MeetingRecord
+  let selected: Bool
+  let status: Status?
+  let select: () -> Void
+
+  var body: some View {
+    Button(action: select) {
+      HStack(spacing: 0) {
+        Capsule()
+          .fill(selected ? VaniTheme.accent : .clear)
+          .frame(width: 3)
+          .padding(.vertical, 8)
+        VStack(alignment: .leading, spacing: 8) {
+          Text(meeting.title).font(.system(size: 14, weight: .semibold)).lineLimit(2)
+          Text(meeting.createdAt, format: .dateTime.month(.abbreviated).day().hour().minute())
+            .font(.caption).foregroundStyle(.secondary)
+          if let status {
+            Label(status.text, systemImage: status.icon)
+              .font(.caption).foregroundStyle(.secondary)
+          }
+        }.frame(maxWidth: .infinity, alignment: .leading)
+          .padding(.vertical, 12).padding(.leading, 8).padding(.trailing, 12)
+      }
+      .selectionHighlight(selected, cornerRadius: 10)
+      .contentShape(Rectangle())
+    }
+    .buttonStyle(.plain)
+    .accessibilityLabel(meeting.title)
+    .accessibilityValue(
+      [
+        meeting.createdAt.formatted(.dateTime.month(.wide).day().hour().minute()),
+        status?.spoken,
+      ].compactMap(\.self).joined(separator: ", ")
+    )
+    .accessibilityAddTraits(selected ? .isSelected : [])
+  }
+}
+
+/// Brief VoiceOver announcements for meeting state that changes without a focus change. They
+/// name the state only and never include transcript, notes or summary text.
+enum MeetingAnnouncement {
+  struct State: Equatable {
+    let phase: MeetingModel.Phase
+    let summarizing: Bool
+    let error: String?
+
+    @MainActor init(_ model: MeetingModel) {
+      self.init(phase: model.phase, summarizing: model.summarizingID != nil, error: model.error)
+    }
+
+    init(phase: MeetingModel.Phase, summarizing: Bool, error: String?) {
+      self.phase = phase
+      self.summarizing = summarizing
+      self.error = error
+    }
+  }
+
+  static func message(from old: State, to new: State) -> String? {
+    let capturing: Set<MeetingModel.Phase> = [.recording, .finishing]
+    if new.phase == .recording, old.phase == .preparing { return "Meeting recording started" }
+    if capturing.contains(old.phase), !capturing.contains(new.phase) {
+      return new.error == nil
+        ? "Meeting recording stopped" : "Meeting recording stopped. \(new.error ?? "")"
+    }
+    if old.summarizing, !new.summarizing {
+      return new.error == nil ? "Summary ready" : "Summary not generated. \(new.error ?? "")"
+    }
+    if let error = new.error, error != old.error { return "Meeting error: \(error)" }
+    return nil
   }
 }
