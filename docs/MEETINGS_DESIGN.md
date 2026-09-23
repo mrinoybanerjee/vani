@@ -119,8 +119,9 @@ and counted in a short note; the summary fails only when every proposed item is 
 When a transcript needs more than one batch, a final consolidation pass merges duplicates into at
 most 8 summary items, 8 decisions and 10 actions. Each merged item must cite validated items of
 the same section by number and is shown with every cited quote and time. A merged item that adds
-a number or capitalized name absent from its cited items is rejected, and any validated item left
-uncited is kept as it was, so consolidation never drops evidence. Consolidation is skipped when a
+a number or capitalized name absent from its cited items is rejected, a cited item that shares
+fewer than two distinctive words with the merged statement is dropped from its citations, and any
+validated item left uncited is kept as it was, so consolidation never drops evidence. Consolidation is skipped when a
 conservative token estimate of the prompt plus answer exceeds the 8,192-token context. If it is
 skipped or fails, the de-duplicated batch items are used. An unavailable model produces an error and preserves the
 previous summary. Summaries run in the background: other meetings can be opened or recorded,
