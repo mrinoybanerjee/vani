@@ -477,11 +477,21 @@ public actor DictationSession {
   }
 
   public func audioRouteDidChange() async {
-    cancelRecordingLimitTimer()
     if machine.phase == .listening {
+      // Connecting headphones or switching microphones should not end a dictation.
+      if await audioCapture.continueOnCurrentInput(), machine.phase == .listening {
+        await diagnostics.record(
+          DiagnosticEvent(category: .capture, code: "capture_route_continued", phase: machine.phase)
+        )
+        return
+      }
+      guard machine.phase == .listening else { return }
+      cancelRecordingLimitTimer()
       await preserveInterruptedDictation(diagnosticCode: "capture_interrupted_audio_route")
       return
     }
+    cancelRecordingLimitTimer()
+    await audioCapture.inputRouteChanged()
     if isStartingCapture {
       await audioCapture.cancel()
     }

@@ -5,6 +5,25 @@ import Testing
 @testable import VaniCore
 
 struct MeetingAudioTests {
+  @Test func aRestartedStreamContinuesTheMeetingTimeline() throws {
+    guard #available(macOS 15.0, *) else { return }
+    let output = MeetingStreamOutput(
+      directory: FileManager.default.temporaryDirectory, onChunk: {}, onFailure: { _ in },
+      onStopped: { _ in })
+    let first = NSObject()
+    let second = NSObject()
+    output.beginStream(ObjectIdentifier(first), continuingAt: 0)
+    #expect(output.timelineOffset(for: 9_000) == 0)
+    #expect(output.timelineOffset(for: 9_004.5) == 4.5)
+    // The replacement stream's clock starts elsewhere; the meeting timeline does not.
+    output.beginStream(ObjectIdentifier(second), continuingAt: 6)
+    #expect(output.timelineOffset(for: 12) == 6)
+    #expect(output.timelineOffset(for: 15) == 9)
+    // An early base never moves the timeline backwards.
+    output.beginStream(ObjectIdentifier(first), continuingAt: 2)
+    #expect(output.timelineOffset(for: 100) == 9)
+  }
+
   @Test func repeatedCallbacksPreserveBothSourcesAndFinalTails() throws {
     guard #available(macOS 15.0, *) else { return }
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)

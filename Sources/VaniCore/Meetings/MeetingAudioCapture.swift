@@ -14,6 +14,11 @@ public protocol MeetingAudioRecording: AnyObject {
 
 /// ScreenCaptureKit supplies buffers on our serial work queue, not an audio render callback.
 /// File writes and conversion stay off the main actor. No video output is registered or stored.
+///
+/// Capture heals itself: if the stream stops with an error (a microphone disconnects or the
+/// audio route changes) it restarts up to three times, and when the default input changes it
+/// switches to the new microphone. The meeting timeline stays continuous across restarts; a
+/// short gap is recorded as a gap, never as overlapping audio.
 @available(macOS 15.0, *)
 @MainActor
 public final class MeetingAudioCapture: MeetingAudioRecording {
@@ -21,7 +26,13 @@ public final class MeetingAudioCapture: MeetingAudioRecording {
   public var isCapturing: Bool { stream != nil && !captureStopped }
   private var stream: SCStream?
   private var output: MeetingStreamOutput?
+  private var onFailure: (@Sendable (String) -> Void)?
+  private var startedAt: ContinuousClock.Instant?
+  private var restarting = false
+  private var stopping = false
+  private var inputObserver: DefaultInputObserver?
   private let queue = DispatchQueue(label: "com.mrinoy.vani.meeting-audio", qos: .userInitiated)
+  static let restartAttempts = 3
 
   public init() {}
 
@@ -34,48 +45,32 @@ public final class MeetingAudioCapture: MeetingAudioRecording {
       throw MeetingError.capture(
         "Allow Microphone access in System Settings before starting a meeting.")
     }
-    let content = try await SCShareableContent.excludingDesktopWindows(
-      false, onScreenWindowsOnly: false)
-    guard let display = content.displays.first else {
-      throw MeetingError.capture("No display is available for meeting audio capture.")
-    }
-    let excluded = content.applications.filter {
-      $0.processID == ProcessInfo.processInfo.processIdentifier
-    }
-    let filter = SCContentFilter(
-      display: display, excludingApplications: excluded, exceptingWindows: [])
-    let configuration = SCStreamConfiguration()
-    configuration.width = 2
-    configuration.height = 2
-    configuration.minimumFrameInterval = CMTime(seconds: 1, preferredTimescale: 600)
-    configuration.capturesAudio = true
-    configuration.captureMicrophone = true
-    configuration.excludesCurrentProcessAudio = true
-    configuration.sampleRate = 16_000
-    configuration.channelCount = 1
     let output = MeetingStreamOutput(
       directory: directory, onChunk: onChunk, onFailure: onFailure,
       onStopped: { [weak self] message in
-        Task { @MainActor in
-          self?.captureStopped = true
-          onFailure(message)
-        }
+        Task { @MainActor in await self?.streamStopped(message) }
       })
-    let stream = SCStream(filter: filter, configuration: configuration, delegate: output)
-    try stream.addStreamOutput(output, type: .audio, sampleHandlerQueue: queue)
-    try stream.addStreamOutput(output, type: .microphone, sampleHandlerQueue: queue)
+    let stream = try await makeStream(output: output)
     self.output = output
+    self.onFailure = onFailure
     self.stream = stream
     captureStopped = false
+    stopping = false
+    startedAt = ContinuousClock().now
     do { try await stream.startCapture() } catch {
       self.stream = nil
       self.output = nil
       throw error
     }
+    inputObserver = DefaultInputObserver { [weak self] in
+      Task { await self?.defaultInputChanged() }
+    }
   }
 
   public func stop() async throws {
     guard let stream, let output else { return }
+    stopping = true
+    inputObserver = nil
     // Retain both handles if stop fails; callers must not claim the microphone is released.
     if !captureStopped {
       try await stream.stopCapture()
@@ -92,6 +87,86 @@ public final class MeetingAudioCapture: MeetingAudioRecording {
     self.stream = nil
     self.output = nil
   }
+
+  private func makeStream(output: MeetingStreamOutput) async throws -> SCStream {
+    let content = try await SCShareableContent.excludingDesktopWindows(
+      false, onScreenWindowsOnly: false)
+    guard let display = content.displays.first else {
+      throw MeetingError.capture("No display is available for meeting audio capture.")
+    }
+    let excluded = content.applications.filter {
+      $0.processID == ProcessInfo.processInfo.processIdentifier
+    }
+    let filter = SCContentFilter(
+      display: display, excludingApplications: excluded, exceptingWindows: [])
+    let configuration = SCStreamConfiguration()
+    configuration.width = 2
+    configuration.height = 2
+    configuration.minimumFrameInterval = CMTime(seconds: 1, preferredTimescale: 600)
+    configuration.capturesAudio = true
+    configuration.captureMicrophone = true  // The current default input.
+    configuration.excludesCurrentProcessAudio = true
+    configuration.sampleRate = 16_000
+    configuration.channelCount = 1
+    let stream = SCStream(filter: filter, configuration: configuration, delegate: output)
+    try stream.addStreamOutput(output, type: .audio, sampleHandlerQueue: queue)
+    try stream.addStreamOutput(output, type: .microphone, sampleHandlerQueue: queue)
+    let identity = ObjectIdentifier(stream)
+    let elapsed = elapsedTimeline
+    // Enqueued before the stream starts, so its first buffer already uses the new timeline.
+    queue.async { output.beginStream(identity, continuingAt: elapsed) }
+    return stream
+  }
+
+  /// Seconds since the meeting started, used to place a restarted stream on the timeline.
+  private var elapsedTimeline: TimeInterval {
+    guard let startedAt else { return 0 }
+    let elapsed = ContinuousClock().now - startedAt
+    return Double(elapsed.components.seconds) + Double(elapsed.components.attoseconds) / 1e18
+  }
+
+  /// The stream stopped with an error. Restart it; give up only after repeated failures.
+  private func streamStopped(_ message: String) async {
+    guard !stopping, stream != nil else { return }
+    for attempt in 1...Self.restartAttempts {
+      try? await Task.sleep(for: .milliseconds(500 * attempt))
+      guard !stopping, stream != nil else { return }
+      if await restartStream(stoppingCurrent: false) {
+        VaniLog.event(category: .capture, code: "meeting_capture_restarted")
+        return
+      }
+    }
+    captureStopped = true
+    onFailure?(message)
+  }
+
+  /// A different microphone became the default input: follow it.
+  private func defaultInputChanged() async {
+    guard isCapturing, !stopping else { return }
+    if await restartStream(stoppingCurrent: true) {
+      VaniLog.event(category: .capture, code: "meeting_capture_followed_input")
+    }
+  }
+
+  private func restartStream(stoppingCurrent: Bool) async -> Bool {
+    guard !restarting, let output, let current = stream else { return false }
+    restarting = true
+    defer { restarting = false }
+    if stoppingCurrent { try? await current.stopCapture() }
+    do {
+      let replacement = try await makeStream(output: output)
+      try await replacement.startCapture()
+      guard !stopping else {
+        try? await replacement.stopCapture()
+        return false
+      }
+      stream = replacement
+      captureStopped = false
+      return true
+    } catch {
+      return false
+    }
+  }
 }
 
 @available(macOS 15.0, *)
@@ -100,6 +175,11 @@ final class MeetingStreamOutput: NSObject, SCStreamOutput, SCStreamDelegate, @un
 {
   private var pending: [MeetingAudioSource: MeetingChunkBuffer] = [:]
   private var origin: Double?
+  /// Meeting time at which the current stream began, and that stream's identity. Buffers
+  /// from a replaced stream are ignored; the new stream continues the same timeline.
+  private var timelineBase: TimeInterval = 0
+  private var latestOffset: TimeInterval = 0
+  private var currentStream: ObjectIdentifier?
   private var failed = false
   private var closed = false
   private let directory: URL
@@ -123,11 +203,27 @@ final class MeetingStreamOutput: NSObject, SCStreamOutput, SCStreamDelegate, @un
     onStopped("Meeting capture stopped: \(error.localizedDescription)")
   }
 
+  /// Called on the sample queue before a (re)started stream delivers audio.
+  func beginStream(_ identity: ObjectIdentifier, continuingAt base: TimeInterval) {
+    currentStream = identity
+    origin = nil
+    timelineBase = max(base, latestOffset)
+  }
+
+  /// Meeting time for a presentation timestamp of the current stream.
+  func timelineOffset(for timestamp: Double) -> TimeInterval {
+    if origin == nil { origin = timestamp }
+    let offset = timelineBase + max(0, timestamp - (origin ?? timestamp))
+    latestOffset = max(latestOffset, offset)
+    return offset
+  }
+
   func stream(
     _ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer,
     of type: SCStreamOutputType
   ) {
-    guard !closed, !failed, sampleBuffer.isValid, CMSampleBufferDataIsReady(sampleBuffer),
+    guard !closed, !failed, currentStream == nil || currentStream == ObjectIdentifier(stream),
+      sampleBuffer.isValid, CMSampleBufferDataIsReady(sampleBuffer),
       CMSampleBufferGetNumSamples(sampleBuffer) > 0, type == .audio || type == .microphone
     else {
       return
@@ -138,8 +234,7 @@ final class MeetingStreamOutput: NSObject, SCStreamOutput, SCStreamDelegate, @un
       guard !samples.isEmpty else { return }
       let timestamp = CMTimeGetSeconds(CMSampleBufferGetPresentationTimeStamp(sampleBuffer))
       guard timestamp.isFinite else { throw MeetingError.invalidData }
-      if origin == nil { origin = timestamp }
-      let offset = max(0, timestamp - (origin ?? timestamp))
+      let offset = timelineOffset(for: timestamp)
       guard offset < 2 * 60 * 60 else {
         throw MeetingError.capture(
           "The two-hour recording limit was reached. Stop this meeting and start a new one to continue."

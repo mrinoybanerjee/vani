@@ -15,6 +15,15 @@ private actor MockAudioCapture: AudioCapturing {
   private(set) var stopCount = 0
   private(set) var recoverPendingCount = 0
   private(set) var cancelCount = 0
+  private(set) var continueCount = 0
+  var continuesAfterRouteChange = false
+
+  func setContinuesAfterRouteChange(_ value: Bool) { continuesAfterRouteChange = value }
+
+  func continueOnCurrentInput() async -> Bool {
+    continueCount += 1
+    return continuesAfterRouteChange
+  }
 
   init(
     audio: CapturedAudio = CapturedAudio(samples: Array(repeating: 0.05, count: 8_000)),
@@ -1673,4 +1682,52 @@ func historyRevisionAdvancesOnlyAfterTheHistoryWriteLands() async throws {
 
   #expect(await session.snapshot().historyRevision == 1)
   #expect(try await history.load().map(\.text) == ["kept"])
+}
+
+@Test @MainActor
+func switchingMicrophonesDuringDictationKeepsRecordingAndInserts() async throws {
+  let audio = MockAudioCapture()
+  await audio.setContinuesAfterRouteChange(true)
+  let insertion = MockTextInserter(results: [.success(.verified)])
+  let diagnostics = DiagnosticStore()
+  let session = DictationSession(
+    audioCapture: audio,
+    speechRecognizer: MockSpeechRecognizer(results: [.success(speechResult("still here"))]),
+    textInserter: insertion,
+    focusProvider: MockFocusProvider(),
+    diagnostics: diagnostics
+  )
+
+  #expect(await session.prepareModels(allowDownload: false))
+  await session.beginDictation()
+  await session.audioRouteDidChange()
+  await session.audioRouteDidChange()
+  #expect(await session.snapshot().phase == .listening)
+  await session.endDictation()
+
+  #expect(insertion.insertedTexts == ["still here"])
+  #expect(await audio.continueCount == 2)
+  #expect(await audio.stopCount == 1)
+  #expect(await diagnostics.snapshot().contains { $0.code == "capture_route_continued" })
+}
+
+@Test @MainActor
+func losingEveryInputDuringDictationKeepsTheCapturedSpeechForRetry() async throws {
+  let audio = MockAudioCapture()
+  let session = DictationSession(
+    audioCapture: audio,
+    speechRecognizer: MockSpeechRecognizer(results: [.success(speechResult("recovered"))]),
+    textInserter: MockTextInserter(results: [.success(.verified)]),
+    focusProvider: MockFocusProvider(),
+    diagnostics: DiagnosticStore()
+  )
+
+  #expect(await session.prepareModels(allowDownload: false))
+  await session.beginDictation()
+  await session.audioRouteDidChange()
+
+  let snapshot = await session.snapshot()
+  #expect(snapshot.phase == .recoverableError)
+  #expect(snapshot.failure == .recordingInterrupted)
+  #expect(await audio.continueCount == 1)
 }
