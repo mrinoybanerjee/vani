@@ -9,6 +9,9 @@ struct MeetingView: View {
   @State private var confirmingCapture = false
   @State private var confirmingAudioRemoval = false
   @State private var confirmingDiscard = false
+  @State private var confirmingDelete = false
+  @State private var copied = false
+  @State private var followingTranscript = true
 
   var body: some View {
     VStack(alignment: .leading, spacing: 0) {
@@ -20,21 +23,10 @@ struct MeetingView: View {
       .tint(VaniTheme.accent).background(VaniTheme.paper)
       .onChange(of: model.draft?.id) {
         tab = model.draft?.summary.isEmpty == false ? "Summary" : "My notes"
+        followingTranscript = true
       }
-      .task(id: model.draft?.notes) {
-        do {
-          try await Task.sleep(for: .milliseconds(600))
-          while model.saving { try await Task.sleep(for: .milliseconds(10)) }
-          if !Task.isCancelled { await model.save() }
-        } catch {}
-      }
-      .task(id: model.draft?.title) {
-        do {
-          try await Task.sleep(for: .milliseconds(600))
-          while model.saving { try await Task.sleep(for: .milliseconds(10)) }
-          if !Task.isCancelled { await model.save() }
-        } catch {}
-      }
+      .task(id: model.draft?.notes) { await autosave() }
+      .task(id: model.draft?.title) { await autosave() }
       .confirmationDialog(
         "Start a meeting recording?", isPresented: $confirmingCapture, titleVisibility: .visible
       ) {
@@ -47,17 +39,40 @@ struct MeetingView: View {
         Button("Cancel", role: .cancel) {}
       } message: {
         Text(
-          "Vani records your microphone and other Mac audio. Let participants know before starting. Use headphones to reduce echo. Audio, transcription and summaries stay on this Mac."
+          "Vani records your microphone and other Mac audio. Let participants know before starting. macOS may ask you to allow Screen & System Audio Recording; Vani captures audio only, never your screen. Use headphones to reduce echo. Audio, transcription and summaries stay on this Mac."
         )
       }
       .confirmationDialog(
         "Remove this meeting’s saved audio?", isPresented: $confirmingAudioRemoval,
         titleVisibility: .visible
       ) {
-        Button("Remove audio", role: .destructive) { Task { await model.clearAudio() } }
+        if model.failedSegmentCount > 0 {
+          Button("Remove All Audio", role: .destructive) {
+            Task { await model.clearAudio(includingFailed: true) }
+          }
+        } else {
+          Button("Remove audio", role: .destructive) { Task { await model.clearAudio() } }
+        }
         Button("Keep audio", role: .cancel) {}
       } message: {
-        Text("Your notes, transcript and summary will remain. Audio removal cannot be undone.")
+        Text(
+          model.failedSegmentCount > 0
+            ? "\(model.failedSegmentCount) part(s) couldn’t be transcribed, and their audio is the only copy of that speech. Keep the audio to retry with Recover transcript. Removal cannot be undone."
+            : "Your notes, transcript and summary will remain. Audio removal cannot be undone."
+        )
+      }
+      .confirmationDialog(
+        "Move this meeting to Recently Deleted?", isPresented: $confirmingDelete,
+        titleVisibility: .visible
+      ) {
+        Button("Move to Recently Deleted", role: .destructive) {
+          Task { await model.setDeleted(true) }
+        }
+        Button("Cancel", role: .cancel) {}
+      } message: {
+        Text(
+          "You can restore it from Recently Deleted. Its notes, transcript, summary and saved audio are kept."
+        )
       }
       .confirmationDialog("Discard unsaved meeting changes?", isPresented: $confirmingDiscard) {
         Button("Discard Unsaved Changes", role: .destructive) { model.discardChanges() }
@@ -69,12 +84,34 @@ struct MeetingView: View {
       }
   }
 
+  private func autosave() async {
+    do {
+      try await Task.sleep(for: .milliseconds(600))
+      // save() waits for any write already in flight, then saves the latest draft.
+      await model.save()
+    } catch {}
+  }
+
+  private var recordingOrFinishing: Bool {
+    model.phase == .recording || model.phase == .stopping || model.phase == .transcribing
+      || model.phase == .finishing
+  }
+
   private var toolbar: some View {
-    HStack {
+    HStack(spacing: 12) {
       Text(model.phase == .recording ? "Meeting in progress" : "Meetings")
         .font(.system(size: 13, weight: .medium))
       Spacer()
       if let meeting = model.draft {
+        if copied {
+          Text("Copied").font(.caption).foregroundStyle(.secondary)
+        }
+        Button {
+          copyMarkdown(meeting)
+        } label: {
+          Image(systemName: "doc.on.clipboard")
+        }
+        .buttonStyle(.borderless).help("Copy as Markdown").accessibilityLabel("Copy as Markdown")
         Button {
           export(meeting)
         } label: {
@@ -84,6 +121,13 @@ struct MeetingView: View {
         Menu {
           Button("Recover transcript") { Task { await model.recoverTranscript() } }
           Button("Remove saved audio…", role: .destructive) { confirmingAudioRemoval = true }
+          Divider()
+          if meeting.deletedAt == nil {
+            Button("Move to Recently Deleted…", role: .destructive) { confirmingDelete = true }
+              .disabled(model.summarizingSelection)
+          } else {
+            Button("Restore meeting") { Task { await model.setDeleted(false) } }
+          }
         } label: {
           Image(systemName: "ellipsis.circle")
         }
@@ -103,13 +147,22 @@ struct MeetingView: View {
         .tint(.red).buttonStyle(.borderedProminent)
       } else {
         Button("New meeting", systemImage: "plus") { confirmingCapture = true }
-          .disabled(!model.loaded || model.busy || model.saving)
+          .disabled(!model.loaded || model.busy || model.saving || !model.captureSupported)
+          .help(model.captureSupported ? "Start a meeting recording" : unsupportedMessage)
       }
     }.padding(.horizontal, 24).frame(height: 60)
   }
 
   private var detail: some View {
     VStack(alignment: .leading, spacing: 20) {
+      if model.draft?.deletedAt != nil {
+        HStack(spacing: 12) {
+          Label("This meeting is in Recently Deleted.", systemImage: "trash")
+            .foregroundStyle(.secondary)
+          Button("Restore meeting") { Task { await model.setDeleted(false) } }
+            .disabled(model.busy || model.saving)
+        }.font(.callout)
+      }
       TextField(
         "Meeting title",
         text: Binding(get: { model.draft?.title ?? "" }, set: { model.draft?.title = $0 })
@@ -129,7 +182,7 @@ struct MeetingView: View {
           ZStack(alignment: .topLeading) {
             if model.draft?.notes.isEmpty == true {
               Text("Add notes…")
-                .foregroundStyle(.secondary).padding(.horizontal, 5).allowsHitTesting(false)
+                .foregroundStyle(.secondary).padding(.horizontal, 4).allowsHitTesting(false)
             }
             TextEditor(
               text: Binding(get: { model.draft?.notes ?? "" }, set: { model.draft?.notes = $0 })
@@ -143,76 +196,124 @@ struct MeetingView: View {
   }
 
   private var transcript: some View {
-    ScrollView {
-      LazyVStack(alignment: .leading, spacing: 20) {
-        ForEach(
-          (model.draft?.transcript ?? []).filter { !$0.text.isEmpty }.sorted {
-            $0.offset < $1.offset
-          }
-        ) { segment in
-          VStack(alignment: .leading, spacing: 8) {
-            Text(
-              "\(segment.source.label) · \(Int(segment.offset) / 60):\(String(format: "%02d", Int(segment.offset) % 60))"
-            )
-            .font(.caption.weight(.medium)).foregroundStyle(.secondary)
-            Text(segment.text).font(.system(size: 15)).lineSpacing(5).textSelection(.enabled)
-          }.frame(maxWidth: .infinity, alignment: .leading)
-        }
-        if model.draft?.transcript.allSatisfy({ $0.text.isEmpty }) == true {
+    VStack(alignment: .leading, spacing: 12) {
+      if model.echoCount > 0 {
+        Toggle(isOn: $model.showingEchoes) {
           Text(
-            model.phase == .recording
-              ? "Listening. Transcript updates arrive about every 20 seconds."
-              : "No speech transcribed yet."
+            "Show \(model.echoCount) microphone echo \(model.echoCount == 1 ? "line" : "lines") of Mac audio"
           )
-          .foregroundStyle(.secondary)
+        }
+        .toggleStyle(.checkbox).font(.caption)
+        .help("Without headphones, the microphone also hears other participants.")
+      }
+      ScrollViewReader { proxy in
+        ScrollView {
+          LazyVStack(alignment: .leading, spacing: 20) {
+            ForEach(model.visibleTranscript) { segment in
+              segmentView(segment).id(segment.id)
+            }
+            if model.visibleTranscript.isEmpty {
+              Text(
+                model.phase == .recording
+                  ? "Listening. Transcript updates arrive about every 20 seconds."
+                  : "No speech transcribed yet."
+              )
+              .foregroundStyle(.secondary)
+            }
+          }
+        }
+        .modifier(FollowsLatest(following: $followingTranscript))
+        .onChange(of: model.visibleTranscript.last?.id) {
+          guard model.phase == .recording, followingTranscript,
+            let last = model.visibleTranscript.last?.id
+          else { return }
+          proxy.scrollTo(last, anchor: .bottom)
         }
       }
     }
   }
 
+  private func segmentView(_ segment: MeetingTranscriptSegment) -> some View {
+    VStack(alignment: .leading, spacing: 8) {
+      Text(
+        "\(segment.source.label) · \(meetingTimestamp(segment.offset))\(segment.isEcho ? " · Echo of Mac audio" : "")"
+      )
+      .font(.caption.weight(.medium)).foregroundStyle(.secondary)
+      if segment.isFailed {
+        Label("Couldn’t transcribe \(segment.timeRange)", systemImage: "exclamationmark.triangle")
+          .font(.system(size: 15)).foregroundStyle(.secondary)
+          .help("The audio is kept. Use Recover transcript to try again.")
+      } else {
+        Text(segment.text).font(.system(size: 15)).lineSpacing(6).textSelection(.enabled)
+          .foregroundStyle(segment.isEcho ? .secondary : .primary)
+      }
+    }.frame(maxWidth: .infinity, alignment: .leading)
+      .accessibilityElement(children: .combine)
+  }
+
   private var summary: some View {
-    VStack(alignment: .leading, spacing: 14) {
-      if model.phase == .summarizing {
+    VStack(alignment: .leading, spacing: 12) {
+      if model.summarizingSelection {
         HStack {
           ProgressView().controlSize(.small)
           Text("Summarizing on this Mac…")
           Spacer()
           Button("Cancel") { model.cancelSummary() }
         }.font(.subheadline)
-      } else if model.phase == .recording || model.phase == .stopping
-        || model.phase == .transcribing || model.phase == .finishing
-      {
+      } else if recordingOrFinishing {
         Text("Your summary will be generated after capture and transcription finish.")
           .foregroundStyle(.secondary)
       } else {
-        Button(
-          model.draft?.summary.isEmpty == true ? "Generate summary" : "Regenerate summary",
-          systemImage: "sparkles"
-        ) {
-          Task { await model.generateSummary() }
-        }.disabled(model.transcriptionFailed || model.draft?.transcript.isEmpty == true)
+        HStack(spacing: 12) {
+          Button(
+            model.draft?.summary.isEmpty == true ? "Generate summary" : "Regenerate summary",
+            systemImage: "sparkles"
+          ) {
+            Task { await model.generateSummary() }
+          }.disabled(
+            model.transcriptionFailed || model.summarizingID != nil || model.saving
+              || model.draft?.transcript.contains(where: \.isSpeech) != true)
+          if model.summarizingID != nil {
+            Text("Another meeting is being summarized.").font(.caption).foregroundStyle(.secondary)
+          }
+        }
+      }
+      if model.summaryAvailability == .modelMissing || model.summaryAvailability == .unreachable {
+        Label(
+          "Summaries need Ollama with qwen3:4b — run `ollama pull qwen3:4b`",
+          systemImage: "info.circle"
+        )
+        .font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
       }
       Text(
-        "AI-generated from the transcript. Review the quoted sources before relying on decisions or action items."
+        "AI-generated on this Mac from the transcript, guided by your notes. Review the quoted sources before relying on decisions or action items."
       )
       .font(.caption).foregroundStyle(.secondary)
       ScrollView {
         Text(model.draft?.summary ?? "").font(.system(size: 15)).lineSpacing(6)
           .textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
       }
-    }
+    }.task { await model.refreshSummaryAvailability() }
   }
+
+  private let unsupportedMessage =
+    "Meeting recording requires macOS 15 or later. Dictation and quick notes still work."
 
   private var welcome: some View {
     VStack(alignment: .leading, spacing: 20) {
       Image(systemName: "waveform").font(.system(size: 30, weight: .light)).foregroundStyle(
-        VaniTheme.accent)
+        VaniTheme.accent
+      ).accessibilityHidden(true)
       Text("Meetings").font(.system(size: 34, design: .serif))
       Button("Start a meeting", systemImage: "mic") { confirmingCapture = true }
-        .buttonStyle(.borderedProminent).controlSize(.large).disabled(!model.loaded || model.busy)
-      Text("Microphone + Mac audio · Everything stays local")
-        .font(.caption).foregroundStyle(.secondary)
-    }.padding(40).frame(maxWidth: .infinity, maxHeight: .infinity)
+        .buttonStyle(.borderedProminent).controlSize(.large)
+        .disabled(!model.loaded || model.busy || !model.captureSupported)
+      Text(
+        model.captureSupported
+          ? "Microphone + Mac audio · Everything stays local" : unsupportedMessage
+      )
+      .font(.caption).foregroundStyle(.secondary)
+    }.padding(32).frame(maxWidth: .infinity, maxHeight: .infinity)
   }
 
   private var status: some View {
@@ -239,7 +340,7 @@ struct MeetingView: View {
             .keyboardShortcut("s", modifiers: .command).disabled(!model.dirty || model.saving)
         }
       }
-    }.font(.caption).controlSize(.small).padding(.horizontal, 24).padding(.vertical, 14)
+    }.font(.caption).controlSize(.small).padding(.horizontal, 24).padding(.vertical, 12)
   }
 
   private var statusText: String {
@@ -249,14 +350,29 @@ struct MeetingView: View {
     case .stopping, .finishing: "Finishing audio capture…"
     case .transcribing: "Finishing local transcription…"
     case .summarizing: "Generating a local summary…"
-    case .idle: model.saving ? "Saving…" : model.dirty ? "Unsaved changes" : "Saved on this Mac"
+    case .idle:
+      model.saving
+        ? "Saving…"
+        : model.dirty
+          ? "Unsaved changes"
+          : model.summarizingID != nil ? "Generating a local summary…" : "Saved on this Mac"
+    }
+  }
+
+  private func copyMarkdown(_ meeting: MeetingRecord) {
+    NSPasteboard.general.clearContents()
+    NSPasteboard.general.setString(meeting.markdownText, forType: .string)
+    copied = true
+    Task {
+      try? await Task.sleep(for: .seconds(2))
+      copied = false
     }
   }
 
   private func export(_ meeting: MeetingRecord) {
     let panel = NSSavePanel()
     panel.allowedContentTypes = [.plainText]
-    panel.nameFieldStringValue = "Vani Meeting.txt"
+    panel.nameFieldStringValue = meeting.exportFileName + ".txt"
     panel.begin { response in
       guard response == .OK, let url = panel.url else { return }
       do { try meeting.exportedText.write(to: url, atomically: true, encoding: .utf8) } catch {
@@ -266,18 +382,57 @@ struct MeetingView: View {
   }
 }
 
+/// Keeps the live transcript pinned to the newest segment until the user scrolls away from the
+/// bottom. Meeting capture needs macOS 15, which provides scroll geometry.
+private struct FollowsLatest: ViewModifier {
+  @Binding var following: Bool
+
+  private struct Position: Equatable {
+    let contentHeight: Double
+    let atBottom: Bool
+  }
+
+  func body(content: Content) -> some View {
+    if #available(macOS 15.0, *) {
+      content.onScrollGeometryChange(for: Position.self) { geometry in
+        Position(
+          contentHeight: geometry.contentSize.height,
+          atBottom: geometry.contentOffset.y + geometry.containerSize.height
+            >= geometry.contentSize.height - 48)
+      } action: { old, new in
+        // Growth from a new segment is not a user scroll; only movement changes following.
+        if old.contentHeight == new.contentHeight { following = new.atBottom }
+      }
+    } else {
+      content
+    }
+  }
+}
+
 struct MeetingLibraryView: View {
   @ObservedObject var model: MeetingModel
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 18) {
+    VStack(alignment: .leading, spacing: 16) {
       HStack {
-        Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+        Image(systemName: "magnifyingglass").foregroundStyle(.secondary).accessibilityHidden(true)
         TextField("Search meetings", text: $model.search).textFieldStyle(.plain).accessibilityLabel(
           "Search meetings")
-      }.padding(10).background(VaniTheme.paper, in: RoundedRectangle(cornerRadius: 8))
+        if !model.search.isEmpty {
+          Button {
+            model.search = ""
+          } label: {
+            Image(systemName: "xmark.circle.fill")
+          }
+          .buttonStyle(.plain).foregroundStyle(.secondary).accessibilityLabel("Clear search")
+        }
+      }.padding(12).background(VaniTheme.paper, in: RoundedRectangle(cornerRadius: 8))
+      HStack(spacing: 4) {
+        categoryButton("Meetings", deleted: false)
+        categoryButton("Recently Deleted", deleted: true)
+      }
       ScrollView {
-        LazyVStack(alignment: .leading, spacing: 6) {
+        LazyVStack(alignment: .leading, spacing: 4) {
           ForEach(model.visibleMeetings) { meeting in
             Button {
               Task {
@@ -288,20 +443,25 @@ struct MeetingLibraryView: View {
                 Text(meeting.title).font(.system(size: 14, weight: .semibold)).lineLimit(2)
                 Text(meeting.createdAt, format: .dateTime.month(.abbreviated).day().hour().minute())
                   .font(.caption).foregroundStyle(.secondary)
-                if meeting.endedAt == nil && model.phase == .idle {
+                if model.summarizingID == meeting.id {
+                  Label("Summarizing…", systemImage: "sparkles")
+                    .font(.caption).foregroundStyle(.secondary)
+                } else if meeting.endedAt == nil && model.phase == .idle {
                   Label("Interrupted · recover", systemImage: "arrow.clockwise")
                     .font(.caption).foregroundStyle(.secondary)
                 }
               }.frame(maxWidth: .infinity, alignment: .leading).padding(12)
                 .background(
                   model.draft?.id == meeting.id ? VaniTheme.paper : .clear,
-                  in: RoundedRectangle(cornerRadius: 9))
+                  in: RoundedRectangle(cornerRadius: 10))
             }.buttonStyle(.plain).disabled(model.busy || model.saving)
               .accessibilityAddTraits(model.draft?.id == meeting.id ? .isSelected : [])
           }
           if model.visibleMeetings.isEmpty {
             Text(
-              model.search.isEmpty ? "No meetings yet" : "No matching meetings"
+              !model.search.isEmpty
+                ? "No matching meetings"
+                : model.showingDeleted ? "No recently deleted meetings" : "No meetings yet"
             )
             .font(.caption).foregroundStyle(.secondary).padding(.top, 12)
           }
@@ -313,4 +473,19 @@ struct MeetingLibraryView: View {
       .background(VaniTheme.sidebar)
   }
 
+  private func categoryButton(_ title: String, deleted: Bool) -> some View {
+    Button {
+      Task { await model.showDeleted(deleted) }
+    } label: {
+      Text(title).font(
+        .system(size: 12, weight: model.showingDeleted == deleted ? .semibold : .regular)
+      )
+      .foregroundStyle(model.showingDeleted == deleted ? Color.primary : .secondary)
+      .padding(.horizontal, 8).padding(.vertical, 8)
+      .background(
+        model.showingDeleted == deleted ? VaniTheme.paper : .clear,
+        in: RoundedRectangle(cornerRadius: 6))
+    }.buttonStyle(.plain).disabled(model.busy || model.saving)
+      .accessibilityAddTraits(model.showingDeleted == deleted ? .isSelected : [])
+  }
 }

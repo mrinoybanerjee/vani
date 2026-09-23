@@ -322,7 +322,13 @@ final class AppCoordinator: ObservableObject {
         else { return false }
         meetingOwnsSpeech = true
         return true
-      }, releaseSpeech: { [weak self] in self?.meetingOwnsSpeech = false })
+      }, releaseSpeech: { [weak self] in self?.meetingOwnsSpeech = false },
+      vocabulary: { [weak self] in
+        guard let self else { return .empty }
+        return MeetingVocabulary(
+          dictionary: settings.dictionary, learnedCorrections: learnedCorrections,
+          personalizationEnabled: settings.personalizationEnabled)
+      })
     let controller = WorkspaceWindowController(model: WorkspaceModel(meetings: meetings))
     workspaceWindowController = controller
     return controller
