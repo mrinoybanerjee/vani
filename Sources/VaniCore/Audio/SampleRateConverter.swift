@@ -59,9 +59,8 @@ enum SampleRateConverter {
     else {
       throw VaniFailure.audioCaptureFailed
     }
-    // Conversion runs once per recording, off the audio thread, so use the
-    // highest-quality anti-aliasing filter available.
-    converter.sampleRateConverterAlgorithm = AVSampleRateConverterAlgorithm_Mastering
+    // Maximum-quality anti-aliasing with the normal algorithm costs about 3 ms per 30 s
+    // of 48 kHz audio on an M4; the mastering algorithm costs ~150 ms and is not used.
     converter.sampleRateConverterQuality = AVAudioQuality.max.rawValue
 
     guard
