@@ -25,11 +25,16 @@ struct NotesView: View {
       Text(
         "Only the unsaved edits will be discarded. Export a copy first if you want to keep them.")
     }
+    // Storage messages describe the failure, never the note's text.
+    .onChange(of: model.error) { _, error in
+      if let error { VoiceOverAnnouncer.announce("Notes: \(error)") }
+    }
   }
 
   private var toolbar: some View {
     HStack(spacing: 16) {
       Text("Notes").font(.system(size: 13, weight: .medium))
+        .accessibilityAddTraits(.isHeader)
       Spacer()
       if let note = model.draft {
         Button {
@@ -41,11 +46,9 @@ struct NotesView: View {
         .disabled(model.busy)
         Menu {
           if note.deletedAt == nil {
-            Button("Move to Recently Deleted", role: .destructive) {
-              Task { await model.setDeleted(true) }
-            }
+            Button("Move to Recently Deleted", role: .destructive) { setDeleted(true) }
           } else {
-            Button("Restore Note") { Task { await model.setDeleted(false) } }
+            Button("Restore Note") { setDeleted(false) }
           }
         } label: {
           Image(systemName: "ellipsis.circle")
@@ -96,7 +99,7 @@ struct NotesView: View {
           .disabled(model.busy || note.deletedAt != nil)
         }
         if note.deletedAt != nil {
-          Button("Restore note") { Task { await model.setDeleted(false) } }.disabled(model.busy)
+          Button("Restore note") { setDeleted(false) }.disabled(model.busy)
         }
       }
       .padding(32).frame(maxWidth: 780, maxHeight: .infinity, alignment: .topLeading)
@@ -108,6 +111,7 @@ struct NotesView: View {
           .accessibilityHidden(true)
         Text(model.notes.isEmpty ? "No notes yet" : "Select or create a note")
           .font(.system(size: 34, weight: .regular, design: .serif))
+          .accessibilityAddTraits(.isHeader)
         Button("Create a note", systemImage: "plus") { createNote() }
           .buttonStyle(.borderedProminent).controlSize(.large)
           .disabled(!model.loaded || model.busy)
@@ -123,6 +127,7 @@ struct NotesView: View {
           Text(error).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
         } icon: {
           Image(systemName: "exclamationmark.circle.fill").foregroundStyle(.red)
+            .accessibilityHidden(true)
         }
         HStack {
           if model.dirty {
@@ -139,9 +144,11 @@ struct NotesView: View {
           .foregroundStyle(.secondary)
         Spacer()
         if model.draft?.deletedAt == nil, model.draft != nil {
-          Button("Save") { Task { await model.save() } }
-            .keyboardShortcut("s", modifiers: .command)
-            .disabled(!model.dirty || model.busy)
+          Button("Save") {
+            Task { if await model.save() { VoiceOverAnnouncer.announce("Note saved") } }
+          }
+          .keyboardShortcut("s", modifiers: .command)
+          .disabled(!model.dirty || model.busy)
         }
       }
     }
@@ -153,6 +160,16 @@ struct NotesView: View {
     if model.busy { return "Saving…" }
     if model.error != nil { return "Storage needs attention" }
     return model.dirty ? "Unsaved changes · ⌘S to save" : "Saved on this Mac"
+  }
+
+  /// The selected note leaves the list either way, so VoiceOver hears where it went.
+  private func setDeleted(_ deleted: Bool) {
+    Task {
+      guard model.draft != nil else { return }
+      await model.setDeleted(deleted)
+      guard model.draft == nil else { return }
+      VoiceOverAnnouncer.announce(deleted ? "Note moved to Recently Deleted" : "Note restored")
+    }
   }
 
   private func createNote() {
@@ -185,6 +202,7 @@ struct NotesLibraryView: View {
       VStack(alignment: .leading, spacing: 16) {
         HStack {
           Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+            .accessibilityHidden(true)
           TextField("Search notes", text: $model.search)
             .textFieldStyle(.plain).focused($searchFocused).accessibilityLabel("Search notes")
           if !model.search.isEmpty {
@@ -198,8 +216,8 @@ struct NotesLibraryView: View {
         }
         .padding(8).background(VaniTheme.paper, in: RoundedRectangle(cornerRadius: 8))
         HStack(spacing: 4) {
-          categoryButton("Notes", deleted: false)
-          categoryButton("Recently Deleted", deleted: true)
+          categoryButton("Notes", spoken: "All Notes", deleted: false)
+          categoryButton("Recently Deleted", spoken: "Recently Deleted Notes", deleted: true)
         }
 
       }.padding(.horizontal, 20).padding(.top, 20)
@@ -229,7 +247,8 @@ struct NotesLibraryView: View {
         Label("On this Mac", systemImage: "internaldrive")
         Spacer()
         Text("\(model.visibleNotes.count)")
-          .accessibilityLabel("\(model.visibleNotes.count) notes")
+          .accessibilityLabel(
+            "\(model.visibleNotes.count) \(model.visibleNotes.count == 1 ? "note" : "notes")")
       }.font(.caption).foregroundStyle(.secondary).padding(20)
     }
     .background(VaniTheme.sidebar)
@@ -239,7 +258,9 @@ struct NotesLibraryView: View {
     }
   }
 
-  private func categoryButton(_ title: String, deleted: Bool) -> some View {
+  /// `spoken` keeps the visible word first while distinguishing this filter from the sidebar's
+  /// Notes section for VoiceOver and Voice Control.
+  private func categoryButton(_ title: String, spoken: String, deleted: Bool) -> some View {
     Button {
       Task { await model.showDeleted(deleted) }
     } label: {
@@ -248,10 +269,9 @@ struct NotesLibraryView: View {
       )
       .foregroundStyle(model.showingDeleted == deleted ? Color.primary : .secondary)
       .padding(.horizontal, 8).padding(.vertical, 8)
-      .background(
-        model.showingDeleted == deleted ? VaniTheme.paper : .clear,
-        in: RoundedRectangle(cornerRadius: 6))
+      .selectionHighlight(model.showingDeleted == deleted, cornerRadius: 6)
     }.buttonStyle(.plain).disabled(model.busy)
+      .accessibilityLabel(spoken)
       .accessibilityAddTraits(model.showingDeleted == deleted ? .isSelected : [])
   }
 }
@@ -263,6 +283,16 @@ private struct NoteRow: View {
   let selected: Bool
   let select: () -> Void
 
+  private var preview: String { note.text.isEmpty ? "Empty note" : String(note.text.prefix(160)) }
+
+  /// The preview without a first line that only repeats the title, which VoiceOver already read.
+  private var spokenPreview: String {
+    var text = Substring(note.text)
+    if text.hasPrefix(note.displayTitle) { text = text.dropFirst(note.displayTitle.count) }
+    let body = text.trimmingCharacters(in: .whitespacesAndNewlines)
+    return body.isEmpty ? "Empty note" : String(body.prefix(80))
+  }
+
   var body: some View {
     Button(action: select) {
       HStack(spacing: 0) {
@@ -273,7 +303,7 @@ private struct NoteRow: View {
         VStack(alignment: .leading, spacing: 4) {
           Text(note.displayTitle)
             .font(.system(size: 14, weight: selected ? .semibold : .medium)).lineLimit(2)
-          Text(note.text.isEmpty ? "Empty note" : String(note.text.prefix(160)))
+          Text(preview)
             .font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(2)
           Text(note.updatedAt, format: .dateTime.month(.abbreviated).day())
             .font(.system(size: 11)).foregroundStyle(.secondary)
@@ -281,10 +311,7 @@ private struct NoteRow: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.vertical, 12).padding(.leading, 8).padding(.trailing, 12)
       }
-      .background(
-        selected ? VaniTheme.paper : .clear,
-        in: RoundedRectangle(cornerRadius: 10)
-      )
+      .selectionHighlight(selected, cornerRadius: 10)
       .overlay {
         RoundedRectangle(cornerRadius: 10)
           .strokeBorder(selected ? VaniTheme.line : .clear)
@@ -292,6 +319,11 @@ private struct NoteRow: View {
       .contentShape(Rectangle())
     }
     .buttonStyle(.plain)
+    // The title names the row; the date and the start of the text follow as its value.
+    .accessibilityLabel(note.displayTitle)
+    .accessibilityValue(
+      "\(note.updatedAt.formatted(.dateTime.month(.wide).day())), \(spokenPreview)"
+    )
     .accessibilityAddTraits(selected ? .isSelected : [])
   }
 }

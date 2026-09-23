@@ -43,33 +43,14 @@ struct MenuContentView: View {
   }
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 0) {
-      header
-        .padding(20)
-      Divider()
-      if let error = coordinator.settingsError {
-        MenuErrorBanner(message: error, dismiss: coordinator.dismissSettingsError)
-          .padding(.horizontal, 24).padding(.top, 16)
-      }
+    MenuLayout(
+      status: statusLabel, statusIcon: statusIcon, error: coordinator.settingsError,
+      dismissError: coordinator.dismissSettingsError,
+      actions: MenuFooterActions(
+        meetings: coordinator.showMeetings, notes: { coordinator.showNotes() },
+        settings: coordinator.showSettings, quit: coordinator.quit)
+    ) {
       content
-        .padding(24)
-      Divider()
-      footer
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-    }
-    .frame(width: 360)
-    .background(VaniTheme.paper)
-    .tint(VaniTheme.accent)
-  }
-
-  private var header: some View {
-    HStack(spacing: 8) {
-      VaniWordmark(size: 24)
-      Spacer()
-      Label(statusLabel, systemImage: statusIcon)
-        .font(.caption)
-        .foregroundStyle(.secondary)
     }
   }
 
@@ -79,43 +60,16 @@ struct MenuContentView: View {
     case .recovery:
       RecoveryView()
     case .preparing:
-      PreparationView()
+      PreparationView(progress: coordinator.snapshot.modelProgress)
     case .setup:
       SetupView()
     case .meeting:
-      VStack(alignment: .leading, spacing: 12) {
-        Text("Meeting in progress").font(.system(size: 24, design: .serif))
-        Text("Dictation returns when the meeting finishes transcribing.")
-          .font(.caption).foregroundStyle(.secondary)
-        Button("Open Meeting", systemImage: "waveform") { coordinator.showMeetings() }
-          .buttonStyle(.borderedProminent)
-      }
+      MeetingInProgressView(open: coordinator.showMeetings)
     case .shortcutInactive:
       ShortcutInactiveView(quit: coordinator.quit)
     case .ready, .dictating:
       ReadyView()
     }
-  }
-
-  private var footer: some View {
-    HStack(spacing: 12) {
-      Button("Meetings", systemImage: "waveform") { coordinator.showMeetings() }
-      Button("Notes", systemImage: "note.text") { coordinator.showNotes() }
-      Button("Settings", systemImage: "gearshape") { coordinator.showSettings() }
-        .help("Settings (Command-Comma)")
-      Spacer()
-      Button {
-        coordinator.quit()
-      } label: {
-        Image(systemName: "power")
-          .frame(width: 24, height: 24)
-      }
-      .help("Quit Vani")
-      .accessibilityLabel("Quit Vani")
-    }
-    .buttonStyle(.plain)
-    .font(.caption)
-    .frame(height: 28)
   }
 
   private var statusIcon: String {
@@ -137,6 +91,91 @@ struct MenuContentView: View {
     case .ready: return "Ready"
     case .dictating:
       return coordinator.snapshot.phase == .listening ? "Listening" : "Transcribing…"
+    }
+  }
+}
+
+struct MenuFooterActions {
+  let meetings: () -> Void
+  let notes: () -> Void
+  let settings: () -> Void
+  let quit: () -> Void
+
+  static var none: MenuFooterActions { .init(meetings: {}, notes: {}, settings: {}, quit: {}) }
+}
+
+/// The menu's frame: wordmark and status, an optional settings error, the state content and
+/// the destinations footer. Driven by values so every menu state can be rendered and audited.
+struct MenuLayout<Content: View>: View {
+  let status: String
+  let statusIcon: String
+  var error: String?
+  var dismissError: () -> Void = {}
+  var actions = MenuFooterActions.none
+  @ViewBuilder let content: Content
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 0) {
+      header
+        .padding(20)
+      Divider()
+      if let error {
+        MenuErrorBanner(message: error, dismiss: dismissError)
+          .padding(.horizontal, 24).padding(.top, 16)
+      }
+      content
+        .padding(24)
+      Divider()
+      footer
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+    }
+    .frame(width: 360)
+    .background(VaniTheme.paper)
+    .tint(VaniTheme.accent)
+  }
+
+  private var header: some View {
+    HStack(spacing: 8) {
+      VaniWordmark(size: 24)
+      Spacer()
+      Label(status, systemImage: statusIcon)
+        .font(.caption)
+        .foregroundStyle(.secondary)
+    }
+  }
+
+  private var footer: some View {
+    HStack(spacing: 12) {
+      Button("Meetings", systemImage: "waveform", action: actions.meetings)
+      Button("Notes", systemImage: "note.text", action: actions.notes)
+      Button("Settings", systemImage: "gearshape", action: actions.settings)
+        .help("Settings (Command-Comma)")
+      Spacer()
+      Button(action: actions.quit) {
+        Image(systemName: "power")
+          .frame(width: 24, height: 24)
+      }
+      .help("Quit Vani")
+      .accessibilityLabel("Quit Vani")
+    }
+    .buttonStyle(.plain)
+    .font(.caption)
+    .frame(height: 28)
+  }
+}
+
+struct MeetingInProgressView: View {
+  let open: () -> Void
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 12) {
+      Text("Meeting in progress").font(.system(size: 24, design: .serif))
+        .accessibilityAddTraits(.isHeader)
+      Text("Dictation returns when the meeting finishes transcribing.")
+        .font(.caption).foregroundStyle(.secondary)
+      Button("Open Meeting", systemImage: "waveform", action: open)
+        .buttonStyle(.borderedProminent)
     }
   }
 }
@@ -275,6 +314,7 @@ struct SetupStepsView: View {
   var body: some View {
     VStack(alignment: .leading, spacing: 16) {
       Text("Set up Vani").font(.system(size: 24, design: .serif))
+        .accessibilityAddTraits(.isHeader)
       VStack(alignment: .leading, spacing: 12) {
         ForEach(steps) { step in
           SetupStepRow(step: step, perform: perform)
@@ -289,6 +329,7 @@ struct SetupStepsView: View {
       .foregroundStyle(.secondary)
       .accessibilityElement(children: .ignore)
       .accessibilityLabel("Then hold the \(shortcut.displayName) key to speak.")
+      .accessibilityAddTraits(.isStaticText)
     }
   }
 }
@@ -330,6 +371,7 @@ private struct SetupStepRow: View {
       .accessibilityElement(children: .ignore)
       .accessibilityLabel(step.accessibilityLabel)
       .accessibilityHint(step.detail)
+      .accessibilityAddTraits(.isStaticText)
 
       if let actionTitle = step.actionTitle {
         Button(actionTitle) { perform(step.action) }
@@ -403,8 +445,10 @@ struct ShortcutInactiveView: View {
         Text("Shortcut not active")
       } icon: {
         Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.secondary)
+          .accessibilityHidden(true)
       }
       .font(.system(size: 14, weight: .semibold))
+      .accessibilityAddTraits(.isHeader)
       Text("macOS applies Input Monitoring after Vani restarts.")
         .font(.system(size: 12))
         .foregroundStyle(.secondary)
@@ -429,22 +473,26 @@ struct ShortcutInactiveView: View {
 
 // MARK: - Progress, ready and recovery
 
-private struct PreparationView: View {
-  @EnvironmentObject private var coordinator: AppCoordinator
+struct PreparationView: View {
+  let progress: Double?
 
   var body: some View {
     VStack(alignment: .leading, spacing: 8) {
       Text("Preparing local speech model")
         .font(.system(size: 13, weight: .semibold))
-      if let progress = coordinator.snapshot.modelProgress {
+        .accessibilityAddTraits(.isHeader)
+      if let progress {
         ProgressView(value: progress)
+          .accessibilityLabel("Speech model download")
           .accessibilityValue("\(Int(progress * 100)) percent")
       } else {
         ProgressView()
+          .accessibilityLabel("Preparing speech model")
       }
       Text("The model stays on this Mac.")
         .font(.caption).foregroundStyle(.secondary)
     }
+    .announcesProgressMilestones(progress, subject: "Speech model download")
   }
 }
 
@@ -466,88 +514,81 @@ private struct ReadyView: View {
               install: coordinator.installImprovedModel)
           }
         } else {
-          Text(phaseTitle)
-            .font(.system(size: 28, weight: .regular, design: .serif))
-          HStack(spacing: 8) {
-            Image(systemName: phaseIcon).foregroundStyle(VaniTheme.accent)
-              .accessibilityHidden(true)
-            Text(listeningHint)
-              .font(.system(size: 12)).foregroundStyle(.secondary)
-            if coordinator.snapshot.phase != .listening { ProgressView().controlSize(.small) }
-          }
-          if coordinator.snapshot.phase == .listening {
-            HStack(spacing: 8) {
-              Button("Stop and Insert", systemImage: "stop.circle") {
-                coordinator.stopDictationFromMenu()
-              }
-              .buttonStyle(.borderedProminent)
-              Button("Cancel", systemImage: "xmark") {
-                coordinator.cancelDictationFromMenu()
-              }
-            }
-            .controlSize(.small)
-          }
+          DictationProgressView(
+            phase: coordinator.snapshot.phase, handsFree: coordinator.handsFreeLocked,
+            shortcut: coordinator.settings.shortcut,
+            stop: coordinator.stopDictationFromMenu,
+            cancel: coordinator.cancelDictationFromMenu)
         }
       }.padding(.bottom, 8)
 
       if coordinator.snapshot.phase == .ready,
         coordinator.snapshot.hasLastTranscript
       {
-        Divider()
-        Text("Last dictation").font(.system(size: 12, weight: .medium))
-          .foregroundStyle(.secondary)
-          .accessibilityAddTraits(.isHeader)
-        HStack(spacing: 8) {
-          Button("Paste Last", systemImage: "arrow.down.doc") {
-            coordinator.pasteLastTranscript()
-          }
-          .buttonStyle(.borderedProminent)
-          .help(lastTranscriptHelp("Paste", key: "V"))
+        LastDictationActions(
+          binding: coordinator.settings.lastTranscriptBinding,
+          canTeach: coordinator.settings.personalizationEnabled,
+          paste: coordinator.pasteLastTranscript,
+          copy: coordinator.copyLastTranscript,
+          teach: teach,
+          saveAsNote: { coordinator.showNotes(saveLastTranscript: true) })
+      }
+    }
+  }
 
-          Button("Copy", systemImage: "doc.on.doc") {
-            coordinator.copyLastTranscript()
-          }
-          .help(lastTranscriptHelp("Copy", key: "C"))
+  private func teach() {
+    coordinator.prepareToShowTeachWindow()
+    Task {
+      guard let candidate = await coordinator.correctionCandidate() else { return }
+      coordinator.showTeachWindow(for: candidate)
+    }
+  }
+}
 
-          if coordinator.settings.personalizationEnabled {
-            Button("Teach", systemImage: "brain.head.profile") {
-              coordinator.prepareToShowTeachWindow()
-              Task {
-                guard let candidate = await coordinator.correctionCandidate() else { return }
-                coordinator.showTeachWindow(for: candidate)
-              }
-            }
-            .help("Correct the last transcript and teach Vani")
-          }
+/// Listening, hands-free and transcribing states, with the menu's Stop and Cancel controls.
+struct DictationProgressView: View {
+  let phase: SessionPhase
+  let handsFree: Bool
+  let shortcut: HoldShortcut
+  var stop: () -> Void = {}
+  var cancel: () -> Void = {}
 
-          Spacer()
+  var body: some View {
+    VStack(alignment: .leading, spacing: 16) {
+      Text(phaseTitle)
+        .font(.system(size: 28, weight: .regular, design: .serif))
+        .accessibilityAddTraits(.isHeader)
+      HStack(spacing: 8) {
+        Image(systemName: phaseIcon).foregroundStyle(VaniTheme.accent)
+          .accessibilityHidden(true)
+        Text(listeningHint)
+          .font(.system(size: 12)).foregroundStyle(.secondary)
+        if phase != .listening {
+          ProgressView().controlSize(.small).accessibilityHidden(true)
         }
-        .controlSize(.small)
-        Button("Save as Note", systemImage: "note.text.badge.plus") {
-          coordinator.showNotes(saveLastTranscript: true)
+      }
+      if phase == .listening {
+        HStack(spacing: 8) {
+          Button("Stop and Insert", systemImage: "stop.circle", action: stop)
+            .buttonStyle(.borderedProminent)
+          Button("Cancel", systemImage: "xmark", action: cancel)
+            .accessibilityLabel("Cancel recording")
         }
         .controlSize(.small)
       }
     }
   }
 
-  private func lastTranscriptHelp(_ verb: String, key: String) -> String {
-    guard let symbols = coordinator.settings.lastTranscriptBinding.symbols else {
-      return "\(verb) last transcript"
-    }
-    return "\(verb) last transcript (\(symbols)\(key))"
-  }
-
   private var listeningHint: String {
-    guard coordinator.snapshot.phase == .listening else { return "On this Mac" }
-    let key = coordinator.settings.shortcut.displayName
-    return coordinator.handsFreeLocked
+    guard phase == .listening else { return "On this Mac" }
+    let key = shortcut.displayName
+    return handsFree
       ? "Hands-free. Press \(key) again when you’re done."
       : "Release \(key) when you’re done."
   }
 
   private var phaseTitle: String {
-    switch coordinator.snapshot.phase {
+    switch phase {
     case .listening: "Listening"
     case .transcribing, .inserting: "Transcribing…"
     default: "Vani"
@@ -555,11 +596,53 @@ private struct ReadyView: View {
   }
 
   private var phaseIcon: String {
-    switch coordinator.snapshot.phase {
+    switch phase {
     case .listening: "record.circle"
     case .transcribing, .inserting: "text.bubble"
     default: "checkmark.circle"
     }
+  }
+}
+
+/// Actions for the memory-only last transcript. Labels never include the transcript itself.
+struct LastDictationActions: View {
+  let binding: LastTranscriptBinding
+  let canTeach: Bool
+  var paste: () -> Void = {}
+  var copy: () -> Void = {}
+  var teach: () -> Void = {}
+  var saveAsNote: () -> Void = {}
+
+  var body: some View {
+    Divider()
+    Text("Last dictation").font(.system(size: 12, weight: .medium))
+      .foregroundStyle(.secondary)
+      .accessibilityAddTraits(.isHeader)
+    HStack(spacing: 8) {
+      Button("Paste Last", systemImage: "arrow.down.doc", action: paste)
+        .buttonStyle(.borderedProminent)
+        .help(help("Paste", key: "V"))
+
+      Button("Copy", systemImage: "doc.on.doc", action: copy)
+        .help(help("Copy", key: "C"))
+        .accessibilityLabel("Copy last dictation")
+
+      if canTeach {
+        Button("Teach", systemImage: "brain.head.profile", action: teach)
+          .help("Correct the last transcript and teach Vani")
+          .accessibilityLabel("Teach Vani a correction")
+      }
+
+      Spacer()
+    }
+    .controlSize(.small)
+    Button("Save as Note", systemImage: "note.text.badge.plus", action: saveAsNote)
+      .controlSize(.small)
+  }
+
+  private func help(_ verb: String, key: String) -> String {
+    guard let symbols = binding.symbols else { return "\(verb) last transcript" }
+    return "\(verb) last transcript (\(symbols)\(key))"
   }
 }
 
@@ -598,6 +681,7 @@ struct ImprovedModelRow: View {
     .padding(12)
     .frame(maxWidth: .infinity, alignment: .leading)
     .background(VaniTheme.sidebar, in: RoundedRectangle(cornerRadius: 8))
+    .announcesProgressMilestones(progress, subject: "Speech model download")
   }
 }
 
@@ -621,7 +705,9 @@ struct ReadyShortcutRow: View {
       .accessibilityElement(children: .ignore)
       .accessibilityLabel(
         "Ready. Hold \(shortcut.displayName) to speak, release to insert."
-          + (handsFreeEnabled ? " Double-tap for hands-free. Escape cancels." : ""))
+          + (handsFreeEnabled ? " Double-tap for hands-free. Escape cancels." : "")
+      )
+      .accessibilityAddTraits(.isStaticText)
       if shortcut == .function, globeKey != .doNothing, globeKey != .unknown {
         VStack(alignment: .leading, spacing: 8) {
           Text("macOS also reacts to 🌐. Set “Press 🌐 key to” → Do Nothing.")
@@ -640,20 +726,42 @@ private struct RecoveryView: View {
   @EnvironmentObject private var coordinator: AppCoordinator
 
   var body: some View {
+    RecoveryContent(
+      snapshot: coordinator.snapshot,
+      primaryLabel: coordinator.primaryRecoveryLabel,
+      primaryIcon: coordinator.primaryRecoveryIcon,
+      primary: coordinator.performPrimaryRecoveryAction,
+      copy: coordinator.copyRecoveredTranscript,
+      discard: coordinator.discardRecovery)
+  }
+}
+
+/// A recoverable dictation failure with its preserved transcript and recovery actions.
+struct RecoveryContent: View {
+  let snapshot: SessionSnapshot
+  let primaryLabel: String?
+  let primaryIcon: String
+  var primary: () -> Void = {}
+  var copy: () -> Void = {}
+  var discard: () -> Void = {}
+
+  var body: some View {
     VStack(alignment: .leading, spacing: 12) {
       Label {
-        Text(coordinator.snapshot.failure?.title ?? "Action needed")
+        Text(snapshot.failure?.title ?? "Action needed")
       } icon: {
         Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.red)
+          .accessibilityHidden(true)
       }
       .font(.system(size: 14, weight: .semibold))
+      .accessibilityAddTraits(.isHeader)
 
-      Text(coordinator.snapshot.failure?.message ?? "Your transcript is preserved.")
+      Text(snapshot.failure?.message ?? "Your transcript is preserved.")
         .font(.system(size: 12))
         .foregroundStyle(.secondary)
         .fixedSize(horizontal: false, vertical: true)
 
-      if let transcript = coordinator.snapshot.recoverableTranscript {
+      if let transcript = snapshot.recoverableTranscript {
         ScrollView {
           Text(transcript)
             .font(.system(size: 12))
@@ -667,27 +775,23 @@ private struct RecoveryView: View {
       }
 
       HStack {
-        if let label = coordinator.primaryRecoveryLabel {
-          Button(label, systemImage: coordinator.primaryRecoveryIcon) {
-            coordinator.performPrimaryRecoveryAction()
-          }
-          .buttonStyle(.borderedProminent)
+        if let primaryLabel {
+          Button(primaryLabel, systemImage: primaryIcon, action: primary)
+            .buttonStyle(.borderedProminent)
         }
 
-        if coordinator.snapshot.hasRecoverableTranscript,
-          coordinator.snapshot.failure?.recoveryAction != .copyTranscript
+        if snapshot.hasRecoverableTranscript,
+          snapshot.failure?.recoveryAction != .copyTranscript
         {
-          Button("Copy", systemImage: "doc.on.doc") {
-            coordinator.copyRecoveredTranscript()
-          }
+          Button("Copy", systemImage: "doc.on.doc", action: copy)
+            .accessibilityLabel("Copy preserved transcript")
         }
 
         Spacer()
 
-        if coordinator.snapshot.failure?.recoveryAction != .startAgain {
-          Button("Discard", role: .destructive) {
-            coordinator.discardRecovery()
-          }
+        if snapshot.failure?.recoveryAction != .startAgain {
+          Button("Discard", role: .destructive, action: discard)
+            .accessibilityLabel("Discard preserved transcript")
         }
       }
       .controlSize(.small)
