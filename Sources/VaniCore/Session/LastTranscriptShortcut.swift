@@ -9,18 +9,22 @@ public enum LastTranscriptShortcutResolver {
   public static func action(
     keyCode: Int64,
     modifierFlagsRawValue: UInt64,
-    isRepeat: Bool
+    isRepeat: Bool,
+    binding: LastTranscriptBinding = .controlCommand
   ) -> LastTranscriptShortcutAction? {
     guard !isRepeat else { return nil }
     guard keyCode == 8 || keyCode == 9 else { return nil }
 
-    let flags = CGEventFlags(rawValue: modifierFlagsRawValue)
-    guard flags.contains(.maskCommand), flags.contains(.maskControl) else {
-      return nil
+    let required: CGEventFlags
+    switch binding {
+    case .controlCommand: required = [.maskControl, .maskCommand]
+    case .optionCommand: required = [.maskAlternate, .maskCommand]
+    case .controlOption: required = [.maskControl, .maskAlternate]
+    case .disabled: return nil
     }
-    guard !flags.contains(.maskShift), !flags.contains(.maskAlternate) else {
-      return nil
-    }
+    let chordModifiers: CGEventFlags = [.maskControl, .maskCommand, .maskAlternate, .maskShift]
+    let flags = CGEventFlags(rawValue: modifierFlagsRawValue).intersection(chordModifiers)
+    guard flags == required else { return nil }
 
     return switch keyCode {
     case 9: .paste

@@ -25,6 +25,7 @@ public actor DictationSession {
   private var preparationGeneration: UInt64 = 0
   private var isStartingCapture = false
   private var shouldStopAfterCaptureStarts = false
+  private var shouldCancelAfterCaptureStarts = false
   private var isPastingLastTranscript = false
   private var currentTarget: TextTarget?
   private var lastTranscript: String?
@@ -137,14 +138,18 @@ public actor DictationSession {
   }
 
   public func beginDictation() async {
-    guard machine.phase == .ready, !isStartingCapture else {
+    // Paste Last shares the ready phase across suspensions; starting now would clear
+    // the transcript it is about to insert.
+    guard machine.phase == .ready, !isStartingCapture, !isPastingLastTranscript else {
       await recordIgnored("capture_start", phase: machine.phase)
       return
     }
     isStartingCapture = true
     shouldStopAfterCaptureStarts = false
+    shouldCancelAfterCaptureStarts = false
     defer {
       isStartingCapture = false
+      shouldCancelAfterCaptureStarts = false
       if machine.phase != .listening {
         shouldStopAfterCaptureStarts = false
       }
@@ -167,13 +172,18 @@ public actor DictationSession {
     do {
       let captureStartedAt = ContinuousClock().now
       try await audioCapture.start()
-      guard machine.phase == .ready else {
+      guard machine.phase == .ready, !shouldCancelAfterCaptureStarts else {
         await audioCapture.cancel()
+        currentTarget = nil
         await recordIgnored("capture_start_cancelled", phase: machine.phase)
         return
       }
       try await transition(.captureStarted)
       guard machine.phase == .listening else { return }
+      if settings.personalizationEnabled, !learnedCorrections.isEmpty {
+        let recognizer = speechRecognizer
+        Task(priority: .userInitiated) { await recognizer.prewarmPersonalization() }
+      }
       if shouldStopAfterCaptureStarts {
         shouldStopAfterCaptureStarts = false
         await finishDictation()
@@ -198,6 +208,34 @@ public actor DictationSession {
     }
 
     await finishDictation()
+  }
+
+  /// Discards the active recording without transcription or insertion.
+  public func cancelDictation() async {
+    if isStartingCapture {
+      shouldCancelAfterCaptureStarts = true
+      VaniLog.event(category: .capture, code: "capture_cancel_queued")
+      return
+    }
+    guard machine.phase == .listening else {
+      await recordIgnored("capture_cancel", phase: machine.phase)
+      return
+    }
+    cancelRecordingLimitTimer()
+    do {
+      // Reserve the transition first so a concurrent release cannot finalize this audio.
+      try machine.transition(.captureCancelled)
+    } catch {
+      await recordIgnored("capture_cancel", phase: machine.phase)
+      return
+    }
+    await audioCapture.cancel()
+    await recovery.clear()
+    currentTarget = nil
+    failure = nil
+    didUnexpectedlyTruncateCurrentAudio = false
+    VaniLog.event(category: .capture, code: "capture_cancelled")
+    await publishTransition(.captureCancelled)
   }
 
   private func finishDictation(automaticallyStopped: Bool = false) async {
@@ -312,7 +350,7 @@ public actor DictationSession {
   }
 
   public func pasteLastTranscript() async {
-    guard machine.phase == .ready, !isPastingLastTranscript else {
+    guard machine.phase == .ready, !isPastingLastTranscript, !isStartingCapture else {
       await recordIgnored("paste_last", phase: machine.phase)
       return
     }
@@ -635,23 +673,22 @@ public actor DictationSession {
       )
     )
     guard machine.phase == .inserting else { return }
-    if settings.historyEnabled, payload.shouldAppendToHistory {
+    let historyLimit = settings.historyEnabled && payload.shouldAppendToHistory
+      ? settings.historyLimit : nil
+    await recovery.clear()
+    currentTarget = nil
+    failure = nil
+    try await transition(.insertionSucceeded)
+    // The text is already delivered; rewriting history must not delay the next dictation.
+    if let historyLimit {
       do {
-        try await history.append(
-          TranscriptHistoryEntry(text: transcript),
-          limit: settings.historyLimit
-        )
+        try await history.append(TranscriptHistoryEntry(text: transcript), limit: historyLimit)
       } catch {
         await diagnostics.record(
           DiagnosticEvent(category: .storage, code: "history_write_failed")
         )
       }
     }
-    guard machine.phase == .inserting else { return }
-    await recovery.clear()
-    currentTarget = nil
-    failure = nil
-    try await transition(.insertionSucceeded)
   }
 
   private func fail(_ failure: VaniFailure) async {

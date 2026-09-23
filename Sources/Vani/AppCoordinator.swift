@@ -21,6 +21,8 @@ final class AppCoordinator: ObservableObject {
   @Published private(set) var settingsError: String?
   /// True only while the global event tap is installed and receiving the hold shortcut.
   @Published private(set) var shortcutActive = false
+  /// True after a double-tap locks recording on; the next press stops it.
+  @Published private(set) var handsFreeLocked = false
   @Published var settings: VaniSettings = .default
 
   private let settingsStore: SettingsStore
@@ -45,6 +47,8 @@ final class AppCoordinator: ObservableObject {
   private var settingsRevision: UInt64 = 0
   private var personalizationRevision: UInt64 = 0
   private var startCueWasPreplayed = false
+  private var holdGesture: HoldGesture = .idle
+  private var secondTapTask: Task<Void, Never>?
   private var isTerminating = false
   private var quitPreflight = false
   private var started = false
@@ -121,11 +125,21 @@ final class AppCoordinator: ObservableObject {
     }
 
     hotkeyMonitor.onPress = { [weak self] in
-      self?.beginDictation()
+      self?.shortcutPressed()
     }
     hotkeyMonitor.onRelease = { [weak self] in
-      self?.endDictation()
+      self?.shortcutReleased()
     }
+    hotkeyMonitor.onEscape = { [weak self] in
+      guard let self, settings.escapeCancelsEnabled else { return }
+      cancelDictation(reason: "escape")
+    }
+    hotkeyMonitor.onKeyDuringHold = { [weak self] in
+      guard let self, case .holding = holdGesture else { return }
+      cancelDictation(reason: "chord")
+    }
+    let binding = settings.lastTranscriptBinding
+    hotkeyMonitor.lastTranscriptBinding.withLock { $0 = binding }
     hotkeyMonitor.onPasteLast = { [weak self] in
       self?.pasteLastTranscript()
     }
@@ -140,6 +154,7 @@ final class AppCoordinator: ObservableObject {
       _ = await session.prepareModels(allowDownload: false)
     }
     configureHotkey()
+    refreshLaunchAtLogin()
     await refreshHistory()
     AppDelegate.coordinatorDidBecomeReady()
   }
@@ -399,6 +414,22 @@ final class AppCoordinator: ObservableObject {
     persistSettings()
   }
 
+  func setHandsFreeEnabled(_ enabled: Bool) {
+    settings.handsFreeEnabled = enabled
+    persistSettings()
+  }
+
+  func setEscapeCancelsEnabled(_ enabled: Bool) {
+    settings.escapeCancelsEnabled = enabled
+    persistSettings()
+  }
+
+  func setLastTranscriptBinding(_ binding: LastTranscriptBinding) {
+    settings.lastTranscriptBinding = binding
+    hotkeyMonitor.lastTranscriptBinding.withLock { $0 = binding }
+    persistSettings()
+  }
+
   func setPersonalizationEnabled(_ enabled: Bool) {
     settings.personalizationEnabled = enabled
     persistSettings()
@@ -496,13 +527,24 @@ final class AppCoordinator: ObservableObject {
       } else {
         try SMAppService.mainApp.unregister()
       }
-      settings.launchAtLogin = enabled
       settingsError = nil
-      persistSettings()
     } catch {
       settingsError = "Launch at login requires the bundled Vani app."
       recordDiagnostic(category: .storage, code: "launch_at_login_failed")
     }
+    refreshLaunchAtLogin()
+    if enabled, SMAppService.mainApp.status == .requiresApproval {
+      settingsError = "Allow Vani in System Settings › General › Login Items."
+      SMAppService.openSystemSettingsLoginItems()
+    }
+  }
+
+  /// The login item can change in System Settings; reflect macOS rather than the saved flag.
+  func refreshLaunchAtLogin() {
+    let enabled = SMAppService.mainApp.status == .enabled
+    guard settings.launchAtLogin != enabled else { return }
+    settings.launchAtLogin = enabled
+    persistSettings()
   }
 
   @discardableResult
@@ -674,22 +716,134 @@ final class AppCoordinator: ObservableObject {
       if generation == captureStartGeneration {
         captureStartTask = nil
       }
+      updateRecordingActive()
+    }
+    updateRecordingActive()
+  }
+
+  private enum HoldGesture: Equatable {
+    case idle
+    case holding(since: ContinuousClock.Instant)
+    case awaitingSecondTap
+    /// Locked on; the press that locked it has not been released yet.
+    case lockedWhilePressed
+    case locked
+    /// The press that stopped a locked recording has not been released yet.
+    case stoppingWhilePressed
+  }
+
+  /// A press released sooner than this may be the first half of a double-tap.
+  private static let quickTapThreshold: Duration = .milliseconds(300)
+  private static let secondTapWindow: Duration = .milliseconds(300)
+
+  private var recordingInProgress: Bool {
+    captureStartTask != nil || snapshot.phase == .listening
+  }
+
+  private func shortcutPressed() {
+    switch holdGesture {
+    case .locked:
+      holdGesture = .stoppingWhilePressed
+      setHandsFreeLocked(false)
+      endDictation()
+    case .awaitingSecondTap:
+      secondTapTask?.cancel()
+      secondTapTask = nil
+      guard recordingInProgress else {
+        holdGesture = .idle
+        return
+      }
+      holdGesture = .lockedWhilePressed
+      setHandsFreeLocked(true)
+      VaniLog.event(category: .capture, code: "hands_free_locked")
+    case .idle, .holding, .lockedWhilePressed, .stoppingWhilePressed:
+      holdGesture = .holding(since: ContinuousClock().now)
+      beginDictation()
     }
   }
 
+  private func shortcutReleased() {
+    switch holdGesture {
+    case .holding(let since):
+      let quickTap = ContinuousClock().now - since < Self.quickTapThreshold
+      guard settings.handsFreeEnabled, quickTap, recordingInProgress else {
+        holdGesture = .idle
+        endDictation()
+        return
+      }
+      // Keep recording briefly: a second press within the window locks hands-free mode.
+      holdGesture = .awaitingSecondTap
+      secondTapTask = Task { [weak self] in
+        try? await Task.sleep(for: Self.secondTapWindow)
+        guard let self, !Task.isCancelled, holdGesture == .awaitingSecondTap else { return }
+        secondTapTask = nil
+        holdGesture = .idle
+        endDictation()
+      }
+    case .lockedWhilePressed:
+      holdGesture = .locked
+    case .stoppingWhilePressed:
+      holdGesture = .idle
+    case .idle, .awaitingSecondTap, .locked:
+      endDictation()
+    }
+  }
+
+  private func setHandsFreeLocked(_ locked: Bool) {
+    guard handsFreeLocked != locked else { return }
+    handsFreeLocked = locked
+  }
+
+  private func resetHoldGesture() {
+    secondTapTask?.cancel()
+    secondTapTask = nil
+    holdGesture = .idle
+    setHandsFreeLocked(false)
+  }
+
+  /// Discards the recording that is starting or active. Never inserts text.
+  private func cancelDictation(reason: String) {
+    guard recordingInProgress else { return }
+    resetHoldGesture()
+    let startTask = captureStartTask
+    captureStartGeneration &+= 1
+    let generation = captureStartGeneration
+    startTask?.cancel()
+    VaniLog.event(category: .capture, code: "capture_cancel_\(reason)")
+    Task { [weak self] in
+      guard let self else { return }
+      // Queue cancellation for a start already inside the session, then cancel
+      // whatever that start produced.
+      await session.cancelDictation()
+      await startTask?.value
+      await session.cancelDictation()
+      if captureStartGeneration == generation { captureStartTask = nil }
+      updateRecordingActive()
+    }
+  }
+
+  /// A release must never be dropped: it is the only thing that closes the microphone.
+  /// It therefore bypasses the single-operation gate used by retries and Paste Last.
   private func endDictation() {
+    guard !isTerminating else { return }
     let startTask = captureStartTask
     captureStartGeneration &+= 1
     let releaseGeneration = captureStartGeneration
     startTask?.cancel()
-    performSessionOperation { coordinator in
+    Task { [weak self] in
       await startTask?.value
-      if coordinator.captureStartGeneration == releaseGeneration {
-        coordinator.captureStartTask = nil
+      guard let self else { return }
+      if captureStartGeneration == releaseGeneration {
+        captureStartTask = nil
       }
-      guard !Task.isCancelled else { return }
-      await coordinator.session.endDictation()
+      await session.endDictation()
+      updateRecordingActive()
     }
+  }
+
+  private func updateRecordingActive() {
+    let active = recordingInProgress
+    hotkeyMonitor.recordingActive.withLock { $0 = active }
   }
 
   private func performSessionOperation(
@@ -710,6 +864,11 @@ final class AppCoordinator: ObservableObject {
   private func apply(_ newSnapshot: SessionSnapshot) {
     let previous = snapshot.phase
     snapshot = newSnapshot
+    updateRecordingActive()
+    if previous == .listening, newSnapshot.phase != .listening, captureStartTask == nil {
+      // Limit, interruption or failure can end a locked recording without a key press.
+      if handsFreeLocked || holdGesture == .awaitingSecondTap { resetHoldGesture() }
+    }
     overlay.update(snapshot: newSnapshot, previousPhase: previous)
     if let cue = DictationCueResolver.cue(
       previousPhase: previous,
@@ -898,6 +1057,7 @@ final class AppCoordinator: ObservableObject {
         Task { @MainActor in
           await self?.refreshPermissions()
           self?.configureHotkey()
+          self?.refreshLaunchAtLogin()
           await self?.prepareWhenPossible()
         }
       }

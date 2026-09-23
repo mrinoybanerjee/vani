@@ -24,15 +24,23 @@ protocol TextInsertionEnvironment: AnyObject {
 }
 
 enum AccessibilityFocusResolver {
+  /// Accessibility calls block the main actor until the target app answers. The
+  /// system default is about six seconds, so a hung frontmost app could freeze Vani
+  /// repeatedly during one insertion. Every Vani query is best-effort evidence.
+  static let messagingTimeout: Float = 0.5
+
   static func focusedElement(for processIdentifier: Int32) -> AXUIElement? {
     let application = AXUIElementCreateApplication(processIdentifier)
+    AXUIElementSetMessagingTimeout(application, messagingTimeout)
     if let element = focusedElement(on: application),
       belongsToProcess(element, processIdentifier: processIdentifier)
     {
       return element
     }
 
-    guard let element = focusedElement(on: AXUIElementCreateSystemWide()),
+    let systemWide = AXUIElementCreateSystemWide()
+    AXUIElementSetMessagingTimeout(systemWide, messagingTimeout)
+    guard let element = focusedElement(on: systemWide),
       belongsToProcess(element, processIdentifier: processIdentifier)
     else {
       return nil

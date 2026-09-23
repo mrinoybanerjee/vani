@@ -59,6 +59,10 @@ enum SampleRateConverter {
     else {
       throw VaniFailure.audioCaptureFailed
     }
+    // Conversion runs once per recording, off the audio thread, so use the
+    // highest-quality anti-aliasing filter available.
+    converter.sampleRateConverterAlgorithm = AVSampleRateConverterAlgorithm_Mastering
+    converter.sampleRateConverterQuality = AVAudioQuality.max.rawValue
 
     guard
       let inputBuffer = AVAudioPCMBuffer(

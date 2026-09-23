@@ -14,6 +14,7 @@ public enum SessionEvent: String, Codable, CaseIterable, Sendable, Equatable {
   case preparationSucceeded
   case captureStarted
   case captureStopped
+  case captureCancelled
   case transcriptReady
   case pasteLastRequested
   case insertionSucceeded
@@ -80,6 +81,7 @@ public struct SessionStateMachine: Sendable, Equatable {
     case (.ready, .terminate): .disabled
 
     case (.listening, .captureStopped): .transcribing
+    case (.listening, .captureCancelled): .ready
     case (.listening, .failed), (.listening, .permissionsLost),
       (.listening, .audioRouteChanged), (.listening, .systemWillSleep):
       .recoverableError
