@@ -54,7 +54,8 @@ public enum HoldShortcut: String, Codable, CaseIterable, Sendable, Equatable, Id
 }
 
 /// Modifier chord that pairs with V (paste) and C (copy) for the last transcript.
-public enum LastTranscriptBinding: String, Codable, CaseIterable, Sendable, Equatable, Identifiable {
+public enum LastTranscriptBinding: String, Codable, CaseIterable, Sendable, Equatable, Identifiable
+{
   case controlCommand
   case optionCommand
   case controlOption

@@ -613,3 +613,56 @@ func failedEventConstructionLeavesTranscriptReadyForManualPaste() async throws {
   #expect(environment.postCount == 1)
   #expect(pasteboard.string(forType: .string) == "manual")
 }
+
+@Test
+func consecutiveDictationsAreSeparatedByASingleSpace() {
+  func observation(_ value: String, cursor: Int) -> TextInsertionObservation {
+    TextInsertionObservation(
+      value: value, selectedRange: NSRange(location: cursor, length: 0),
+      characterCount: (value as NSString).length)
+  }
+  typealias Inserter = SystemTextInserter
+  #expect(
+    Inserter.separatedFromPrecedingText("How", before: observation("Hi.", cursor: 3)) == " How")
+  #expect(
+    Inserter.separatedFromPrecedingText("How", before: observation("Hi. ", cursor: 4)) == "How")
+  #expect(Inserter.separatedFromPrecedingText("How", before: observation("", cursor: 0)) == "How")
+  #expect(Inserter.separatedFromPrecedingText("How", before: observation("(", cursor: 1)) == "How")
+  #expect(
+    Inserter.separatedFromPrecedingText(", then", before: observation("a", cursor: 1)) == ", then")
+  #expect(
+    Inserter.separatedFromPrecedingText("How", before: observation("a\n", cursor: 2)) == "How")
+  #expect(Inserter.separatedFromPrecedingText("How", before: nil) == "How")
+  #expect(Inserter.separatedFromPrecedingText("go", before: observation("ab", cursor: 1)) == " go")
+}
+
+@Test @MainActor
+func pastedTranscriptsAreTransientAndConcealedClipboardsAreNotRestored() async throws {
+  let focus = InsertionFocusProvider()
+  let environment = InsertionEnvironment(reads: [
+    insertionRead(value: "", range: NSRange(location: 0, length: 0), count: 0),
+    insertionRead(value: "hello", range: NSRange(location: 5, length: 0), count: 5),
+  ])
+  let pasteboard = NSPasteboard.withUniqueName()
+  defer { pasteboard.releaseGlobally() }
+  let secret = NSPasteboardItem()
+  secret.setString("hunter2", forType: .string)
+  secret.setData(Data(), forType: NSPasteboard.PasteboardType("org.nspasteboard.ConcealedType"))
+  pasteboard.clearContents()
+  pasteboard.writeObjects([secret])
+
+  var transientDuringPaste = false
+  environment.onDelivery = {
+    transientDuringPaste =
+      pasteboard.types?.contains(NSPasteboard.PasteboardType("org.nspasteboard.TransientType"))
+      == true
+  }
+
+  let result = try await makeInserter(
+    focus: focus, environment: environment, pasteboard: pasteboard
+  ).insert("hello", into: focus.target)
+
+  #expect(result == .verified)
+  #expect(transientDuringPaste)
+  #expect(pasteboard.string(forType: .string) == nil)
+}

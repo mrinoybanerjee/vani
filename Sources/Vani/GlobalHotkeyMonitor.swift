@@ -257,8 +257,9 @@ final class GlobalHotkeyMonitor {
       // Ordinary typing never leaves the callback. Only a key code and modifier
       // presence cross to the main actor, and only during a hold or recording.
       let isEscape = keyCode == escapeKeyCode
-      guard monitor.holdDown.withLock({ $0 })
-        || (isEscape && monitor.recordingActive.withLock({ $0 }))
+      guard
+        monitor.holdDown.withLock({ $0 })
+          || (isEscape && monitor.recordingActive.withLock({ $0 }))
       else { return Unmanaged.passUnretained(event) }
       let hasCommandOrControl =
         event.flags.contains(.maskCommand) || event.flags.contains(.maskControl)

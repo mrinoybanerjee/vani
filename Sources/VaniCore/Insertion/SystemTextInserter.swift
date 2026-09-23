@@ -123,7 +123,7 @@ public final class SystemTextInserter: TextInserting {
   /// Consecutive dictations would otherwise run together ("Hello world.How are you?").
   /// Adds one space only when the character before the insertion point is visible text
   /// and the transcript starts with a word, so it never doubles existing spacing.
-  static func separatedFromPrecedingText(
+  nonisolated static func separatedFromPrecedingText(
     _ text: String,
     before: TextInsertionObservation?
   ) -> String {

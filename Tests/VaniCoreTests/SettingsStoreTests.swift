@@ -281,3 +281,42 @@ func staleSettingsRevisionCannotOverwriteNewerSettings() async throws {
   #expect(await store.load().shortcut == .function)
   await store.clearSuiteForTesting()
 }
+
+@Test
+func lastTranscriptShortcutsFollowTheConfiguredChord() {
+  let optionCommand = CGEventFlags.maskAlternate.rawValue | CGEventFlags.maskCommand.rawValue
+  let controlCommand = CGEventFlags.maskControl.rawValue | CGEventFlags.maskCommand.rawValue
+
+  #expect(
+    LastTranscriptShortcutResolver.action(
+      keyCode: 9, modifierFlagsRawValue: optionCommand, isRepeat: false,
+      binding: .optionCommand) == .paste)
+  #expect(
+    LastTranscriptShortcutResolver.action(
+      keyCode: 9, modifierFlagsRawValue: controlCommand, isRepeat: false,
+      binding: .optionCommand) == nil)
+  #expect(
+    LastTranscriptShortcutResolver.action(
+      keyCode: 8, modifierFlagsRawValue: controlCommand, isRepeat: false,
+      binding: .disabled) == nil)
+}
+
+@Test
+func unknownSettingValuesResetOnlyThemselvesAndKeepTheUsersVocabulary() throws {
+  let json = """
+    {"shortcut":"futureKey","historyEnabled":true,
+     "dictionary":[{"id":"\(UUID().uuidString)","spoken":"vani","replacement":"Vani"},
+                   {"spoken":"missing id"}],
+     "snippets":[{"id":"\(UUID().uuidString)","trigger":"sig","expansion":"Best, M"}],
+     "lastTranscriptBinding":"unknownChord"}
+    """
+  let settings = try JSONDecoder().decode(VaniSettings.self, from: Data(json.utf8))
+
+  #expect(settings.shortcut == .function)
+  #expect(settings.historyEnabled)
+  #expect(settings.dictionary.map(\.replacement) == ["Vani"])
+  #expect(settings.snippets.map(\.expansion) == ["Best, M"])
+  #expect(settings.lastTranscriptBinding == .controlCommand)
+  #expect(settings.handsFreeEnabled)
+  #expect(settings.escapeCancelsEnabled)
+}

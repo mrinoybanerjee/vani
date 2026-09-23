@@ -673,7 +673,8 @@ public actor DictationSession {
       )
     )
     guard machine.phase == .inserting else { return }
-    let historyLimit = settings.historyEnabled && payload.shouldAppendToHistory
+    let historyLimit =
+      settings.historyEnabled && payload.shouldAppendToHistory
       ? settings.historyLimit : nil
     await recovery.clear()
     currentTarget = nil
