@@ -2,9 +2,10 @@
 
 ## Product boundary
 
-Vani v1 is an Apple Silicon, English-only, local dictation app. Do not add
-cloud transcription, accounts, telemetry, plugins, meeting capture, or a generic
-LLM cleanup layer without an approved design change.
+Vani is an Apple Silicon, English-only, local dictation app. Do not add cloud
+transcription, accounts, telemetry, plugins or a generic LLM cleanup layer for
+dictation without an approved design change. Meeting capture exists only in the
+approved form described below.
 
 The approved v0.4.0 extension adds an explicitly started, all-local meeting note taker
 alongside the optional quick notebook. Follow [docs/MEETINGS_DESIGN.md](docs/MEETINGS_DESIGN.md)
