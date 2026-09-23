@@ -16,11 +16,12 @@ Finish saving and quit Vani, then retry; the script never force-quits the app.
 
 This removes the installed app, Vani settings, optional history, learned corrections,
 all local Notes and Meetings files (including audio and backups), cache, and Vani's
-Microphone, Accessibility and Input Monitoring privacy records. This deletion is permanent.
-It keeps the shared FluidAudio speech model by default because
-another local app may use it.
+Microphone, Accessibility, Input Monitoring and Screen & System Audio Recording privacy
+records. This deletion is permanent. It keeps the shared FluidAudio speech models by
+default because another local app may use them.
 
-To also remove the approximately 443 MiB shared English model:
+To also remove the approximately 443 MiB English model and, if downloaded, the optional
+98 MiB vocabulary model:
 
 ```bash
 ./scripts/uninstall-local.sh --remove-model

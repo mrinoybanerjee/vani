@@ -80,7 +80,7 @@ the manual dictionary, while manual dictionary and snippet collisions are exclud
 Confirming a replacement again preserves its identity and uses the latest explicit casing.
 After two confirmations, up to 50 ranked terms can be passed to an optional experimental pinned CTC
 110M model for conservative acoustic rescoring. Any auxiliary-model failure returns the
-successful base TDT transcript. FluidAudio 0.15.5's rescoring path is disabled in Debug
+successful base TDT transcript. FluidAudio 0.15.8's rescoring path is disabled in Debug
 builds because that dependency enables content-bearing debug logs there.
 
 ## Insertion contract

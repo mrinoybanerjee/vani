@@ -80,7 +80,7 @@ rewrite text in another application.
 
 ## Acoustic vocabulary model
 
-FluidAudio 0.15.5 exposes CTC keyword spotting and vocabulary rescoring. Its documented
+FluidAudio 0.15.8 exposes CTC keyword spotting and vocabulary rescoring. Its documented
 batch convenience overload is not present in the pinned source, so Vani explicitly
 runs TDT, retains token timings, tokenizes the active terms, runs CTC keyword spotting,
 and performs constrained rescoring. Vani keeps
@@ -94,7 +94,7 @@ model downloader. The model is downloaded only after an explicit user action. If
 or fails during rescoring, Vani falls back to the base transcript and deterministic
 learned corrections. Loaded CTC objects are released after an idle period.
 
-FluidAudio 0.15.5 hard-enables transcript-bearing rescorer logs in Debug builds. Vani
+FluidAudio 0.15.8 hard-enables transcript-bearing rescorer logs in Debug builds. Vani
 therefore never invokes acoustic rescoring in Debug. Release builds compile those logs
 out and exercise the real model through a separate opt-in integration test.
 

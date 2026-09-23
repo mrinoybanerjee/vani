@@ -41,6 +41,33 @@ VANI_RUN_LONG_AUDIO_TESTS=1 swift test -c release \
   --filter twentyMinutePagedCaptureDrainsAndResamples
 ```
 
+## Speech accuracy
+
+Measured on 2026-09-23 on an Apple M4 (macOS 26.6.2) with the harness in
+[Benchmarks/](../Benchmarks/README.md): Parakeet TDT v2, release build, CPU + Neural
+Engine, 830 recordings and 9,694 seconds of audio from LibriSpeech test-clean and
+test-other. Long-form items join consecutive utterances from one chapter (60–312 s).
+Lower WER is better.
+
+| Set | Items | FluidAudio 0.15.5 | FluidAudio 0.15.8 |
+| --- | ---: | ---: | ---: |
+| test-clean, single utterances | 400 | 2.22% | 2.22% |
+| test-other, single utterances | 400 | 4.20% | 4.20% |
+| test-clean, long-form | 15 | 3.33% | **2.57%** |
+| test-other, long-form | 15 | 5.28% | **4.88%** |
+
+Both versions ran at about 135× real time over the whole set. Vani ships 0.15.8: short
+dictation is unchanged and long dictation loses 8–23% of its errors, consistent with
+upstream fixes to chunk-seam merging and trailing-word recovery. The two residual
+"catastrophic" test-other items are dialect spellings in the reference transcripts
+("awk'ard", "all outer is own ead"), not recognition failures.
+
+For comparison, NVIDIA Parakeet Unified EN 0.6B (int8 encoder, same harness) scored
+1.91% / 3.96% on single utterances and 2.45% / 5.01% long-form, at about 114× real time,
+with a larger download (about 600 MB against 443 MB). It is a candidate for a future
+model change, not what Vani uses today. LibriSpeech is read audiobook speech; it does
+not measure conversational dictation, accents, noise or domain vocabulary.
+
 ## Results
 
 Local verification on 2026-07-19 used an Apple M4 running macOS 26.5.2. With the

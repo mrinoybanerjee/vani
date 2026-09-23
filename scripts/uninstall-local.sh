@@ -10,7 +10,8 @@ usage() {
     cat <<'EOF'
 Usage: ./scripts/uninstall-local.sh [--remove-model] [--dry-run]
 
-  --remove-model  Also remove Vani's shared 443 MiB FluidAudio speech model.
+  --remove-model  Also remove Vani's shared FluidAudio speech models (443 MiB, plus the
+                  optional 98 MiB vocabulary model if it was downloaded).
   --dry-run       Print the paths and privacy records without changing them.
 EOF
 }
@@ -41,6 +42,7 @@ CACHE_PATH="$HOME/Library/Caches/com.mrinoy.vani"
 PREFERENCES_PATH="$HOME/Library/Preferences/com.mrinoy.vani.plist"
 SAVED_STATE_PATH="$HOME/Library/Saved Application State/com.mrinoy.vani.savedState"
 MODEL_PATH="$HOME/Library/Application Support/FluidAudio/Models/parakeet-tdt-0.6b-v2"
+VOCABULARY_MODEL_PATH="$HOME/Library/Application Support/FluidAudio/Models/parakeet-ctc-110m-coreml"
 
 remove_path() {
     local path="$1"
@@ -81,18 +83,20 @@ remove_path "$SAVED_STATE_PATH"
 
 if ((DRY_RUN)); then
     printf '[dry-run] delete defaults domain com.mrinoy.vani\n'
-    printf '[dry-run] reset Microphone, Accessibility, and Input Monitoring for com.mrinoy.vani\n'
+    printf '[dry-run] reset Microphone, Accessibility, Input Monitoring, and Screen Recording for com.mrinoy.vani\n'
 else
     defaults delete com.mrinoy.vani >/dev/null 2>&1 || true
     tccutil reset Microphone com.mrinoy.vani >/dev/null 2>&1 || true
     tccutil reset Accessibility com.mrinoy.vani >/dev/null 2>&1 || true
     tccutil reset ListenEvent com.mrinoy.vani >/dev/null 2>&1 || true
+    tccutil reset ScreenCapture com.mrinoy.vani >/dev/null 2>&1 || true
 fi
 
 if ((REMOVE_MODEL)); then
     remove_path "$MODEL_PATH"
+    remove_path "$VOCABULARY_MODEL_PATH"
 else
-    printf 'Kept shared speech model at %s\n' "$MODEL_PATH"
+    printf 'Kept shared speech models in %s\n' "$(dirname "$MODEL_PATH")"
 fi
 
 if ((DRY_RUN)); then

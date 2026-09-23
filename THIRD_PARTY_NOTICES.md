@@ -2,9 +2,15 @@
 
 ## FluidAudio
 
-Vani uses [FluidAudio](https://github.com/FluidInference/FluidAudio), version 0.15.5,
+Vani uses [FluidAudio](https://github.com/FluidInference/FluidAudio), version 0.15.8,
 under the Apache License 2.0. FluidAudio's own transitive notices remain available in
 its source distribution.
+
+FluidAudio 0.15.7 and later link
+[NemoTextProcessing](https://github.com/FluidInference/text-processing-rs) v0.3.0, a
+prebuilt Rust text-normalization library under the Apache License 2.0. SwiftPM verifies
+its archive against the checksum declared by the pinned FluidAudio release. Vani does
+not call it; it is linked because toolchains before Swift 6.2 cannot omit it.
 
 ## Parakeet TDT 0.6B V2 Core ML
 
