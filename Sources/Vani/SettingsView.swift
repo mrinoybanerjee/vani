@@ -14,6 +14,10 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
 
 struct SettingsView: View {
   @EnvironmentObject private var coordinator: AppCoordinator
+  /// False while the workspace shows another section. Drafts and the section picker stay alive
+  /// here, but the selected pane and its lists are not built, so hidden Settings does little
+  /// work when the coordinator publishes dictation state.
+  var active = true
   @State private var selection = SettingsSection.general
   @State private var vocabulary = VocabularyDraft()
   @State private var snippet = SnippetDraft()
@@ -21,34 +25,40 @@ struct SettingsView: View {
   var body: some View {
     VStack(alignment: .leading, spacing: 0) {
       Text("Settings").font(.system(size: 28, weight: .regular, design: .serif))
-        .padding(.horizontal, 28).padding(.top, 28).padding(.bottom, 20)
+        .padding(.horizontal, 24).padding(.top, 24).padding(.bottom, 16)
       Picker("Settings section", selection: $selection) {
         ForEach(SettingsSection.allCases) { section in
           Text(section.rawValue).tag(section)
         }
       }
       .pickerStyle(.segmented).labelsHidden()
-      .padding(.horizontal, 28).padding(.bottom, 12)
+      .padding(.horizontal, 24).padding(.bottom, 12)
       if let error = coordinator.settingsError {
         HStack(spacing: 8) {
-          Label(error, systemImage: "exclamationmark.circle").font(.caption)
-            .foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
-          Spacer()
-          Button {
-            coordinator.dismissSettingsError()
-          } label: {
-            Image(systemName: "xmark.circle")
+          Label {
+            Text(error).fixedSize(horizontal: false, vertical: true)
+          } icon: {
+            Image(systemName: "exclamationmark.circle.fill").foregroundStyle(.red)
           }
-          .buttonStyle(.plain).accessibilityLabel("Dismiss error")
-        }.padding(.horizontal, 28).padding(.vertical, 8)
+          .font(.system(size: 12))
+          Spacer()
+          Button("Dismiss") {
+            coordinator.dismissSettingsError()
+          }
+          .buttonStyle(.borderless).controlSize(.small).accessibilityLabel("Dismiss error")
+        }.padding(.horizontal, 24).padding(.vertical, 8)
       }
       Group {
-        switch selection {
-        case .general: GeneralSettingsView()
-        case .vocabulary: VocabularySettingsView(draft: $vocabulary)
-        case .snippets: SnippetSettingsView(draft: $snippet)
-        case .history: HistorySettingsView()
-        case .diagnostics: DiagnosticsSettingsView()
+        if active {
+          switch selection {
+          case .general: GeneralSettingsView()
+          case .vocabulary: VocabularySettingsView(draft: $vocabulary)
+          case .snippets: SnippetSettingsView(draft: $snippet)
+          case .history: HistorySettingsView()
+          case .diagnostics: DiagnosticsSettingsView()
+          }
+        } else {
+          Color.clear
         }
       }.frame(maxWidth: .infinity, maxHeight: .infinity)
 
@@ -56,6 +66,23 @@ struct SettingsView: View {
       .tint(VaniTheme.accent)
   }
 
+}
+
+/// Visible, keyboard-reachable delete control for list rows. Swipe-to-delete alone is not
+/// discoverable on the Mac and is unavailable to many keyboard and VoiceOver users.
+private struct DeleteRowButton: View {
+  let label: String
+  let action: () -> Void
+
+  var body: some View {
+    Button(role: .destructive, action: action) {
+      Image(systemName: "trash")
+        .frame(width: 24, height: 24)
+    }
+    .buttonStyle(.borderless)
+    .help("Delete")
+    .accessibilityLabel(label)
+  }
 }
 
 private struct VocabularyDraft {
@@ -109,23 +136,24 @@ private struct PersonalizationSettingsView: View {
         )
       )
 
-      Text("Saved corrections stay on this Mac. Vani never stores correction audio.")
+      Text("Corrections stay on this Mac. Vani never stores correction audio.")
         .font(.caption)
         .foregroundStyle(.secondary)
 
       GroupBox("Experimental acoustic vocabulary") {
         HStack {
-          VStack(alignment: .leading, spacing: 3) {
+          VStack(alignment: .leading, spacing: 4) {
             Text(
               coordinator.personalizationModelInstalled
-                ? "The optional experimental local model is installed."
-                : "Optional experimental local model for harder names and terminology."
+                ? "Installed on this Mac."
+                : "Optional local model for hard names and terms."
             )
             .font(.caption)
             .foregroundStyle(.secondary)
             if let progress = coordinator.personalizationModelProgress {
               ProgressView(value: progress)
                 .frame(maxWidth: 220)
+                .accessibilityValue("\(Int(progress * 100)) percent")
             }
           }
           Spacer()
@@ -145,31 +173,42 @@ private struct PersonalizationSettingsView: View {
         ContentUnavailableView(
           "Nothing Learned Yet",
           systemImage: "brain.head.profile",
-          description: Text("After dictation, choose Teach Vani and save your correction.")
+          description: Text("After dictation, choose Teach and save your correction.")
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
       } else {
         List {
           ForEach(coordinator.learnedCorrections) { correction in
-            VStack(alignment: .leading, spacing: 4) {
-              HStack(spacing: 8) {
-                Text(correction.spoken)
-                Image(systemName: "arrow.right")
-                  .foregroundStyle(.secondary)
-                Text(correction.replacement.isEmpty ? "Remove" : correction.replacement)
-                  .fontWeight(.medium)
-                Spacer()
-                if correction.confirmationCount > 1 {
-                  Text("×\(correction.confirmationCount)")
-                    .font(.caption.monospacedDigit())
+            HStack(spacing: 8) {
+              VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 8) {
+                  Text(correction.spoken)
+                  Image(systemName: "arrow.right")
+                    .foregroundStyle(.secondary)
+                    .accessibilityLabel("becomes")
+                  Text(correction.replacement.isEmpty ? "Remove" : correction.replacement)
+                    .fontWeight(.medium)
+                  Spacer()
+                  if correction.confirmationCount > 1 {
+                    Text("×\(correction.confirmationCount)")
+                      .font(.caption.monospacedDigit())
+                      .foregroundStyle(.secondary)
+                      .accessibilityLabel("confirmed \(correction.confirmationCount) times")
+                  }
+                }
+                if let bundleIdentifier = correction.applicationBundleIdentifier {
+                  Text(bundleIdentifier)
+                    .font(.caption2.monospaced())
                     .foregroundStyle(.secondary)
                 }
               }
-              if let bundleIdentifier = correction.applicationBundleIdentifier {
-                Text(bundleIdentifier)
-                  .font(.caption2.monospaced())
-                  .foregroundStyle(.tertiary)
+              .accessibilityElement(children: .combine)
+              DeleteRowButton(label: "Delete learned correction \(correction.spoken)") {
+                remove(correction.id)
               }
+            }
+            .contextMenu {
+              Button("Delete Correction", role: .destructive) { remove(correction.id) }
             }
           }
           .onDelete { coordinator.removeLearnedCorrections(at: $0) }
@@ -182,8 +221,11 @@ private struct PersonalizationSettingsView: View {
         )
         .font(.caption.monospacedDigit())
         .foregroundStyle(.secondary)
+        .accessibilityLabel(
+          "\(coordinator.learnedCorrections.count) of \(PersonalizationEngine.maximumCorrectionCount) corrections"
+        )
         Spacer()
-        Button("Reset Learning", role: .destructive) {
+        Button("Reset Learning…", role: .destructive) {
           confirmsReset = true
         }
         .disabled(coordinator.learnedCorrections.isEmpty)
@@ -203,6 +245,13 @@ private struct PersonalizationSettingsView: View {
       Text("This cannot be undone. Your manual dictionary is not affected.")
     }
   }
+
+  private func remove(_ id: UUID) {
+    guard let index = coordinator.learnedCorrections.firstIndex(where: { $0.id == id }) else {
+      return
+    }
+    coordinator.removeLearnedCorrections(at: IndexSet(integer: index))
+  }
 }
 
 private struct GeneralSettingsView: View {
@@ -219,10 +268,28 @@ private struct GeneralSettingsView: View {
           )
         ) {
           ForEach(HoldShortcut.allCases) { shortcut in
-            Text(shortcut.label).tag(shortcut)
+            Text(shortcut.displayName).tag(shortcut)
           }
         }
         .pickerStyle(.segmented)
+        Toggle(
+          isOn: Binding(
+            get: { coordinator.settings.handsFreeEnabled },
+            set: { coordinator.setHandsFreeEnabled($0) }
+          )
+        ) {
+          Text("Double-tap for hands-free")
+          Text("Double-tap the hold key to keep recording; press it again to insert.")
+        }
+        Toggle(
+          isOn: Binding(
+            get: { coordinator.settings.escapeCancelsEnabled },
+            set: { coordinator.setEscapeCancelsEnabled($0) }
+          )
+        ) {
+          Text("Escape cancels recording")
+          Text("Discards the recording without inserting text.")
+        }
         Toggle(
           "Smart Formatting",
           isOn: Binding(
@@ -235,6 +302,17 @@ private struct GeneralSettingsView: View {
             get: { coordinator.settings.soundFeedbackEnabled },
             set: { coordinator.setSoundFeedbackEnabled($0) }
           ))
+        Picker(
+          "Last transcript shortcut",
+          selection: Binding(
+            get: { coordinator.settings.lastTranscriptBinding },
+            set: { coordinator.setLastTranscriptBinding($0) }
+          )
+        ) {
+          ForEach(LastTranscriptBinding.allCases) { binding in
+            Text(binding.symbols.map { "\($0)V paste · \($0)C copy" } ?? "Off").tag(binding)
+          }
+        }
       }
 
       Section("On this Mac") {
@@ -289,18 +367,26 @@ private struct DictionarySettingsView: View {
         ContentUnavailableView(
           "Your words, spelled correctly",
           systemImage: "character.book.closed",
-          description: Text("Add a name or phrase above, then the spelling you want Vani to use.")
+          description: Text("Add a name or phrase, then the spelling Vani should use.")
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
       } else {
         List {
           ForEach(coordinator.settings.dictionary) { entry in
-            HStack {
-              Text(entry.spoken)
-              Spacer()
-              Image(systemName: "arrow.right")
-                .foregroundStyle(.secondary)
-              Text(entry.replacement)
+            HStack(spacing: 8) {
+              HStack(spacing: 8) {
+                Text(entry.spoken)
+                Spacer()
+                Image(systemName: "arrow.right")
+                  .foregroundStyle(.secondary)
+                  .accessibilityLabel("becomes")
+                Text(entry.replacement)
+              }
+              .accessibilityElement(children: .combine)
+              DeleteRowButton(label: "Delete \(entry.spoken)") { remove(entry.id) }
+            }
+            .contextMenu {
+              Button("Delete Correction", role: .destructive) { remove(entry.id) }
             }
           }
           .onDelete { coordinator.removeDictionaryEntries(at: $0) }
@@ -308,6 +394,13 @@ private struct DictionarySettingsView: View {
       }
     }
     .padding(20)
+  }
+
+  private func remove(_ id: UUID) {
+    guard let index = coordinator.settings.dictionary.firstIndex(where: { $0.id == id }) else {
+      return
+    }
+    coordinator.removeDictionaryEntries(at: IndexSet(integer: index))
   }
 }
 
@@ -330,8 +423,9 @@ private struct SnippetSettingsView: View {
           Text("Expanded text")
             .foregroundStyle(.tertiary)
             .padding(.horizontal, 6)
-            .padding(.vertical, 7)
+            .padding(.vertical, 8)
             .allowsHitTesting(false)
+            .accessibilityHidden(true)
         }
         TextEditor(text: $draft.expansion)
           .font(.body)
@@ -340,9 +434,9 @@ private struct SnippetSettingsView: View {
           .accessibilityLabel("Expanded snippet text")
       }
       .frame(height: 72)
-      .background(.background)
+      .background(.background, in: RoundedRectangle(cornerRadius: 8))
       .overlay {
-        RoundedRectangle(cornerRadius: 5)
+        RoundedRectangle(cornerRadius: 8)
           .strokeBorder(.quaternary, lineWidth: 1)
       }
 
@@ -350,6 +444,8 @@ private struct SnippetSettingsView: View {
         Text("\(draft.expansion.count)/\(SnippetEntry.maximumExpansionLength)")
           .font(.caption.monospacedDigit())
           .foregroundStyle(.secondary)
+          .accessibilityLabel(
+            "\(draft.expansion.count) of \(SnippetEntry.maximumExpansionLength) characters")
         Spacer()
         if draft.editingSnippetID != nil {
           Button {
@@ -372,13 +468,16 @@ private struct SnippetSettingsView: View {
       Divider()
 
       if coordinator.settings.snippets.isEmpty {
-        ContentUnavailableView("No Snippets", systemImage: "text.badge.plus")
-          .frame(maxWidth: .infinity, maxHeight: .infinity)
+        ContentUnavailableView(
+          "No Snippets", systemImage: "text.badge.plus",
+          description: Text("Say a trigger phrase to insert its expanded text.")
+        )
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
       } else {
         List {
           ForEach(coordinator.settings.snippets) { snippet in
-            HStack(spacing: 10) {
-              VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 8) {
+              VStack(alignment: .leading, spacing: 4) {
                 Text(snippet.trigger)
                   .font(.system(size: 13, weight: .medium))
                 Text(snippet.expansion)
@@ -387,28 +486,29 @@ private struct SnippetSettingsView: View {
                   .lineLimit(2)
                   .textSelection(.enabled)
               }
+              .accessibilityElement(children: .combine)
               Spacer()
               Button {
                 beginEditing(snippet)
               } label: {
                 Image(systemName: "pencil")
-                  .frame(width: 22, height: 22)
+                  .frame(width: 24, height: 24)
               }
               .buttonStyle(.borderless)
               .help("Edit snippet")
-              .accessibilityLabel("Edit snippet: \(snippet.trigger)")
+              .accessibilityLabel("Edit snippet \(snippet.trigger)")
+              DeleteRowButton(label: "Delete snippet \(snippet.trigger)") {
+                remove([snippet.id])
+              }
             }
-            .padding(.vertical, 2)
+            .padding(.vertical, 4)
+            .contextMenu {
+              Button("Edit Snippet") { beginEditing(snippet) }
+              Button("Delete Snippet", role: .destructive) { remove([snippet.id]) }
+            }
           }
           .onDelete { offsets in
-            if let editingSnippetID = draft.editingSnippetID,
-              offsets.contains(where: {
-                coordinator.settings.snippets[$0].id == editingSnippetID
-              })
-            {
-              resetDraft()
-            }
-            coordinator.removeSnippets(at: offsets)
+            remove(offsets.map { coordinator.settings.snippets[$0].id })
           }
         }
       }
@@ -420,6 +520,18 @@ private struct SnippetSettingsView: View {
     (draft.editingSnippetID != nil
       || coordinator.settings.snippets.count < VaniSettings.maximumSnippetCount)
       && SnippetEntry(trigger: draft.trigger, expansion: draft.expansion).isValid
+  }
+
+  private func remove(_ ids: [UUID]) {
+    let offsets = IndexSet(
+      coordinator.settings.snippets.indices.filter {
+        ids.contains(coordinator.settings.snippets[$0].id)
+      })
+    guard !offsets.isEmpty else { return }
+    if let editingSnippetID = draft.editingSnippetID, ids.contains(editingSnippetID) {
+      resetDraft()
+    }
+    coordinator.removeSnippets(at: offsets)
   }
 
   private func beginEditing(_ snippet: SnippetEntry) {
@@ -455,12 +567,13 @@ private struct SnippetSettingsView: View {
 
 private struct HistorySettingsView: View {
   @EnvironmentObject private var coordinator: AppCoordinator
+  @State private var confirmsClear = false
 
   var body: some View {
     VStack(spacing: 12) {
       if coordinator.history.isEmpty {
         ContentUnavailableView(
-          "No saved transcripts",
+          "No Saved Transcripts",
           systemImage: "clock",
           description: Text(
             coordinator.settings.historyEnabled
@@ -478,40 +591,61 @@ private struct HistorySettingsView: View {
               .font(.caption)
               .foregroundStyle(.secondary)
           }
+          .accessibilityElement(children: .combine)
         }
       }
       HStack {
         Spacer()
-        Button("Clear", role: .destructive) {
-          coordinator.clearHistory()
+        Button("Clear History…", role: .destructive) {
+          confirmsClear = true
         }
         .disabled(!coordinator.hasStoredHistoryData)
       }
     }
     .padding(20)
+    .confirmationDialog(
+      "Clear transcript history?", isPresented: $confirmsClear, titleVisibility: .visible
+    ) {
+      Button("Clear History", role: .destructive) { coordinator.clearHistory() }
+      Button("Cancel", role: .cancel) {}
+    } message: {
+      Text("Saved transcripts are deleted from this Mac. This cannot be undone.")
+    }
   }
 }
 
 private struct DiagnosticsSettingsView: View {
   @EnvironmentObject private var coordinator: AppCoordinator
+  @State private var confirmsClear = false
 
   var body: some View {
     VStack(spacing: 12) {
-      List(coordinator.diagnostics) { event in
-        HStack {
-          VStack(alignment: .leading, spacing: 2) {
-            Text(event.code)
-              .font(.system(size: 12, weight: .medium, design: .monospaced))
-            Text(event.category.rawValue)
-              .font(.caption)
-              .foregroundStyle(.secondary)
+      if coordinator.diagnostics.isEmpty {
+        ContentUnavailableView(
+          "No Diagnostics",
+          systemImage: "stethoscope",
+          description: Text(
+            "Event codes and timings appear here. They never include audio or what you said.")
+        )
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+      } else {
+        List(coordinator.diagnostics) { event in
+          HStack {
+            VStack(alignment: .leading, spacing: 2) {
+              Text(event.code)
+                .font(.system(size: 12, weight: .medium, design: .monospaced))
+              Text(event.category.rawValue)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+            Spacer()
+            if let duration = event.durationMilliseconds {
+              Text("\(duration) ms")
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.secondary)
+            }
           }
-          Spacer()
-          if let duration = event.durationMilliseconds {
-            Text("\(duration) ms")
-              .font(.caption.monospacedDigit())
-              .foregroundStyle(.secondary)
-          }
+          .accessibilityElement(children: .combine)
         }
       }
       HStack {
@@ -519,12 +653,21 @@ private struct DiagnosticsSettingsView: View {
           coordinator.refreshDiagnostics()
         }
         Spacer()
-        Button("Clear", role: .destructive) {
-          coordinator.clearDiagnostics()
+        Button("Clear Diagnostics…", role: .destructive) {
+          confirmsClear = true
         }
+        .disabled(coordinator.diagnostics.isEmpty)
       }
     }
     .padding(20)
     .task { coordinator.refreshDiagnostics() }
+    .confirmationDialog(
+      "Clear diagnostics?", isPresented: $confirmsClear, titleVisibility: .visible
+    ) {
+      Button("Clear Diagnostics", role: .destructive) { coordinator.clearDiagnostics() }
+      Button("Cancel", role: .cancel) {}
+    } message: {
+      Text("The recent event list is emptied. This cannot be undone.")
+    }
   }
 }

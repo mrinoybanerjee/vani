@@ -147,7 +147,8 @@ public enum VaniFailure: String, Error, Codable, CaseIterable, Sendable, Equatab
   }
 
   public var dismissesAutomatically: Bool {
-    self == .recordingTooShort || self == .noSpeechDetected
+    // Content-free outcomes: nothing is recoverable, so do not block the next dictation.
+    self == .recordingTooShort || self == .noSpeechDetected || self == .emptyTranscript
   }
 }
 

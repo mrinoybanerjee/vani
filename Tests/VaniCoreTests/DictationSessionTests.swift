@@ -1543,3 +1543,134 @@ func interruptedCapturePublishesStoppedOnlyAfterMicrophoneStops(_ interruption: 
   #expect(insertion.insertedTexts == ["preserve this speech"])
   #expect(await session.snapshot().phase == .ready)
 }
+
+@Test @MainActor
+func cancellingAnActiveRecordingDiscardsItWithoutTranscriptionOrInsertion() async throws {
+  let audio = MockAudioCapture()
+  let speech = MockSpeechRecognizer(results: [.success(speechResult("should not appear"))])
+  let insertion = MockTextInserter(results: [.success(.verified)])
+  let diagnostics = DiagnosticStore()
+  let session = DictationSession(
+    audioCapture: audio,
+    speechRecognizer: speech,
+    textInserter: insertion,
+    focusProvider: MockFocusProvider(),
+    diagnostics: diagnostics
+  )
+
+  #expect(await session.prepareModels(allowDownload: false))
+  await session.beginDictation()
+  #expect(await session.snapshot().phase == .listening)
+  await session.cancelDictation()
+  await session.endDictation()
+
+  let snapshot = await session.snapshot()
+  #expect(snapshot.phase == .ready)
+  #expect(snapshot.failure == nil)
+  #expect(!snapshot.hasRecoverableTranscript)
+  #expect(await audio.cancelCount == 1)
+  #expect(await audio.stopCount == 0)
+  #expect(await speech.transcribeCount == 0)
+  #expect(insertion.insertedTexts.isEmpty)
+  #expect(
+    await diagnostics.snapshot().contains { $0.code == "transition_captureCancelled" })
+}
+
+@Test @MainActor
+func cancellingDuringCaptureStartupStopsTheMicrophoneBeforeListening() async throws {
+  let audio = MockAudioCapture(startDelay: .milliseconds(30))
+  let speech = MockSpeechRecognizer(results: [])
+  let session = DictationSession(
+    audioCapture: audio,
+    speechRecognizer: speech,
+    textInserter: MockTextInserter(results: []),
+    focusProvider: MockFocusProvider(),
+    diagnostics: DiagnosticStore()
+  )
+
+  #expect(await session.prepareModels(allowDownload: false))
+  let start = Task { await session.beginDictation() }
+  #expect(await audio.waitUntilStart())
+  await session.cancelDictation()
+  await start.value
+
+  #expect(await session.snapshot().phase == .ready)
+  #expect(await audio.cancelCount == 1)
+  #expect(await audio.stopCount == 0)
+  #expect(await speech.transcribeCount == 0)
+}
+
+@Test @MainActor
+func aQuietPhraseInsideALongMostlySilentRecordingIsStillTranscribed() async throws {
+  // Whole-recording RMS is below the speech threshold; one 0.2 s phrase is not.
+  var samples = [Float](repeating: 0, count: 10 * CapturedAudio.targetSampleRate)
+  for index in 0..<3_200 { samples[80_000 + index] = index.isMultiple(of: 2) ? 0.008 : -0.008 }
+  let quiet = CapturedAudio(samples: samples)
+  #expect(quiet.rootMeanSquare < AudioPolicy.default.minimumRootMeanSquare)
+  #expect(quiet.loudestFrameRootMeanSquare >= AudioPolicy.default.minimumRootMeanSquare)
+
+  let speech = MockSpeechRecognizer(results: [.success(speechResult("quiet words"))])
+  let insertion = MockTextInserter(results: [.success(.verified)])
+  let session = DictationSession(
+    audioCapture: MockAudioCapture(audio: quiet),
+    speechRecognizer: speech,
+    textInserter: insertion,
+    focusProvider: MockFocusProvider(),
+    diagnostics: DiagnosticStore()
+  )
+
+  #expect(await session.prepareModels(allowDownload: false))
+  await session.beginDictation()
+  await session.endDictation()
+
+  #expect(insertion.insertedTexts == ["quiet words"])
+}
+
+@Test @MainActor
+func anEmptyTranscriptDismissesItselfAndDoesNotBlockTheNextDictation() async throws {
+  let speech = MockSpeechRecognizer(results: [
+    .success(speechResult("   ")), .success(speechResult("next")),
+  ])
+  let insertion = MockTextInserter(results: [.success(.verified)])
+  let session = DictationSession(
+    audioCapture: MockAudioCapture(),
+    speechRecognizer: speech,
+    textInserter: insertion,
+    focusProvider: MockFocusProvider(),
+    diagnostics: DiagnosticStore(),
+    transientFailureDuration: .milliseconds(1)
+  )
+
+  #expect(await session.prepareModels(allowDownload: false))
+  await session.beginDictation()
+  await session.endDictation()
+  #expect(await session.snapshot().phase == .ready)
+
+  await session.beginDictation()
+  await session.endDictation()
+  #expect(insertion.insertedTexts == ["next"])
+}
+
+@Test @MainActor
+func historyRevisionAdvancesOnlyAfterTheHistoryWriteLands() async throws {
+  let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+  defer { try? FileManager.default.removeItem(at: directory) }
+  let history = TranscriptHistoryStore(directory: directory)
+  let session = DictationSession(
+    audioCapture: MockAudioCapture(),
+    speechRecognizer: MockSpeechRecognizer(results: [.success(speechResult("kept"))]),
+    textInserter: MockTextInserter(results: [.success(.verified)]),
+    focusProvider: MockFocusProvider(),
+    history: history,
+    diagnostics: DiagnosticStore(),
+    settings: VaniSettings(historyEnabled: true)
+  )
+
+  #expect(await session.prepareModels(allowDownload: false))
+  #expect(await session.snapshot().historyRevision == 0)
+  await session.beginDictation()
+  await session.endDictation()
+
+  #expect(await session.snapshot().historyRevision == 1)
+  #expect(try await history.load().map(\.text) == ["kept"])
+}

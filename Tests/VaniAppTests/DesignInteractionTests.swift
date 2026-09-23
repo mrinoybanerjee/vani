@@ -94,9 +94,81 @@ extension NativeInteractionTests.NotesTests {
     menu.isReleasedWhenClosed = false
     menu.contentViewController = NSHostingController(
       rootView: MenuContentView().environmentObject(coordinator))
+    if let fitting = menu.contentViewController?.view.fittingSize { menu.setContentSize(fitting) }
     menu.orderFront(nil)
     defer { menu.close() }
     try await capture(menu, name: "setup", path: path)
+
+    let content = try #require(window.contentView)
+    func picker(in view: NSView) -> NSSegmentedControl? {
+      if let picker = view as? NSSegmentedControl, picker.segmentCount == 5 { return picker }
+      return view.subviews.lazy.compactMap { picker(in: $0) }.first
+    }
+    let sections = try #require(picker(in: content))
+    for (index, name) in ["vocabulary", "snippets", "history", "diagnostics"].enumerated() {
+      sections.selectedSegment = index + 1
+      sections.sendAction(sections.action, to: sections.target)
+      try await capture(window, name: "settings-\(name)", path: path)
+    }
+    sections.selectedSegment = 0
+    sections.sendAction(sections.action, to: sections.target)
+  }
+
+  @Test func captureMenuAndOverlayStatesWhenRequested() async throws {
+    guard let path = ProcessInfo.processInfo.environment["VANI_UI_SNAPSHOT_DIR"] else { return }
+    let steps = SetupStepModel.steps(
+      microphone: .granted, accessibility: .granted, inputMonitoring: .denied,
+      modelInstalled: false, shortcut: .function, globeKey: .showEmojiAndSymbols)
+    try await captureView(
+      MenuPreview(status: "Setup") {
+        SetupStepsView(steps: steps, shortcut: .function, perform: { _ in })
+      }, name: "menu-setup-steps", path: path)
+    try await captureView(
+      MenuPreview(status: "Ready") {
+        ReadyShortcutRow(shortcut: .function, globeKey: .doNothing, handsFreeEnabled: true)
+      }, name: "menu-ready", path: path)
+    try await captureView(
+      MenuPreview(status: "Ready") {
+        ReadyShortcutRow(shortcut: .function, globeKey: .showEmojiAndSymbols)
+      }, name: "menu-ready-globe-hint", path: path)
+    try await captureView(
+      MenuPreview(status: "Shortcut inactive") {
+        ShortcutInactiveView(quit: {}, canRelaunch: true)
+      }, name: "menu-shortcut-inactive", path: path)
+
+    let states: [(String, OverlayState)] = [
+      ("listening", .listening), ("hands-free", .handsFree), ("processing", .processing),
+      ("success", .success),
+      ("backup", .backupCopied), ("truncated", .captureTruncated),
+      ("failure", .failure(VaniFailure.inputMonitoringPermissionDenied.title)),
+      ("failure-long", .failure(VaniFailure.clipboardChanged.title + " while pasting your text")),
+    ]
+    for (name, state) in states {
+      let started = Date().addingTimeInterval(-7)
+      let hosting = NSHostingController(
+        rootView: OverlayView(state: state, listeningStartedAt: started))
+      let size = OverlayController.layout(hosting, state: state, listeningStartedAt: started)
+      try await captureView(
+        OverlayView(state: state, listeningStartedAt: started)
+          .frame(width: size.width, height: size.height)
+          .padding(8),
+        name: "overlay-\(name)", path: path)
+    }
+  }
+
+  private func captureView<Content: View>(_ view: Content, name: String, path: String)
+    async throws
+  {
+    let hosting = NSHostingController(rootView: view)
+    let window = NSWindow(
+      contentRect: NSRect(x: 0, y: 0, width: 360, height: 200),
+      styleMask: [.titled], backing: .buffered, defer: false)
+    window.isReleasedWhenClosed = false
+    window.contentViewController = hosting
+    window.setContentSize(hosting.view.fittingSize)
+    window.orderFront(nil)
+    defer { window.close() }
+    try await capture(window, name: name, path: path)
   }
 
   @Test func meetingDesignAndNativeNotesWhenRequested() async throws {
@@ -186,5 +258,27 @@ extension NativeInteractionTests.NotesTests {
       let data = try #require(bitmap.representation(using: .png, properties: [:]))
       try data.write(to: folder.appendingPathComponent("\(name)-\(appearance.rawValue).png"))
     }
+  }
+}
+
+/// Menu chrome around a state view, matching MenuContentView's header, padding and width.
+private struct MenuPreview<Content: View>: View {
+  let status: String
+  @ViewBuilder let content: Content
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 0) {
+      HStack(spacing: 8) {
+        VaniWordmark(size: 24)
+        Spacer()
+        Text(status).font(.caption).foregroundStyle(.secondary)
+      }
+      .padding(20)
+      Divider()
+      content.padding(24)
+    }
+    .frame(width: 360)
+    .background(VaniTheme.paper)
+    .tint(VaniTheme.accent)
   }
 }

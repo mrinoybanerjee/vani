@@ -56,7 +56,9 @@ extension NativeInteractionTests {
       #expect(await model.select(.notes))
       controller.present(coordinator: coordinator)
       #expect(controller.window === window)
-      await waitUntil { snippetField()?.isEnabled == false }
+      // Hidden Settings keeps its drafts but does not build its pane controls.
+      await waitUntil { snippetField() == nil }
+      #expect(snippetField() == nil)
       await waitUntil {
         self.descendants(content, NSTextField.self).contains {
           $0.placeholderString == "Search notes" && $0.isEnabled

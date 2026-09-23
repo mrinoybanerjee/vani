@@ -47,6 +47,8 @@ public protocol SpeechRecognizing: Sendable {
   func preparePersonalizationModels(
     progress: @escaping @Sendable (Double) -> Void
   ) async throws
+  /// Loads optional personalization models ahead of use. Never required for dictation.
+  func prewarmPersonalization() async
 }
 
 extension SpeechRecognizing {
@@ -58,6 +60,8 @@ extension SpeechRecognizing {
   }
 
   public func personalizationModelsAreInstalled() async -> Bool { false }
+
+  public func prewarmPersonalization() async {}
 
   public func preparePersonalizationModels(
     progress: @escaping @Sendable (Double) -> Void

@@ -1,4 +1,5 @@
 import AVFoundation
+import Accelerate
 import Darwin
 import os
 
@@ -105,10 +106,28 @@ final class AudioSampleRingBuffer: Sendable {
   }
 
   func append(_ buffer: AVAudioPCMBuffer) {
-    guard let channel = buffer.floatChannelData?.pointee else { return }
-    let incomingCount = Int(buffer.frameLength)
+    guard let channels = buffer.floatChannelData else { return }
+    append(
+      channels: channels,
+      channelCount: Int(buffer.format.channelCount),
+      frameCount: Int(buffer.frameLength)
+    )
+  }
+
+  /// Interfaces can deliver the voice on any input channel, so up to eight channels
+  /// are averaged into mono. vDSP works in place on preallocated pages, with no
+  /// allocation, so this remains real-time safe.
+  static let maximumMixedChannels = 8
+
+  func append(
+    channels: UnsafePointer<UnsafeMutablePointer<Float>>,
+    channelCount: Int,
+    frameCount incomingCount: Int
+  ) {
+    let channelCount = min(max(channelCount, 1), Self.maximumMixedChannels)
     guard incomingCount > 0 else { return }
-    let channelAddress = UInt(bitPattern: channel)
+    let channelsAddress = UInt(bitPattern: channels)
+    let channelAddress = UInt(bitPattern: channels[0])
 
     state.withLock { state in
       let writableCount = min(incomingCount, state.reservedCapacity - state.count)
@@ -147,6 +166,18 @@ final class AudioSampleRingBuffer: Sendable {
             sourceAddress,
             copyCount * MemoryLayout<Float>.stride
           )
+          guard channelCount > 1,
+            let channelList = UnsafePointer<UnsafeMutablePointer<Float>>(
+              bitPattern: channelsAddress)
+          else { return }
+          let mixed = destinationAddress.assumingMemoryBound(to: Float.self)
+          let offset = copiedCount
+          for index in 1..<channelCount {
+            let channel = UnsafePointer(channelList[index]).advanced(by: offset)
+            vDSP_vadd(mixed, 1, channel, 1, mixed, 1, vDSP_Length(copyCount))
+          }
+          var scale = 1 / Float(channelCount)
+          vDSP_vsmul(mixed, 1, &scale, mixed, 1, vDSP_Length(copyCount))
         }
         state.count += copyCount
         copiedCount += copyCount

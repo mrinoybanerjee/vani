@@ -107,7 +107,7 @@ VANI_RUN_LONG_MODEL_TESTS=1 swift test -c release \
 ```
 
 The optional acoustic-personalization integration must run as a Release test because
-FluidAudio 0.15.5 enables transcript-bearing rescorer logs in Debug builds:
+FluidAudio 0.15.8 enables transcript-bearing rescorer logs in Debug builds:
 
 ```bash
 VANI_RUN_PERSONALIZATION_MODEL_TESTS=1 swift test -c release \

@@ -3,6 +3,9 @@ import ApplicationServices
 import CoreGraphics
 import Foundation
 import VaniCore
+import os
+
+private let escapeKeyCode: Int64 = 53
 
 @MainActor
 final class GlobalHotkeyMonitor {
@@ -10,13 +13,34 @@ final class GlobalHotkeyMonitor {
   var onRelease: (() -> Void)?
   var onPasteLast: (() -> Void)?
   var onCopyLast: (() -> Void)?
+  /// Escape, without modifiers. The listen-only tap never consumes the key.
+  var onEscape: (() -> Void)?
+  /// Any other key pressed while the hold shortcut is down: the user is typing a
+  /// chord such as Fn-Delete or Control-C, not dictating.
+  var onKeyDuringHold: (() -> Void)?
+  /// The hold key became part of a Command chord (Left Control + Command). This is
+  /// never a dictation gesture, so it must not be read as the first tap of a double-tap.
+  var onYieldToChord: (() -> Void)?
+
+  /// Read from the event-tap callback, which is not actor-isolated.
+  nonisolated let lastTranscriptBinding = OSAllocatedUnfairLock(
+    initialState: LastTranscriptBinding.controlCommand)
+  /// Set by the coordinator while a recording is starting or active, so the callback
+  /// forwards Escape only when it can cancel something.
+  nonisolated let recordingActive = OSAllocatedUnfairLock(initialState: false)
+  private nonisolated let holdDown = OSAllocatedUnfairLock(initialState: false)
+  private var isPressed = false {
+    didSet {
+      let pressed = isPressed
+      holdDown.withLock { $0 = pressed }
+    }
+  }
 
   private var eventTap: CFMachPort?
   private var runLoopSource: CFRunLoopSource?
   private var globalMonitor: Any?
   private var localMonitor: Any?
   private var shortcut: HoldShortcut = .function
-  private var isPressed = false
 
   func start(shortcut: HoldShortcut) throws {
     if self.shortcut == shortcut,
@@ -164,7 +188,7 @@ final class GlobalHotkeyMonitor {
       if isPressed {
         isPressed = false
         VaniLog.event(category: .capture, code: "shortcut_yielded_to_command_chord")
-        onRelease?()
+        if let onYieldToChord { onYieldToChord() } else { onRelease?() }
       }
       return
     }
@@ -189,6 +213,17 @@ final class GlobalHotkeyMonitor {
     }
   }
 
+  private func handleKeyDown(keyCode: Int64, isRepeat: Bool, hasCommandOrControl: Bool) {
+    if keyCode == escapeKeyCode, !isRepeat, !hasCommandOrControl {
+      onEscape?()
+      return
+    }
+    if isPressed {
+      VaniLog.event(category: .capture, code: "shortcut_chord_detected")
+      onKeyDuringHold?()
+    }
+  }
+
   private func handleLastTranscriptShortcut(_ action: LastTranscriptShortcutAction) {
     switch action {
     case .paste:
@@ -210,18 +245,30 @@ final class GlobalHotkeyMonitor {
     let typeRawValue = type.rawValue
 
     if type == .keyDown {
-      guard keyCode == 8 || keyCode == 9 else {
+      let isRepeat = event.getIntegerValueField(.keyboardEventAutorepeat) != 0
+      if let action = LastTranscriptShortcutResolver.action(
+        keyCode: keyCode,
+        modifierFlagsRawValue: event.flags.rawValue,
+        isRepeat: isRepeat,
+        binding: monitor.lastTranscriptBinding.withLock { $0 }
+      ) {
+        Task { @MainActor in
+          monitor.handleLastTranscriptShortcut(action)
+        }
         return Unmanaged.passUnretained(event)
       }
+      // Ordinary typing never leaves the callback. Only a key code and modifier
+      // presence cross to the main actor, and only during a hold or recording.
+      let isEscape = keyCode == escapeKeyCode
       guard
-        let action = LastTranscriptShortcutResolver.action(
-          keyCode: keyCode,
-          modifierFlagsRawValue: event.flags.rawValue,
-          isRepeat: event.getIntegerValueField(.keyboardEventAutorepeat) != 0
-        )
+        monitor.holdDown.withLock({ $0 })
+          || (isEscape && monitor.recordingActive.withLock({ $0 }))
       else { return Unmanaged.passUnretained(event) }
+      let hasCommandOrControl =
+        event.flags.contains(.maskCommand) || event.flags.contains(.maskControl)
       Task { @MainActor in
-        monitor.handleLastTranscriptShortcut(action)
+        monitor.handleKeyDown(
+          keyCode: keyCode, isRepeat: isRepeat, hasCommandOrControl: hasCommandOrControl)
       }
       return Unmanaged.passUnretained(event)
     }

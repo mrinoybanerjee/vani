@@ -219,8 +219,10 @@ public struct TextPipeline: Sendable {
     result = replaceSpokenCommands(
       punctuationCommands,
       in: result,
-      leadingArtifactPattern: #"[,.;:!?…]"#
+      leadingArtifactPattern: #"[,.;:!?…]"#,
+      nounReadings: Self.punctuationWordsWithNounReadings
     )
+    result = applyScratchThat(in: result)
 
     result = capitalizeSentenceStarts(
       in: cleanSpacing(in: result, preserveBoundaryNewlines: true)
@@ -301,10 +303,54 @@ public struct TextPipeline: Sendable {
     return String(mutable)
   }
 
+  /// "Scratch that" deletes the sentence or clause spoken just before it. It counts as a
+  /// command only when it stands alone: it starts the text, a sentence or a clause, and is
+  /// followed by punctuation or the end. "I told him to delete that." and "Please scratch
+  /// that item" stay literal. Nothing before the previous sentence boundary is touched.
+  private func applyScratchThat(in text: String) -> String {
+    let lexical = Self.lexicalCharacterPattern
+    let pattern =
+      #"(?i)(?<![\#(lexical)])(?:scratch|delete) that(?![\#(lexical)])[ \t]*([,.;:!?…]*)"#
+    guard let expression = try? NSRegularExpression(pattern: pattern) else { return text }
+    var result = text
+    var searchStart = 0
+    while true {
+      let source = result as NSString
+      guard searchStart <= source.length,
+        let match = expression.firstMatch(
+          in: result,
+          range: NSRange(location: searchStart, length: source.length - searchStart))
+      else { return result }
+      let before = source.substring(to: match.range.location)
+      let trimmedBefore = before.trimmingCharacters(in: .whitespaces)
+      let startsUnit = trimmedBefore.last.map { ",.;:!?…\n".contains($0) } ?? true
+      let endsUnit =
+        match.range(at: 1).length > 0 || NSMaxRange(match.range) == source.length
+      guard startsUnit, endsUnit else {
+        searchStart = NSMaxRange(match.range)
+        continue
+      }
+      // Drop the retracted text back to the previous sentence boundary or line break;
+      // a command set off by a comma or semicolon retracts only that clause.
+      let clauseScoped = trimmedBefore.last.map { ",;".contains($0) } ?? false
+      let boundaries = clauseScoped ? ".!?…\n,;" : ".!?…\n"
+      var retracted = Substring(trimmedBefore)
+      while let last = retracted.last, ",.;:!?…".contains(last) { retracted.removeLast() }
+      let boundary = retracted.lastIndex { boundaries.contains($0) }
+      let kept = boundary.map { String(retracted[...$0]) } ?? ""
+      let after = source.substring(from: NSMaxRange(match.range))
+      let separator = kept.isEmpty || kept.hasSuffix("\n") || after.isEmpty ? "" : " "
+      let joined = kept + separator + after.trimmingCharacters(in: .whitespaces)
+      searchStart = (kept as NSString).length
+      result = joined
+    }
+  }
+
   private func replaceSpokenCommands(
     _ commands: [(phrase: String, replacement: String)],
     in text: String,
-    leadingArtifactPattern: String
+    leadingArtifactPattern: String,
+    nounReadings: Set<String> = []
   ) -> String {
     let orderedCommands = commands.sorted { $0.phrase.count > $1.phrase.count }
     let alternatives = orderedCommands.map {
@@ -330,6 +376,11 @@ public struct TextPipeline: Sendable {
     for match in matches.reversed() {
       let phrase = source.substring(with: match.range(at: 1)).lowercased()
       guard let replacement = replacements[phrase] else { continue }
+      if nounReadings.contains(phrase),
+        isNounUse(in: source, before: match.range(at: 1).location, after: match.range(at: 1))
+      {
+        continue
+      }
       let matchEnd = NSMaxRange(match.range)
       let nextCharacter = character(in: source, atUTF16Offset: matchEnd)
       let replacementText: String
@@ -345,6 +396,37 @@ public struct TextPipeline: Sendable {
     }
     return String(mutable)
   }
+
+  /// "The grace period ended" and "a colon of text" use the word, not the command.
+  /// A determiner, possessive, number or common compound before it, or "of" after it,
+  /// marks the noun reading.
+  private func isNounUse(in source: NSString, before location: Int, after range: NSRange) -> Bool {
+    let preceding = source.substring(to: location)
+    let trimmed = preceding.reversed().drop { $0 == " " || $0 == "\t" }
+    // Only a plain word counts; protected URL and snippet tokens end in private-use marks.
+    let previousWord = String(
+      trimmed.prefix { $0.isLetter || $0.isNumber || $0 == "'" }.reversed()
+    ).lowercased()
+    if preceding.last?.isWhitespace == true, !previousWord.isEmpty,
+      Self.nounContextWords.contains(previousWord)
+        || previousWord.allSatisfy(\.isNumber)
+    {
+      return true
+    }
+    let following = source.substring(from: NSMaxRange(range))
+    return following.range(of: #"^[ \t]+of\b"#, options: [.regularExpression, .caseInsensitive])
+      != nil
+  }
+
+  private static let punctuationWordsWithNounReadings: Set<String> = ["period", "colon"]
+  private static let nounContextWords: Set<String> = [
+    "a", "an", "the", "this", "that", "these", "those", "each", "every", "any", "some",
+    "my", "your", "our", "their", "his", "her", "its", "same", "first", "second", "third",
+    "last", "next", "previous", "current", "one", "two", "three", "four", "five", "six",
+    "grace", "trial", "waiting", "cooling", "probation", "probationary", "notice", "billing",
+    "reporting", "holding", "rest", "time", "study", "free", "lock", "blackout", "transition",
+    "sigmoid", "semi", "per",
+  ]
 
   private func character(in text: NSString, atUTF16Offset offset: Int) -> Character? {
     guard offset >= 0, offset < text.length else { return nil }

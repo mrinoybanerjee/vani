@@ -12,6 +12,8 @@ someone who wants private English voice typing without an account or cloud servi
 3. Speak while a non-activating overlay shows capture state.
 4. Release the shortcut.
 5. Transcribe locally and insert text into the focused application.
+   Double-tapping the shortcut locks recording hands-free until the next press;
+   Escape, the menu's Cancel, or typing a key chord while holding discards the take.
 6. If insertion cannot be verified, keep the transcript on the clipboard and return to
    ready without blocking the next recording.
 
@@ -25,7 +27,7 @@ someone who wants private English voice typing without an account or cloud servi
   Category changes save first; persistence status and save failures remain visible.
 - Non-activating upper-right overlay with listening, processing, success, and error
   states, positioned below the menu bar so it does not cover common text composers
-- Restrained 120 to 180 ms state transitions with Reduce Motion support
+- No decorative motion; the only animation is the recording pulse, which stops under Reduce Motion
 - No onboarding carousel, dashboard, document editor inside the dictation popover,
   decorative cards, or hidden background work
 

@@ -43,6 +43,7 @@ func everyPhaseEventPairMatchesTheApprovedTransitionTable() throws {
     .init(phase: .ready, event: .terminate): .disabled,
 
     .init(phase: .listening, event: .captureStopped): .transcribing,
+    .init(phase: .listening, event: .captureCancelled): .ready,
     .init(phase: .listening, event: .failed): .recoverableError,
     .init(phase: .listening, event: .permissionsLost): .recoverableError,
     .init(phase: .listening, event: .audioRouteChanged): .recoverableError,

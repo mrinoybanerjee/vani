@@ -8,7 +8,12 @@ public struct CapturedAudio: Sendable, Equatable {
   public let duration: TimeInterval
   public let peakAmplitude: Float
   public let rootMeanSquare: Float
+  /// Highest RMS of any 30 ms frame. Unlike `rootMeanSquare`, a short phrase inside
+  /// a long, mostly silent recording still registers as speech-level energy.
+  public let loudestFrameRootMeanSquare: Float
   public let wasTruncated: Bool
+
+  static let loudnessFrameDuration: TimeInterval = 0.03
 
   public init(
     samples: [Float],
@@ -20,13 +25,29 @@ public struct CapturedAudio: Sendable, Equatable {
     self.wasTruncated = wasTruncated
     duration = sampleRate > 0 ? Double(samples.count) / Double(sampleRate) : 0
 
+    let frameLength = max(1, Int(Double(max(sampleRate, 1)) * Self.loudnessFrameDuration))
     var peak: Float = 0
     var sumSquares: Double = 0
+    var frameSumSquares: Double = 0
+    var frameCount = 0
+    var loudestFrameMeanSquare: Double = 0
     for sample in samples {
       peak = max(peak, abs(sample))
-      sumSquares += Double(sample * sample)
+      let square = Double(sample * sample)
+      sumSquares += square
+      frameSumSquares += square
+      frameCount += 1
+      if frameCount == frameLength {
+        loudestFrameMeanSquare = max(loudestFrameMeanSquare, frameSumSquares / Double(frameCount))
+        frameSumSquares = 0
+        frameCount = 0
+      }
+    }
+    if frameCount > 0 {
+      loudestFrameMeanSquare = max(loudestFrameMeanSquare, frameSumSquares / Double(frameCount))
     }
     peakAmplitude = peak
+    loudestFrameRootMeanSquare = Float(loudestFrameMeanSquare.squareRoot())
     rootMeanSquare =
       samples.isEmpty
       ? 0
@@ -58,7 +79,8 @@ public struct AudioPolicy: Sendable, Equatable {
     guard audio.duration <= maximumDuration else {
       throw VaniFailure.recordingTooLong
     }
-    guard audio.rootMeanSquare >= minimumRootMeanSquare else {
+    // Frame-level energy: a whole-recording average rejects a quiet phrase in a long take.
+    guard audio.loudestFrameRootMeanSquare >= minimumRootMeanSquare else {
       throw VaniFailure.noSpeechDetected
     }
   }

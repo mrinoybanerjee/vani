@@ -59,6 +59,9 @@ enum SampleRateConverter {
     else {
       throw VaniFailure.audioCaptureFailed
     }
+    // Maximum-quality anti-aliasing with the normal algorithm costs about 3 ms per 30 s
+    // of 48 kHz audio on an M4; the mastering algorithm costs ~150 ms and is not used.
+    converter.sampleRateConverterQuality = AVAudioQuality.max.rawValue
 
     guard
       let inputBuffer = AVAudioPCMBuffer(

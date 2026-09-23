@@ -147,3 +147,33 @@ private func audioBuffer(samples: [Float]) throws -> AVAudioPCMBuffer {
   buffer.floatChannelData?.pointee.update(from: samples, count: samples.count)
   return buffer
 }
+
+@Test
+func multichannelInputIsAveragedSoAVoiceOnAnyChannelIsCaptured() throws {
+  let ringBuffer = AudioSampleRingBuffer()
+  ringBuffer.reset(capacity: 4, sampleRate: 16_000)
+  let format = try #require(
+    AVAudioFormat(
+      commonFormat: .pcmFormatFloat32, sampleRate: 16_000, channels: 2, interleaved: false))
+  let buffer = try #require(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 4))
+  buffer.frameLength = 4
+  let channels = try #require(buffer.floatChannelData)
+  for frame in 0..<4 {
+    channels[0][frame] = 0
+    channels[1][frame] = 0.5
+  }
+
+  ringBuffer.append(buffer)
+
+  #expect(ringBuffer.drain().samples == [0.25, 0.25, 0.25, 0.25])
+}
+
+@Test
+func briefClipsArePaddedToOneSecondForInference() {
+  let brief = [Float](repeating: 0.1, count: 3_200)
+  let padded = FluidAudioSpeechRecognizer.paddedForInference(brief)
+  #expect(padded.count == CapturedAudio.targetSampleRate)
+  #expect(Array(padded.prefix(3_200)) == brief)
+  let long = [Float](repeating: 0.1, count: 20_000)
+  #expect(FluidAudioSpeechRecognizer.paddedForInference(long) == long)
+}

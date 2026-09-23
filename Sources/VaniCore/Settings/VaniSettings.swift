@@ -53,6 +53,36 @@ public enum HoldShortcut: String, Codable, CaseIterable, Sendable, Equatable, Id
   }
 }
 
+/// Modifier chord that pairs with V (paste) and C (copy) for the last transcript.
+public enum LastTranscriptBinding: String, Codable, CaseIterable, Sendable, Equatable, Identifiable
+{
+  case controlCommand
+  case optionCommand
+  case controlOption
+  case disabled
+
+  public var id: String { rawValue }
+
+  public var label: String {
+    switch self {
+    case .controlCommand: "Control-Command"
+    case .optionCommand: "Option-Command"
+    case .controlOption: "Control-Option"
+    case .disabled: "Off"
+    }
+  }
+
+  /// Symbolic prefix shown before V or C, such as "⌃⌘".
+  public var symbols: String? {
+    switch self {
+    case .controlCommand: "⌃⌘"
+    case .optionCommand: "⌥⌘"
+    case .controlOption: "⌃⌥"
+    case .disabled: nil
+    }
+  }
+}
+
 public struct DictionaryEntry: Identifiable, Codable, Sendable, Equatable {
   public static let maximumSpokenLength = 100
   public static let maximumReplacementLength = 1_000
@@ -118,6 +148,11 @@ public struct VaniSettings: Codable, Sendable, Equatable {
   public var smartFormattingEnabled: Bool
   public var personalizationEnabled: Bool
   public var soundFeedbackEnabled: Bool
+  /// Double-tap the hold shortcut to keep recording without holding it.
+  public var handsFreeEnabled: Bool
+  /// Escape discards an active recording without inserting text.
+  public var escapeCancelsEnabled: Bool
+  public var lastTranscriptBinding: LastTranscriptBinding
 
   public init(
     shortcut: HoldShortcut = .function,
@@ -128,7 +163,10 @@ public struct VaniSettings: Codable, Sendable, Equatable {
     snippets: [SnippetEntry] = [],
     smartFormattingEnabled: Bool = false,
     personalizationEnabled: Bool = false,
-    soundFeedbackEnabled: Bool = true
+    soundFeedbackEnabled: Bool = true,
+    handsFreeEnabled: Bool = true,
+    escapeCancelsEnabled: Bool = true,
+    lastTranscriptBinding: LastTranscriptBinding = .controlCommand
   ) {
     self.shortcut = shortcut
     self.launchAtLogin = launchAtLogin
@@ -170,6 +208,9 @@ public struct VaniSettings: Codable, Sendable, Equatable {
     self.smartFormattingEnabled = smartFormattingEnabled
     self.personalizationEnabled = personalizationEnabled
     self.soundFeedbackEnabled = soundFeedbackEnabled
+    self.handsFreeEnabled = handsFreeEnabled
+    self.escapeCancelsEnabled = escapeCancelsEnabled
+    self.lastTranscriptBinding = lastTranscriptBinding
   }
 
   public static let `default` = VaniSettings()
@@ -184,29 +225,45 @@ public struct VaniSettings: Codable, Sendable, Equatable {
     case smartFormattingEnabled
     case personalizationEnabled
     case soundFeedbackEnabled
+    case handsFreeEnabled
+    case escapeCancelsEnabled
+    case lastTranscriptBinding
   }
 
+  /// Decodes field by field so an unknown value (for example after a downgrade) or one
+  /// malformed entry resets only that value. A failed whole-document decode would
+  /// return defaults and the next save would erase the user's dictionary and snippets.
   public init(from decoder: any Decoder) throws {
     let container = try decoder.container(keyedBy: CodingKeys.self)
+    func value<Value: Decodable>(_ key: CodingKeys, _ fallback: Value) -> Value {
+      (try? container.decodeIfPresent(Value.self, forKey: key)) ?? fallback
+    }
+    func entries<Entry: Decodable>(_ key: CodingKeys, as _: Entry.Type) -> [Entry] {
+      guard let lossy = try? container.decodeIfPresent([LossyDecoded<Entry>].self, forKey: key)
+      else { return [] }
+      return lossy.compactMap(\.value)
+    }
     self.init(
-      shortcut: try container.decodeIfPresent(HoldShortcut.self, forKey: .shortcut) ?? .function,
-      launchAtLogin: try container.decodeIfPresent(Bool.self, forKey: .launchAtLogin) ?? false,
-      historyEnabled: try container.decodeIfPresent(Bool.self, forKey: .historyEnabled) ?? false,
-      historyLimit: try container.decodeIfPresent(Int.self, forKey: .historyLimit) ?? 100,
-      dictionary: try container.decodeIfPresent([DictionaryEntry].self, forKey: .dictionary) ?? [],
-      snippets: try container.decodeIfPresent([SnippetEntry].self, forKey: .snippets) ?? [],
-      smartFormattingEnabled: try container.decodeIfPresent(
-        Bool.self,
-        forKey: .smartFormattingEnabled
-      ) ?? false,
-      personalizationEnabled: try container.decodeIfPresent(
-        Bool.self,
-        forKey: .personalizationEnabled
-      ) ?? false,
-      soundFeedbackEnabled: try container.decodeIfPresent(
-        Bool.self,
-        forKey: .soundFeedbackEnabled
-      ) ?? true
+      shortcut: value(.shortcut, HoldShortcut.function),
+      launchAtLogin: value(.launchAtLogin, false),
+      historyEnabled: value(.historyEnabled, false),
+      historyLimit: value(.historyLimit, 100),
+      dictionary: entries(.dictionary, as: DictionaryEntry.self),
+      snippets: entries(.snippets, as: SnippetEntry.self),
+      smartFormattingEnabled: value(.smartFormattingEnabled, false),
+      personalizationEnabled: value(.personalizationEnabled, false),
+      soundFeedbackEnabled: value(.soundFeedbackEnabled, true),
+      handsFreeEnabled: value(.handsFreeEnabled, true),
+      escapeCancelsEnabled: value(.escapeCancelsEnabled, true),
+      lastTranscriptBinding: value(.lastTranscriptBinding, LastTranscriptBinding.controlCommand)
     )
+  }
+}
+
+private struct LossyDecoded<Value: Decodable>: Decodable {
+  let value: Value?
+
+  init(from decoder: any Decoder) throws {
+    value = try? Value(from: decoder)
   }
 }

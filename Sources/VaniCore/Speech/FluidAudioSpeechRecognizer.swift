@@ -19,6 +19,15 @@ public actor FluidAudioSpeechRecognizer: SpeechRecognizing {
   private var ctcModels: CtcModels?
   private var ctcTokenizer: CtcTokenizer?
   private var personalizationUnloadTask: Task<Void, Never>?
+  private var personalizationLoadTask: Task<(CtcModels, CtcTokenizer), Error>?
+  private var cachedRescorer: PreparedRescorer?
+
+  private struct PreparedRescorer {
+    let terms: [SpeechPersonalizationTerm]
+    let vocabulary: CustomVocabularyContext
+    let spotter: CtcKeywordSpotter
+    let rescorer: VocabularyRescorer
+  }
   private var personalizationUnloadGeneration: UInt64 = 0
   private var decoderLayerCount = 2
   private var integrityVerified = false
@@ -84,8 +93,10 @@ public actor FluidAudioSpeechRecognizer: SpeechRecognizing {
       }
 
       progress(0.65)
-      try ModelIntegrityVerifier.parakeetV2.verify(directory: directory)
-      integrityVerified = true
+      if needsDownload || !integrityVerified {
+        try ModelIntegrityVerifier.parakeetV2.verify(directory: directory)
+        integrityVerified = true
+      }
 
       let models = try await AsrModels.load(
         from: directory,
@@ -190,51 +201,25 @@ public actor FluidAudioSpeechRecognizer: SpeechRecognizing {
 
       do {
         let (models, tokenizer) = try await loadPersonalizationModelsIfNeeded()
-        let terms = context.personalizedTerms.compactMap { term -> CustomVocabularyTerm? in
-          let tokenIDs = tokenizer.encode(term.canonical)
-          guard !tokenIDs.isEmpty else { return nil }
-          return CustomVocabularyTerm(
-            text: term.canonical,
-            aliases: term.aliases.isEmpty ? nil : term.aliases,
-            ctcTokenIds: tokenIDs,
-            minSimilarity: 0.60
-          )
-        }
-        guard !terms.isEmpty else {
+        guard
+          let prepared = try await personalizationRescorer(
+            for: context.personalizedTerms, models: models, tokenizer: tokenizer)
+        else {
           return speechResult(
             from: baseResult,
             text: baseResult.text,
             processingDuration: Date().timeIntervalSince(startedAt)
           )
         }
-
-        let vocabulary = CustomVocabularyContext(
-          terms: terms,
-          minSimilarity: 0.60,
-          minTermLength: 4
-        )
-        let spotter = CtcKeywordSpotter(models: models, blankId: models.vocabulary.count)
-        let spotted = try await spotter.spotKeywordsWithLogProbs(
+        let spotted = try await prepared.spotter.spotKeywordsWithLogProbs(
           audioSamples: audio.samples,
-          customVocabulary: vocabulary
+          customVocabulary: prepared.vocabulary
         )
         guard !spotted.logProbs.isEmpty else {
+          schedulePersonalizationUnload()
           return speechResult(from: baseResult, text: baseResult.text)
         }
-        let rescorer = try await VocabularyRescorer.create(
-          spotter: spotter,
-          vocabulary: vocabulary,
-          config: VocabularyRescorer.Config(
-            useAdaptiveThresholds: true,
-            referenceTokenCount: 3,
-            shortTermCbwTaperPivot: 5,
-            shortTermCbwTaperExponent: 2,
-            spotterRescueMinSimilarity: 0.50,
-            spotterRescueMultiWordMinSimilarity: 0.60,
-            spotterRescueEnabled: false
-          ),
-          ctcModelDirectory: Self.personalizationModelDirectory
-        )
+        let rescorer = prepared.rescorer
         let rescored = rescorer.ctcTokenRescore(
           transcript: baseResult.text,
           tokenTimings: tokenTimings,
@@ -274,13 +259,22 @@ public actor FluidAudioSpeechRecognizer: SpeechRecognizing {
     do {
       var decoderState = try TdtDecoderState(decoderLayers: decoderLayerCount)
       let result = try await manager.transcribe(
-        audio.samples,
+        Self.paddedForInference(audio.samples),
         decoderState: &decoderState
       )
       return result
     } catch {
       throw VaniFailure.transcriptionFailed
     }
+  }
+
+  /// The encoder rejects clips shorter than 0.3 s, while Vani accepts brief words such as
+  /// "yes". Trailing silence changes no speech and is free: inference pads to 15 s anyway.
+  static let minimumInferenceSampleCount = CapturedAudio.targetSampleRate
+
+  static func paddedForInference(_ samples: [Float]) -> [Float] {
+    guard samples.count < minimumInferenceSampleCount else { return samples }
+    return samples + [Float](repeating: 0, count: minimumInferenceSampleCount - samples.count)
   }
 
   private func speechResult(
@@ -299,18 +293,88 @@ public actor FluidAudioSpeechRecognizer: SpeechRecognizing {
     )
   }
 
+  /// Loads the optional CTC model once; concurrent callers share the same load.
   private func loadPersonalizationModelsIfNeeded() async throws -> (CtcModels, CtcTokenizer) {
     if let ctcModels, let ctcTokenizer {
       return (ctcModels, ctcTokenizer)
     }
+    if let personalizationLoadTask {
+      return try await personalizationLoadTask.value
+    }
     let directory = Self.personalizationModelDirectory
-    try ModelIntegrityVerifier.parakeetCtc110M.verify(directory: directory)
+    let verified = personalizationIntegrityVerified
+    let task = Task { () throws -> (CtcModels, CtcTokenizer) in
+      if !verified {
+        try ModelIntegrityVerifier.parakeetCtc110M.verify(directory: directory)
+      }
+      let models = try await CtcModels.loadDirect(from: directory, variant: .ctc110m)
+      let tokenizer = try await CtcTokenizer.load(from: directory)
+      return (models, tokenizer)
+    }
+    personalizationLoadTask = task
+    defer { personalizationLoadTask = nil }
+    let loaded = try await task.value
     personalizationIntegrityVerified = true
-    let models = try await CtcModels.loadDirect(from: directory, variant: .ctc110m)
-    let tokenizer = try await CtcTokenizer.load(from: directory)
-    ctcModels = models
-    ctcTokenizer = tokenizer
-    return (models, tokenizer)
+    ctcModels = loaded.0
+    ctcTokenizer = loaded.1
+    return loaded
+  }
+
+  /// Terms change only when corrections change, so the tokenized vocabulary and
+  /// rescorer (which otherwise re-parses tokenizer.json) are reused across dictations.
+  private func personalizationRescorer(
+    for personalizedTerms: [SpeechPersonalizationTerm],
+    models: CtcModels,
+    tokenizer: CtcTokenizer
+  ) async throws -> PreparedRescorer? {
+    if let cachedRescorer, cachedRescorer.terms == personalizedTerms {
+      return cachedRescorer
+    }
+    let terms = personalizedTerms.compactMap { term -> CustomVocabularyTerm? in
+      let tokenIDs = tokenizer.encode(term.canonical)
+      guard !tokenIDs.isEmpty else { return nil }
+      return CustomVocabularyTerm(
+        text: term.canonical,
+        aliases: term.aliases.isEmpty ? nil : term.aliases,
+        ctcTokenIds: tokenIDs,
+        minSimilarity: 0.60
+      )
+    }
+    guard !terms.isEmpty else { return nil }
+    let vocabulary = CustomVocabularyContext(
+      terms: terms,
+      minSimilarity: 0.60,
+      minTermLength: 4
+    )
+    let spotter = CtcKeywordSpotter(models: models, blankId: models.vocabulary.count)
+    let rescorer = try await VocabularyRescorer.create(
+      spotter: spotter,
+      vocabulary: vocabulary,
+      config: VocabularyRescorer.Config(
+        useAdaptiveThresholds: true,
+        referenceTokenCount: 3,
+        shortTermCbwTaperPivot: 5,
+        shortTermCbwTaperExponent: 2,
+        spotterRescueMinSimilarity: 0.50,
+        spotterRescueMultiWordMinSimilarity: 0.60,
+        spotterRescueEnabled: false
+      ),
+      ctcModelDirectory: Self.personalizationModelDirectory
+    )
+    let prepared = PreparedRescorer(
+      terms: personalizedTerms, vocabulary: vocabulary, spotter: spotter, rescorer: rescorer)
+    cachedRescorer = prepared
+    return prepared
+  }
+
+  /// Warms the optional model while the user is still speaking, so acoustic
+  /// personalization does not add model loading after the shortcut is released.
+  public func prewarmPersonalization() async {
+    guard Self.acousticPersonalizationAvailableInCurrentBuild,
+      await personalizationModelsAreInstalled()
+    else { return }
+    _ = try? await loadPersonalizationModelsIfNeeded()
+    schedulePersonalizationUnload()
   }
 
   private func schedulePersonalizationUnload() {
@@ -318,16 +382,19 @@ public actor FluidAudioSpeechRecognizer: SpeechRecognizing {
     let generation = personalizationUnloadGeneration
     personalizationUnloadTask?.cancel()
     personalizationUnloadTask = Task { [weak self] in
-      try? await Task.sleep(for: .seconds(300))
+      try? await Task.sleep(for: Self.personalizationIdleUnloadDelay)
       guard !Task.isCancelled else { return }
       await self?.unloadPersonalizationModels(generation: generation)
     }
   }
 
+  private static let personalizationIdleUnloadDelay: Duration = .seconds(30 * 60)
+
   private func unloadPersonalizationModels(generation: UInt64) {
     guard generation == personalizationUnloadGeneration else { return }
     ctcModels = nil
     ctcTokenizer = nil
+    cachedRescorer = nil
     personalizationUnloadTask = nil
   }
 

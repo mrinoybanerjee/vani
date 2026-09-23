@@ -9,9 +9,11 @@ public actor AVAudioEngineCapture: AudioCapturing {
   private var capacityTask: Task<Void, Never>?
   private var pendingSnapshot: AudioSampleRingBuffer.Snapshot?
 
-  private static let initialCapacityDuration: TimeInterval = 3 * 60
-  private static let capacityChunkDuration: TimeInterval = 60
-  private static let capacityReservationInterval: Duration = .seconds(60)
+  // Reserve a small first page so key-down does not allocate and zero-fill minutes of
+  // audio; background reservations then stay at least 45 seconds ahead of capture.
+  private static let initialCapacityDuration: TimeInterval = 60
+  private static let capacityChunkDuration: TimeInterval = 30
+  private static let capacityReservationInterval: Duration = .seconds(15)
   static let maximumSupportedInputSampleRate = 48_000.5
 
   public init(maximumDuration: TimeInterval = AudioPolicy.default.maximumDuration) {
