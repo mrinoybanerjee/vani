@@ -67,12 +67,13 @@ Audio chunks, transcript, personal notes, summary and a previous saved record li
 `~/Library/Application Support/Vani/Meetings/<meeting-id>/`. Directories are owner-only
 and files are owner-readable/writable. They are not encrypted by Vani. Completed audio
 chunks are retained until **Remove saved audio** succeeds after transcript persistence.
-There is no automatic purge. Up to about 20 seconds per source remain in memory before a
+There is no automatic purge. Up to about 24 seconds per source remain in memory before a
 chunk is saved; a process crash can lose that unfinished tail. Capture stops at two hours.
 
 Summaries use the local `qwen3:4b` model through an independently installed Ollama service.
 Installing that model downloads approximately 2.5 GB; meeting content is not part of that download.
-Vani sends transcript text to the loopback service, never audio, and requests model unload
-after generation. Ollama and any software running as the same macOS user remain trust
+Vani sends transcript text and that meeting's own notes (bounded, as untrusted guidance on what
+matters) only to the loopback service, never audio, and requests model unload after generation.
+It also asks the same loopback service which models are installed, to show a setup hint. Ollama and any software running as the same macOS user remain trust
 boundaries. Source quotes help review a summary; they do not prove that every generated
 interpretation is correct. Dictation remains deterministic and does not use this model.

@@ -12,10 +12,25 @@ and Screen & System Audio Recording permission are required; macOS 15+ is requir
 combined capture. Existing dictation and quick notes continue to support macOS 14.
 
 The workspace keeps My notes, Transcript and Summary separate. Transcript updates arrive
-in roughly 20-second chunks; labels identify microphone or Mac audio, not individual people.
+in chunks of 15–24 seconds: after 15 seconds each source is cut in the quietest 200 ms window
+(immediately at a near-silent one, otherwise the quietest before 24 seconds), so words are not
+split. Labels are "Me" (microphone) and "Others" (Mac audio); they identify sources, not people.
+Chunks use the user's dictionary and, when personalization is enabled, learned corrections and
+acoustic terms. Snippets and Smart Formatting are never applied to meetings. A chunk is skipped
+as silence only when its loudest 30 ms frame stays below a low RMS threshold, so short quiet
+phrases inside long silences are still transcribed.
+
+Without headphones the microphone also hears other participants. A microphone segment whose
+words are mostly (≥ 70%) covered by runs of three or more words from Mac-audio segments within
+±3 seconds is marked as echo, whichever arrives first. Echo lines are kept on disk, hidden by
+default with a toggle to show them, and excluded from summaries and exports.
+
 Stop flushes the final chunks, finishes transcription, saves, then generates a summary.
 Closing the window hides it while capture continues; the menu exposes the active meeting.
-Quitting must finish capture and save successfully. No recording starts automatically.
+Quitting must finish capture and save successfully; while a transcript is finishing, quit is
+refused with an explanation. A running summary is cancelled on quit, because it can be
+regenerated. No recording starts automatically. If sleep or permission loss interrupts a meeting
+and transcription of saved chunks fails, it is retried automatically after the Mac is awake.
 
 ## Small, explicit architecture
 
@@ -43,13 +58,19 @@ source segments and summary. Each save retains the previous valid record in `mee
 Directories use mode 0700; atomic files use 0600. Files are not encrypted by the app.
 Corrupt files are preserved and surfaced as errors, never silently replaced. An empty abandoned
 UUID directory from a failed initial creation does not block other meetings; orphaned audio or
-backups are preserved and fail closed. Manual file recovery remains necessary for corrupt meeting
-metadata; the app does not silently restore an older record.
+backups are preserved and fail closed. A hidden temporary file left by a crash during a first
+save is ignored (not deleted) so it cannot hide other meetings. Manual file recovery remains
+necessary for corrupt meeting metadata; the app does not silently restore an older record.
+While the stored file still matches the last record the store wrote, the backup is written from
+memory instead of being read and decoded again; any outside change triggers full validation.
+If capture fails to start, the just-created record is removed only when it has no audio, notes,
+transcript or summary. Deleting a meeting moves it to Recently Deleted (`deletedAt`); its notes,
+transcript, summary and audio are kept and it can be restored.
 
 Records are limited to 8 MiB, titles to 4 KiB, notes and summaries to 1 MiB each, and transcripts
 to 1,440 unique segments with validated offsets and sizes. Audio chunks are bounded binary
 property lists containing 16 kHz mono Float PCM. Their filenames are unique chunk IDs. Completed
-chunks are durable before transcription. The unfinished tail (about 20 seconds per source) can
+chunks are durable before transcription. The unfinished tail (up to 24 seconds per source) can
 be lost on process crash. A two-hour recording contains roughly 880 MiB of uncompressed audio
 when both sources are continuously active; keep sufficient disk space available.
 
@@ -58,22 +79,40 @@ barrier. A save failure retains the draft for retry or export. When idle, explic
 confirming Discard Changes after a save failure restores the
 last saved meeting without writing, hiding the error, or deleting captured audio. Export first
 to keep unsaved edits; closing never discards automatically. Recover transcript retries saved
-chunks; already persisted segment IDs are skipped. Remove saved audio requires every captured
-chunk to have a durable transcript, and a user confirmation. It keeps notes, transcript and
-summary. No automatic audio deletion or silent truncation occurs.
+chunks in recording order (offset, then ID); already persisted segment IDs are skipped. A chunk
+that fails transcription three times is saved as a failure segment ("Couldn't transcribe
+0:40–1:00") so later chunks are not blocked; its audio is kept and Recover transcript retries it.
+Remove saved audio requires every captured chunk to have a durable transcript, and a user
+confirmation; a second, explicit confirmation is required while failure segments still depend on
+their audio. It keeps notes, transcript and summary. No automatic audio deletion or silent
+truncation occurs.
 
 ## Local summaries
 
 Ollama must already be running with `qwen3:4b` installed (approximately 2.5 GB download).
-Vani sends bounded transcript batches to `http://127.0.0.1:11434/api/generate`. It refuses redirects,
-disables system proxies, caps each response at 256 KiB, checks completion and structured output,
-and asks Ollama to unload the model afterward. There is no cloud fallback or configurable remote URL.
+Before a meeting starts and when the Summary tab opens, Vani checks
+`http://127.0.0.1:11434/api/tags` without blocking and shows a quiet hint if the model is missing;
+recording never depends on it. Vani sends bounded transcript batches to
+`http://127.0.0.1:11434/api/generate`. Both requests refuse redirects, disable system proxies, use
+an ephemeral session and cap each response at 256 KiB. Vani checks completion and structured
+output, reports output cut off at the model's length limit, keeps the model loaded between
+batches and asks Ollama to unload it with the final request. There is no cloud fallback or
+configurable remote URL.
 
-The model receives transcript data, not user-authored notes. Generated summary, decisions and
-actions require a matching quote and timestamp from the transcript. Missing support or an
-unavailable model produces an error and preserves the previous summary. User edits during
-generation invalidate the result. Quoted evidence is a review aid, not proof against all model errors.
-Long transcripts use bounded batches; output can be more verbose than a single consolidated summary.
+The model receives the transcript (without echo lines or failure segments) and the meeting's own
+notes, at most 4,000 characters, delimited and marked as untrusted data. Notes indicate which
+topics the user found important; they are never accepted as evidence. Every generated summary,
+decision and action still requires a quote that matches its cited transcript segment after
+case, punctuation and whitespace are normalized (whole words only). Unsupported items are dropped
+and counted in a short note; the summary fails only when every proposed item is unsupported.
+When a transcript needs more than one batch, a final consolidation pass merges duplicates into at
+most 8 summary items, 8 decisions and 10 actions. Each merged item must cite validated items of
+the same section by number, which keeps its quote and times; if consolidation fails, the
+de-duplicated batch items are used. An unavailable model produces an error and preserves the
+previous summary. Summaries run in the background: other meetings can be opened or recorded,
+and the result is written to the summarized meeting's latest stored record. Notes edited during
+generation are kept; a changed transcript invalidates the result. Quoted evidence is a review aid,
+not proof against all model errors.
 
 ## Validation boundaries
 
