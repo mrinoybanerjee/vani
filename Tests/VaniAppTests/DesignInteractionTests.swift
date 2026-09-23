@@ -132,6 +132,14 @@ extension NativeInteractionTests.NotesTests {
         ReadyShortcutRow(shortcut: .function, globeKey: .showEmojiAndSymbols)
       }, name: "menu-ready-globe-hint", path: path)
     try await captureView(
+      MenuPreview(status: "Ready") {
+        VStack(alignment: .leading, spacing: 16) {
+          ReadyShortcutRow(shortcut: .function, globeKey: .doNothing, handsFreeEnabled: true)
+          ImprovedModelRow(progress: nil, install: {})
+          ImprovedModelRow(progress: 0.42, install: {})
+        }
+      }, name: "menu-improved-model", path: path)
+    try await captureView(
       MenuPreview(status: "Shortcut inactive") {
         ShortcutInactiveView(quit: {}, canRelaunch: true)
       }, name: "menu-shortcut-inactive", path: path)

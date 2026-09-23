@@ -80,6 +80,25 @@ public actor DictationSession {
     await speechRecognizer.modelsAreInstalled()
   }
 
+  public func activeSpeechModel() async -> SpeechModel? {
+    await speechRecognizer.activeModel()
+  }
+
+  public func preferredSpeechModelIsInstalled() async -> Bool {
+    await speechRecognizer.preferredModelIsInstalled()
+  }
+
+  /// Downloads and switches to the preferred model. Safe while ready: the recognizer keeps
+  /// the current engine until the new one has loaded. Refused during a recording.
+  public func installPreferredSpeechModel(
+    progress: @escaping @Sendable (Double) -> Void
+  ) async throws {
+    guard machine.phase == .ready || machine.phase == .setup else {
+      throw VaniFailure.internalInvariant
+    }
+    try await speechRecognizer.installPreferredModel(progress: progress)
+  }
+
   public func personalizationModelsAreInstalled() async -> Bool {
     await speechRecognizer.personalizationModelsAreInstalled()
   }

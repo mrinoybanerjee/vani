@@ -20,8 +20,9 @@ Microphone, Accessibility, Input Monitoring and Screen & System Audio Recording 
 records. This deletion is permanent. It keeps the shared FluidAudio speech models by
 default because another local app may use them.
 
-To also remove the approximately 443 MiB English model and, if downloaded, the optional
-98 MiB vocabulary model:
+The default 583 MiB English model lives in Vani's Application Support folder and is
+removed with the rest of Vani's data. To also remove the shared models in FluidAudio's
+folder (the previous 443 MiB English model and the optional 98 MiB vocabulary model):
 
 ```bash
 ./scripts/uninstall-local.sh --remove-model

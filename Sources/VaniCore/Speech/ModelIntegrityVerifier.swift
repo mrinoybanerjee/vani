@@ -10,6 +10,53 @@ struct ModelArtifact: Sendable, Equatable {
 struct ModelIntegrityVerifier: Sendable {
   static let parakeetV2Revision = "ee09c569f73759e6d44c9bd16766f477b2b36d39"
   static let parakeetCtc110MRevision = "accdafd8cf8a2ff1cabe3c11e54416b405d409aa"
+  static let parakeetUnifiedRevision = "4252711f6f060f9a2f91e5f081a806d7f45eebd8"
+
+  /// Parakeet Unified EN 0.6B, offline int8 encoder with its decoder, joint and vocabulary:
+  /// the exact set `UnifiedAsrManager.loadModels(from:)` reads.
+  static let parakeetUnified = ModelIntegrityVerifier(artifacts: [
+    ModelArtifact(
+      path: "parakeet_unified_decoder.mlmodelc/analytics/coremldata.bin", byteCount: 243,
+      sha256: "9ae70f6559989f88b856b326e59315798f9f0d08207a19fcc2dd3287a30088a5"),
+    ModelArtifact(
+      path: "parakeet_unified_decoder.mlmodelc/coremldata.bin", byteCount: 560,
+      sha256: "ce99c4488840fc463d59f8d4d6d2a9e8ceae8138ead51e3c265dde4d2ba4a0e9"),
+    ModelArtifact(
+      path: "parakeet_unified_decoder.mlmodelc/model.mil", byteCount: 13_102,
+      sha256: "6e60965b89c93943aa2be2d991c2461108145851fde05e1d048223a32d4cb20d"),
+    ModelArtifact(
+      path: "parakeet_unified_decoder.mlmodelc/weights/weight.bin", byteCount: 14_429_952,
+      sha256: "96f990461a5986d5e7309ad1a0f36084fbf0f4b28aec35948f8b8d0dcbf8599e"),
+    ModelArtifact(
+      path: "parakeet_unified_encoder_int8.mlmodelc/analytics/coremldata.bin", byteCount: 243,
+      sha256: "57e116a9d5765e39c0cdf754137ab744ddae34d9c6d68a5fdcad6600ae3a7b6b"),
+    ModelArtifact(
+      path: "parakeet_unified_encoder_int8.mlmodelc/coremldata.bin", byteCount: 492,
+      sha256: "54f533d30343d5e62b324a0691e4c262a6768b07b6e88e7aa14c617a2baba8a3"),
+    ModelArtifact(
+      path: "parakeet_unified_encoder_int8.mlmodelc/model.mil", byteCount: 1_110_902,
+      sha256: "c1c5d71c6cbf4d35bba08458746bde3640da7b1b444e1229a269393a58222c10"),
+    ModelArtifact(
+      path: "parakeet_unified_encoder_int8.mlmodelc/weights/weight.bin", byteCount: 595_051_904,
+      sha256: "f984b81590a4deae041ae20fbab8981c2d2a5b528b2ac81fae81c432633535c6"),
+    ModelArtifact(
+      path: "parakeet_unified_joint_decision_single_step.mlmodelc/analytics/coremldata.bin",
+      byteCount: 243,
+      sha256: "163877ad14af97ec4107cd854fd1c6d336ee5d40ad25a657cc764fb763f452f5"),
+    ModelArtifact(
+      path: "parakeet_unified_joint_decision_single_step.mlmodelc/coremldata.bin", byteCount: 556,
+      sha256: "68a081570a48b52ec9379e153bd56748a5408a50be16767601563f231eaeff03"),
+    ModelArtifact(
+      path: "parakeet_unified_joint_decision_single_step.mlmodelc/model.mil", byteCount: 9_611,
+      sha256: "03c21096090bcd0b71c896c5ae0eb815db31a91c6676f572a7868eee4299abe3"),
+    ModelArtifact(
+      path: "parakeet_unified_joint_decision_single_step.mlmodelc/weights/weight.bin",
+      byteCount: 3_446_978,
+      sha256: "06831afa6d1beb0c0b10350ebf7886bc37638e951d14e738d7e06fbd2a05012f"),
+    ModelArtifact(
+      path: "vocab.json", byteCount: 15_088,
+      sha256: "e1a7bff4f5df133c0f4ad47b8e43c96f6bf1865d99126a4c4725ef51d0108bec"),
+  ])
 
   static let parakeetV2 = ModelIntegrityVerifier(artifacts: [
     ModelArtifact(

@@ -172,9 +172,11 @@ in a logged-in Mac session.
 - Meetings: `~/Library/Application Support/Vani/Meetings/<UUID>/`, including records,
   previous copies and retained `.vani-audio` chunks
 - Cache: `~/Library/Caches/com.mrinoy.vani`
-- Shared speech model: `~/Library/Application Support/FluidAudio/Models/parakeet-tdt-0.6b-v2`
+- Speech model: `~/Library/Application Support/Vani/Models/parakeet-unified-en-0.6b-int8`
+- Previous speech model, if installed: `~/Library/Application Support/FluidAudio/Models/parakeet-tdt-0.6b-v2`
 - Optional vocabulary model:
   `~/Library/Application Support/FluidAudio/Models/parakeet-ctc-110m-coreml`
 
-The speech model is about 443 MiB and is shared through FluidAudio's model directory.
-Vani checks its exact file list, byte counts, and SHA-256 hashes before loading it.
+The speech model is about 583 MiB and lives in Vani's own folder, so another app cannot
+change its file set. The previous model (443 MiB) is shared through FluidAudio's model
+directory and remains a fallback. Vani checks its exact file list, byte counts, and SHA-256 hashes before loading it.

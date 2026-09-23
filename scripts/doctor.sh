@@ -6,7 +6,8 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 INSTALL_ROOT="${INSTALL_ROOT:-/Applications}"
 MINIMUM_DISK_KIB=$((3 * 1024 * 1024))
 LOCAL_SIGNING_IDENTITY="Vani Local Development"
-MODEL_DIRECTORY="$HOME/Library/Application Support/FluidAudio/Models/parakeet-tdt-0.6b-v2"
+MODEL_DIRECTORY="$HOME/Library/Application Support/Vani/Models/parakeet-unified-en-0.6b-int8"
+PREVIOUS_MODEL_DIRECTORY="$HOME/Library/Application Support/FluidAudio/Models/parakeet-tdt-0.6b-v2"
 ERROR_COUNT=0
 WARNING_COUNT=0
 
@@ -97,8 +98,10 @@ fi
 if [[ -d "$MODEL_DIRECTORY" ]]; then
     MODEL_MIB="$(du -sk "$MODEL_DIRECTORY" | awk '{ printf "%.0f", $1 / 1024 }')"
     info "English speech model present ($MODEL_MIB MiB); Vani verifies its manifest before loading"
+elif [[ -d "$PREVIOUS_MODEL_DIRECTORY" ]]; then
+    info "Previous English speech model present; Vani offers the more accurate 583 MiB model in its menu"
 else
-    info "English speech model is not installed; Vani will offer a verified 443 MiB download"
+    info "English speech model is not installed; Vani will offer a verified 583 MiB download"
 fi
 
 INSTALLED_APP="$INSTALL_ROOT/Vani.app"
