@@ -210,6 +210,37 @@ extension NativeInteractionTests {
       #expect(model.error != nil)
     }
 
+    @Test func visibleNotesUpdateOnlyWithSavedNotesSearchAndCategory() async throws {
+      let (directory, model) = fixture()
+      defer { try? FileManager.default.removeItem(at: directory) }
+      await model.create(text: "Alpha")
+      let alpha = try #require(model.draft)
+      await model.create(text: "Beta")
+      #expect(model.visibleNotes.map(\.displayTitle) == ["Beta", "Alpha"])
+      // Editing the draft does not change the library until it is saved.
+      model.draft?.text = "Beta, now about gamma"
+      #expect(model.visibleNotes.first?.text == "Beta")
+      await model.save()
+      #expect(model.visibleNotes.first?.text == "Beta, now about gamma")
+      model.search = "gamma"
+      #expect(model.visibleNotes.map(\.displayTitle) == ["Beta"])
+      model.search = ""
+      await model.select(alpha)
+      await model.setDeleted(true)
+      #expect(model.visibleNotes.map(\.displayTitle) == ["Beta"])
+      await model.showDeleted(true)
+      #expect(model.visibleNotes.map(\.id) == [alpha.id])
+    }
+
+    @Test func exportFileNameUsesASanitisedTitle() {
+      #expect(NotesModel.exportFileName(for: VaniNote(title: "Plan: Q4/Q1")) == "Plan Q4 Q1.txt")
+      #expect(NotesModel.exportFileName(for: VaniNote(title: "  ")) == "Vani Note.txt")
+      #expect(NotesModel.exportFileName(for: VaniNote(title: ".hidden")) == "hidden.txt")
+      #expect(NotesModel.exportFileName(for: VaniNote(title: "Line\nbreak")) == "Line break.txt")
+      let long = NotesModel.exportFileName(for: VaniNote(title: String(repeating: "a", count: 200)))
+      #expect(long.count == 84)
+    }
+
     private func textEditor(in view: NSView?) -> NSTextView? {
       guard let view else { return nil }
       if let editor = view as? NSTextView, editor.isEditable, !editor.isFieldEditor {

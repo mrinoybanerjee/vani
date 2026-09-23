@@ -28,7 +28,7 @@ struct NotesView: View {
   }
 
   private var toolbar: some View {
-    HStack(spacing: 14) {
+    HStack(spacing: 16) {
       Text("Notes").font(.system(size: 13, weight: .medium))
       Spacer()
       if let note = model.draft {
@@ -67,7 +67,7 @@ struct NotesView: View {
 
   @ViewBuilder private var editor: some View {
     if let note = model.draft {
-      VStack(alignment: .leading, spacing: 18) {
+      VStack(alignment: .leading, spacing: 16) {
         HStack(spacing: 8) {
           Text(note.updatedAt, format: .dateTime.month(.wide).day().year())
           if note.deletedAt != nil { Text("· Recently Deleted") }
@@ -82,9 +82,10 @@ struct NotesView: View {
         .disabled(model.busy || note.deletedAt != nil)
         ZStack(alignment: .topLeading) {
           if note.text.isEmpty {
-            Text("Start writing, or use your dictation shortcut…")
+            Text("Start writing, or hold your dictation key…")
               .font(.system(size: 15)).foregroundStyle(.secondary)
               .padding(.horizontal, 5).padding(.top, 1).allowsHitTesting(false)
+              .accessibilityHidden(true)
           }
           TextEditor(
             text: Binding(
@@ -104,22 +105,25 @@ struct NotesView: View {
       VStack(alignment: .leading, spacing: 20) {
         Image(systemName: "text.alignleft")
           .font(.system(size: 28, weight: .light)).foregroundStyle(VaniTheme.accent)
-        Text("Select or create a note")
+          .accessibilityHidden(true)
+        Text(model.notes.isEmpty ? "No notes yet" : "Select or create a note")
           .font(.system(size: 34, weight: .regular, design: .serif))
         Button("Create a note", systemImage: "plus") { createNote() }
           .buttonStyle(.borderedProminent).controlSize(.large)
           .disabled(!model.loaded || model.busy)
       }
-      .padding(40).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+      .padding(32).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
     }
   }
 
   private var status: some View {
-    VStack(alignment: .leading, spacing: 10) {
+    VStack(alignment: .leading, spacing: 8) {
       if let error = model.error {
-        Label(error, systemImage: "exclamationmark.circle")
-          .foregroundStyle(.red).textSelection(.enabled).fixedSize(
-            horizontal: false, vertical: true)
+        Label {
+          Text(error).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+        } icon: {
+          Image(systemName: "exclamationmark.circle.fill").foregroundStyle(.red)
+        }
         HStack {
           if model.dirty {
             Button("Discard Changes…") { confirmingDiscard = true }.disabled(model.busy)
@@ -141,7 +145,7 @@ struct NotesView: View {
         }
       }
     }
-    .font(.caption).controlSize(.small).padding(.horizontal, 24).padding(.vertical, 14)
+    .font(.caption).controlSize(.small).padding(.horizontal, 24).padding(.vertical, 12)
   }
 
   private var statusLabel: String {
@@ -162,7 +166,7 @@ struct NotesView: View {
   private func export(_ note: VaniNote) {
     let panel = NSSavePanel()
     panel.allowedContentTypes = [.plainText]
-    panel.nameFieldStringValue = "Vani Note.txt"
+    panel.nameFieldStringValue = NotesModel.exportFileName(for: note)
     panel.begin { response in
       guard response == .OK, let url = panel.url else { return }
       do { try note.exportedText.write(to: url, atomically: true, encoding: .utf8) } catch {
@@ -192,7 +196,7 @@ struct NotesLibraryView: View {
             .buttonStyle(.plain).accessibilityLabel("Clear search")
           }
         }
-        .padding(10).background(VaniTheme.paper, in: RoundedRectangle(cornerRadius: 8))
+        .padding(8).background(VaniTheme.paper, in: RoundedRectangle(cornerRadius: 8))
         HStack(spacing: 4) {
           categoryButton("Notes", deleted: false)
           categoryButton("Recently Deleted", deleted: true)
@@ -201,30 +205,12 @@ struct NotesLibraryView: View {
       }.padding(.horizontal, 20).padding(.top, 20)
       ScrollView {
         LazyVStack(alignment: .leading, spacing: 4) {
+          let selectedID = model.draft?.id
           ForEach(model.visibleNotes) { note in
-            Button {
+            NoteRow(note: note, selected: selectedID == note.id) {
               Task { await model.select(note) }
-            } label: {
-              VStack(alignment: .leading, spacing: 7) {
-                Text(note.displayTitle).font(.system(size: 14, weight: .semibold)).lineLimit(2)
-                Text(note.text.isEmpty ? "Empty note" : String(note.text.prefix(160)))
-                  .font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(2)
-                Text(note.updatedAt, format: .dateTime.month(.abbreviated).day())
-                  .font(.system(size: 11)).foregroundStyle(.secondary)
-              }
-              .frame(maxWidth: .infinity, alignment: .leading).padding(14)
-              .background(
-                model.draft?.id == note.id ? VaniTheme.paper : .clear,
-                in: RoundedRectangle(cornerRadius: 10)
-              )
-              .overlay {
-                RoundedRectangle(cornerRadius: 10)
-                  .strokeBorder(model.draft?.id == note.id ? VaniTheme.line : .clear)
-              }
-              .contentShape(Rectangle())
             }
-            .buttonStyle(.plain).disabled(model.busy)
-            .accessibilityAddTraits(model.draft?.id == note.id ? .isSelected : [])
+            .disabled(model.busy)
           }
           if model.visibleNotes.isEmpty {
             VStack(alignment: .leading, spacing: 6) {
@@ -235,14 +221,15 @@ struct NotesLibraryView: View {
                   ? "Your notes will appear here." : "Try another word or clear your search."
               )
               .font(.caption).foregroundStyle(.secondary)
-            }.padding(14)
+            }.padding(12)
           }
-        }.padding(10)
+        }.padding(8)
       }.padding(.top, 12)
       HStack {
         Label("On this Mac", systemImage: "internaldrive")
         Spacer()
         Text("\(model.visibleNotes.count)")
+          .accessibilityLabel("\(model.visibleNotes.count) notes")
       }.font(.caption).foregroundStyle(.secondary).padding(20)
     }
     .background(VaniTheme.sidebar)
@@ -260,12 +247,51 @@ struct NotesLibraryView: View {
         .system(size: 12, weight: model.showingDeleted == deleted ? .semibold : .regular)
       )
       .foregroundStyle(model.showingDeleted == deleted ? Color.primary : .secondary)
-      .padding(.horizontal, 9).padding(.vertical, 8)
+      .padding(.horizontal, 8).padding(.vertical, 8)
       .background(
         model.showingDeleted == deleted ? VaniTheme.paper : .clear,
         in: RoundedRectangle(cornerRadius: 6))
     }.buttonStyle(.plain).disabled(model.busy)
       .accessibilityAddTraits(model.showingDeleted == deleted ? .isSelected : [])
   }
+}
 
+/// A library row. Selection uses native-style fill, a leading accent bar and a semibold
+/// title, so it is not conveyed by colour alone; VoiceOver receives the selected trait.
+private struct NoteRow: View {
+  let note: VaniNote
+  let selected: Bool
+  let select: () -> Void
+
+  var body: some View {
+    Button(action: select) {
+      HStack(spacing: 0) {
+        Capsule()
+          .fill(selected ? VaniTheme.accent : .clear)
+          .frame(width: 3)
+          .padding(.vertical, 8)
+        VStack(alignment: .leading, spacing: 4) {
+          Text(note.displayTitle)
+            .font(.system(size: 14, weight: selected ? .semibold : .medium)).lineLimit(2)
+          Text(note.text.isEmpty ? "Empty note" : String(note.text.prefix(160)))
+            .font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(2)
+          Text(note.updatedAt, format: .dateTime.month(.abbreviated).day())
+            .font(.system(size: 11)).foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.vertical, 12).padding(.leading, 8).padding(.trailing, 12)
+      }
+      .background(
+        selected ? VaniTheme.paper : .clear,
+        in: RoundedRectangle(cornerRadius: 10)
+      )
+      .overlay {
+        RoundedRectangle(cornerRadius: 10)
+          .strokeBorder(selected ? VaniTheme.line : .clear)
+      }
+      .contentShape(Rectangle())
+    }
+    .buttonStyle(.plain)
+    .accessibilityAddTraits(selected ? .isSelected : [])
+  }
 }

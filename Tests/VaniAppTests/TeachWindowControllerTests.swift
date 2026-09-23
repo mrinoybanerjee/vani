@@ -164,6 +164,29 @@ extension NativeInteractionTests {
     }
 
     @Test
+    func unrequestedActivationDoesNotStealFocusFromOtherWindows() async {
+      let controller = TeachWindowController(activateApplication: {})
+      controller.present(rootView: Text("Editor"))
+      defer { controller.dismiss() }
+      // The activation Teach requested is honoured once.
+      NotificationCenter.default.post(name: NSApplication.didBecomeActiveNotification, object: nil)
+      try? await Task.sleep(for: .milliseconds(50))
+      #expect(controller.window?.isVisible == true)
+
+      // Later activations (for example, returning to the workspace) leave Teach alone.
+      controller.window?.orderOut(nil)
+      NotificationCenter.default.post(name: NSApplication.didBecomeActiveNotification, object: nil)
+      let refronted = await waitUntil(timeout: 0.3) { controller.window?.isVisible == true }
+      #expect(!refronted)
+
+      // A new explicit request re-arms the one-shot focus.
+      controller.requestActivation()
+      NotificationCenter.default.post(name: NSApplication.didBecomeActiveNotification, object: nil)
+      let requested = await waitUntil { controller.window?.isVisible == true }
+      #expect(requested)
+    }
+
+    @Test
     func closedTeachWindowCanBePresentedAgain() {
       let controller = TeachWindowController(activateApplication: {})
       controller.present(rootView: Text("First"))

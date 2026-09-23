@@ -3,10 +3,19 @@ import VaniCore
 
 @MainActor
 final class NotesModel: ObservableObject {
-  @Published private(set) var notes: [VaniNote] = []
+  @Published private(set) var notes: [VaniNote] = [] {
+    didSet { refreshVisibleNotes() }
+  }
   @Published var draft: VaniNote?
-  @Published var search = ""
-  @Published var showingDeleted = false
+  @Published var search = "" {
+    didSet { if search != oldValue { refreshVisibleNotes() } }
+  }
+  @Published var showingDeleted = false {
+    didSet { if showingDeleted != oldValue { refreshVisibleNotes() } }
+  }
+  /// The filtered, newest-first library. Cached so editing the draft does not re-sort every
+  /// render; recomputed only when notes, search or the category change.
+  private(set) var visibleNotes: [VaniNote] = []
   @Published private(set) var busy = false
   @Published private(set) var loaded = false
   @Published private(set) var error: String?
@@ -15,12 +24,26 @@ final class NotesModel: ObservableObject {
 
   init(store: NoteStore = NoteStore()) { self.store = store }
 
-  var visibleNotes: [VaniNote] {
-    notes.filter {
+  private func refreshVisibleNotes() {
+    visibleNotes = notes.filter {
       ($0.deletedAt != nil) == showingDeleted
         && (search.isEmpty || $0.title.localizedCaseInsensitiveContains(search)
           || $0.text.localizedCaseInsensitiveContains(search))
     }.sorted { $0.updatedAt > $1.updatedAt }
+  }
+
+  /// A safe plain-text file name derived from the note title.
+  static func exportFileName(for note: VaniNote) -> String {
+    let forbidden = CharacterSet(charactersIn: "/:\\").union(.controlCharacters)
+      .union(.newlines)
+    let cleaned = note.title.unicodeScalars
+      .map { forbidden.contains($0) ? " " : String($0) }
+      .joined()
+      .split(whereSeparator: \.isWhitespace)
+      .joined(separator: " ")
+      .trimmingCharacters(in: CharacterSet(charactersIn: ". "))
+    let base = cleaned.isEmpty ? "Vani Note" : String(cleaned.prefix(80))
+    return "\(base).txt"
   }
 
   var dirty: Bool {

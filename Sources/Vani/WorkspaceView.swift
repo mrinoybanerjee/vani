@@ -16,7 +16,7 @@ struct WorkspaceView: View {
               Label(section.rawValue, systemImage: section.icon)
                 .font(.system(size: 13, weight: model.selection == section ? .semibold : .regular))
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 12).padding(.vertical, 10)
+                .padding(.horizontal, 12).padding(.vertical, 8)
                 .background(
                   model.selection == section ? VaniTheme.paper : .clear,
                   in: RoundedRectangle(cornerRadius: 8)
@@ -47,7 +47,7 @@ struct WorkspaceView: View {
       ZStack {
         retained(MeetingView(model: model.meetings), for: .meetings)
         retained(NotesView(model: model.notes), for: .notes)
-        retained(SettingsView(), for: .settings)
+        retained(SettingsView(active: model.selection == .settings), for: .settings)
       }
       .frame(minWidth: 560, maxWidth: .infinity, maxHeight: .infinity)
       .background(VaniTheme.paper)
