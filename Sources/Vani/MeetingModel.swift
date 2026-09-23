@@ -12,7 +12,7 @@ final class MeetingModel: ObservableObject {
   /// room microphone stays near 0.001–0.003; even soft speech frames exceed 0.01.
   static let silenceThreshold: Float = 0.004
   static let minimumSpeechDuration: TimeInterval = 0.18
-  /// A chunk that fails transcription this many times is saved as a visible failure placeholder.
+  /// A chunk is tried this many times in a row before it is saved as a visible failure segment.
   static let maximumTranscriptionAttempts = 3
 
   @Published private(set) var meetings: [MeetingRecord] = []
@@ -57,7 +57,8 @@ final class MeetingModel: ObservableObject {
   private var activeCaptureID: UUID?
   private var summaryTask: Task<String, Error>?
   private var recoveryTask: Task<Void, Never>?
-  private var transcriptionAttempts: [UUID: Int] = [:]
+  private var echoDetector = MeetingEchoDetector()
+  private let transcriptionRetryDelay: Duration
 
   static var systemSupportsCapture: Bool {
     if #available(macOS 15.0, *) { return true }
@@ -74,7 +75,8 @@ final class MeetingModel: ObservableObject {
     }, reserveSpeech: @escaping () -> Bool, releaseSpeech: @escaping () -> Void,
     vocabulary: @escaping @MainActor () -> MeetingVocabulary = { .empty },
     captureSupported: Bool = MeetingModel.systemSupportsCapture,
-    recoveryRetryDelay: Duration = .seconds(15)
+    recoveryRetryDelay: Duration = .seconds(15),
+    transcriptionRetryDelay: Duration = .milliseconds(500)
   ) {
     self.store = store
     self.recognizer = recognizer
@@ -85,12 +87,15 @@ final class MeetingModel: ObservableObject {
     self.vocabulary = vocabulary
     self.captureSupported = captureSupported
     self.recoveryRetryDelay = recoveryRetryDelay
+    self.transcriptionRetryDelay = transcriptionRetryDelay
   }
 
   var busy: Bool { phase != .idle }
   var dirty: Bool { draft != lastSaved }
   var summarizingSelection: Bool { summarizingID != nil && summarizingID == draft?.id }
   var failedSegmentCount: Int { draft?.transcript.filter(\.isFailed).count ?? 0 }
+  /// Saved audio that still lacks a real transcript after an interruption.
+  private var needsRecovery: Bool { transcriptionFailed || failedSegmentCount > 0 }
   var visibleMeetings: [MeetingRecord] {
     meetings.filter {
       ($0.deletedAt != nil) == showingDeleted
@@ -294,11 +299,15 @@ final class MeetingModel: ObservableObject {
     draft?.endedAt = Date()
     phase = .transcribing
     await drainTask?.value
-    if !transcriptionFailed { await drain() }
+    // Try again even if live transcription paused: the failure may have been transient.
+    transcriptionFailed = false
+    await drain()
     let saved = await save()
     phase = .idle
     releaseSpeech()
-    if summarize && saved && !transcriptionFailed && summarizingID == nil {
+    if summarize && saved && !transcriptionFailed && summarizingID == nil,
+      draft?.transcript.contains(where: \.isSpeech) == true
+    {
       await generateSummary()
     }
   }
@@ -313,7 +322,7 @@ final class MeetingModel: ObservableObject {
       return
     }
     await stop(summarize: false)
-    if transcriptionFailed, let id = draft?.id { scheduleRecovery(for: id) }
+    if needsRecovery, let id = draft?.id { scheduleRecovery(for: id) }
   }
 
   private func scheduleRecovery(for id: UUID) {
@@ -323,10 +332,10 @@ final class MeetingModel: ObservableObject {
       for _ in 0..<3 {
         // The suspending clock does not advance during sleep, so this waits for awake time.
         do { try await Task.sleep(for: delay, clock: .suspending) } catch { return }
-        guard let self, self.transcriptionFailed, self.draft?.id == id else { return }
+        guard let self, self.needsRecovery, self.draft?.id == id else { return }
         if self.phase == .idle {
           await self.recoverTranscript()
-          if !self.transcriptionFailed { return }
+          if !self.needsRecovery { return }
         }
       }
     }
@@ -350,13 +359,8 @@ final class MeetingModel: ObservableObject {
       self.error = error.localizedDescription
       return
     }
-    // Chunks saved as failures get one more attempt; failing again restores the placeholder.
-    if let failed = draft?.transcript.filter(\.isFailed), !failed.isEmpty {
-      for segment in failed {
-        transcriptionAttempts[segment.id] = Self.maximumTranscriptionAttempts - 1
-      }
-      draft?.transcript.removeAll { $0.isFailed }
-    }
+    // Chunks saved as failures are tried again; failing again restores the failure segment.
+    draft?.transcript.removeAll { $0.isFailed }
     await drain()
     if draft?.endedAt == nil { draft?.endedAt = Date() }
     _ = await save()
@@ -532,45 +536,60 @@ final class MeetingModel: ObservableObject {
   private func drain() async {
     do {
       while let current = draft {
-        let files = try await store.pendingAudioFiles(for: current)
-        guard let file = files.first else { return }
-        let chunk = try await store.readAudio(file, meetingID: current.id)
-        let audio = try chunk.audio()
-        var text = ""
-        var failed = false
-        if audio.duration >= Self.minimumSpeechDuration,
-          audio.loudestFrameRootMeanSquare >= Self.silenceThreshold
-        {
-          let vocabulary = vocabulary()
-          do {
-            let result = try await recognizer.transcribe(
-              audio, context: vocabulary.recognitionContext)
-            text = vocabulary.process(result.text)
-          } catch {
-            let attempts = transcriptionAttempts[chunk.id, default: 0] + 1
-            transcriptionAttempts[chunk.id] = attempts
-            guard attempts >= Self.maximumTranscriptionAttempts else { throw error }
-            failed = true
-          }
-        }
+        guard let file = try await store.pendingAudioFiles(for: current).first,
+          let identity = MeetingAudioChunk.identity(fromFileName: file.lastPathComponent)
+        else { return }
+        let segment = await transcribeChunk(file, identity: identity, meetingID: current.id)
         guard draft?.id == current.id else { return }
-        if let transcript = draft?.transcript, !transcript.contains(where: { $0.id == chunk.id }) {
-          let segment = MeetingTranscriptSegment(
-            id: chunk.id, source: chunk.source, offset: chunk.offset, duration: audio.duration,
-            text: text, failed: failed ? true : nil)
-          // Re-evaluated on every arrival, so a Mac-audio segment can mark an earlier mic echo.
-          draft?.transcript = MeetingEchoDetector.marking(transcript + [segment])
+        if let transcript = draft?.transcript, !transcript.contains(where: { $0.id == segment.id })
+        {
+          // A Mac-audio segment can also mark an earlier, overlapping microphone echo.
+          draft?.transcript = echoDetector.adding(segment, to: transcript)
         }
         guard await save() else {
           throw MeetingError.storage(
             "The transcript could not be saved. Captured audio is preserved for recovery.")
         }
-        if !failed { transcriptionAttempts[chunk.id] = nil }
       }
     } catch {
       transcriptionFailed = true
       self.error =
         "Live transcription paused: \(error.localizedDescription). Captured audio remains on this Mac; use Recover transcript after stopping."
     }
+  }
+
+  /// Reads and transcribes one chunk, retrying in place with a short backoff. After the last
+  /// failed attempt, whether reading or recognition failed, it returns a failure segment so the
+  /// following chunks continue; the chunk's audio file is kept for Recover transcript.
+  private func transcribeChunk(
+    _ file: URL, identity: MeetingAudioChunk.Identity, meetingID: UUID
+  ) async -> MeetingTranscriptSegment {
+    var source = identity.source ?? .system
+    var offset = identity.offset ?? 0
+    var duration: TimeInterval = 0
+    for attempt in 1...Self.maximumTranscriptionAttempts {
+      do {
+        let chunk = try await store.readAudio(file, meetingID: meetingID)
+        let audio = try chunk.audio()
+        (source, offset, duration) = (chunk.source, chunk.offset, audio.duration)
+        var text = ""
+        if audio.duration >= Self.minimumSpeechDuration,
+          audio.loudestFrameRootMeanSquare >= Self.silenceThreshold
+        {
+          let vocabulary = vocabulary()
+          let result = try await recognizer.transcribe(
+            audio, context: vocabulary.recognitionContext)
+          text = vocabulary.process(result.text)
+        }
+        return MeetingTranscriptSegment(
+          id: identity.id, source: source, offset: offset, duration: duration, text: text)
+      } catch {
+        if attempt < Self.maximumTranscriptionAttempts {
+          try? await Task.sleep(for: transcriptionRetryDelay * attempt)
+        }
+      }
+    }
+    return MeetingTranscriptSegment(
+      id: identity.id, source: source, offset: offset, duration: duration, text: "", failed: true)
   }
 }

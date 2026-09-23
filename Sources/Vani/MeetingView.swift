@@ -12,6 +12,7 @@ struct MeetingView: View {
   @State private var confirmingDelete = false
   @State private var copied = false
   @State private var followingTranscript = true
+  @State private var userScrollingTranscript = false
 
   var body: some View {
     VStack(alignment: .leading, spacing: 0) {
@@ -222,9 +223,12 @@ struct MeetingView: View {
             }
           }
         }
-        .modifier(FollowsLatest(following: $followingTranscript))
+        .modifier(
+          FollowsLatest(following: $followingTranscript, scrolling: $userScrollingTranscript)
+        )
         .onChange(of: model.visibleTranscript.last?.id) {
-          guard model.phase == .recording, followingTranscript,
+          // Never move the transcript while the user is scrolling or reading earlier lines.
+          guard model.phase == .recording, followingTranscript, !userScrollingTranscript,
             let last = model.visibleTranscript.last?.id
           else { return }
           proxy.scrollTo(last, anchor: .bottom)
@@ -240,15 +244,34 @@ struct MeetingView: View {
       )
       .font(.caption.weight(.medium)).foregroundStyle(.secondary)
       if segment.isFailed {
-        Label("Couldn’t transcribe \(segment.timeRange)", systemImage: "exclamationmark.triangle")
-          .font(.system(size: 15)).foregroundStyle(.secondary)
-          .help("The audio is kept. Use Recover transcript to try again.")
+        Label(
+          segment.duration > 0
+            ? "Couldn’t transcribe \(segment.timeRange)" : "Couldn’t read this saved audio",
+          systemImage: "exclamationmark.triangle"
+        )
+        .font(.system(size: 15)).foregroundStyle(.secondary)
+        .help(failedSegmentHint)
       } else {
         Text(segment.text).font(.system(size: 15)).lineSpacing(6).textSelection(.enabled)
           .foregroundStyle(segment.isEcho ? .secondary : .primary)
       }
     }.frame(maxWidth: .infinity, alignment: .leading)
       .accessibilityElement(children: .combine)
+      .accessibilityHint(segment.isFailed ? failedSegmentHint : "")
+  }
+
+  private let failedSegmentHint = "The audio is kept. Use Recover transcript to try again."
+
+  /// Why Generate summary is unavailable, so a disabled button is never unexplained.
+  private var summaryUnavailableReason: String? {
+    if model.transcriptionFailed {
+      return "Recover the transcript first: some saved audio hasn’t been transcribed yet."
+    }
+    if model.summarizingID != nil { return "Another meeting is being summarized." }
+    if model.draft?.transcript.contains(where: \.isSpeech) != true {
+      return "There is no transcribed speech to summarize yet."
+    }
+    return nil
   }
 
   private var summary: some View {
@@ -270,20 +293,15 @@ struct MeetingView: View {
             systemImage: "sparkles"
           ) {
             Task { await model.generateSummary() }
-          }.disabled(
-            model.transcriptionFailed || model.summarizingID != nil || model.saving
-              || model.draft?.transcript.contains(where: \.isSpeech) != true)
-          if model.summarizingID != nil {
-            Text("Another meeting is being summarized.").font(.caption).foregroundStyle(.secondary)
+          }.disabled(summaryUnavailableReason != nil || model.saving)
+          if let reason = summaryUnavailableReason {
+            Text(reason).font(.caption).foregroundStyle(.secondary)
           }
         }
       }
-      if model.summaryAvailability == .modelMissing || model.summaryAvailability == .unreachable {
-        Label(
-          "Summaries need Ollama with qwen3:4b — run `ollama pull qwen3:4b`",
-          systemImage: "info.circle"
-        )
-        .font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+      if let hint = ollamaHint {
+        Label(hint, systemImage: "info.circle")
+          .font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
       }
       Text(
         "AI-generated on this Mac from the transcript, guided by your notes. Review the quoted sources before relying on decisions or action items."
@@ -294,6 +312,14 @@ struct MeetingView: View {
           .textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
       }
     }.task { await model.refreshSummaryAvailability() }
+  }
+
+  private var ollamaHint: String? {
+    switch model.summaryAvailability {
+    case .modelMissing: "Summaries need Ollama with qwen3:4b — run `ollama pull qwen3:4b`"
+    case .unreachable: "Summaries need Ollama with qwen3:4b — start Ollama, then try again"
+    case .ready, nil: nil
+    }
   }
 
   private let unsupportedMessage =
@@ -363,6 +389,7 @@ struct MeetingView: View {
     NSPasteboard.general.clearContents()
     NSPasteboard.general.setString(meeting.markdownText, forType: .string)
     copied = true
+    AccessibilityNotification.Announcement("Copied meeting as Markdown").post()
     Task {
       try? await Task.sleep(for: .seconds(2))
       copied = false
@@ -383,25 +410,41 @@ struct MeetingView: View {
 }
 
 /// Keeps the live transcript pinned to the newest segment until the user scrolls away from the
-/// bottom. Meeting capture needs macOS 15, which provides scroll geometry.
+/// bottom, and reports active scrolling so new segments never pull the view while the user reads.
+/// Meeting capture needs macOS 15, which provides scroll geometry and phases.
 private struct FollowsLatest: ViewModifier {
   @Binding var following: Bool
+  @Binding var scrolling: Bool
 
   private struct Position: Equatable {
     let contentHeight: Double
     let atBottom: Bool
   }
 
+  @available(macOS 15.0, *)
+  private static func atBottom(_ geometry: ScrollGeometry) -> Bool {
+    geometry.contentOffset.y + geometry.containerSize.height >= geometry.contentSize.height - 48
+  }
+
   func body(content: Content) -> some View {
     if #available(macOS 15.0, *) {
       content.onScrollGeometryChange(for: Position.self) { geometry in
-        Position(
-          contentHeight: geometry.contentSize.height,
-          atBottom: geometry.contentOffset.y + geometry.containerSize.height
-            >= geometry.contentSize.height - 48)
+        Position(contentHeight: geometry.contentSize.height, atBottom: Self.atBottom(geometry))
       } action: { old, new in
         // Growth from a new segment is not a user scroll; only movement changes following.
         if old.contentHeight == new.contentHeight { following = new.atBottom }
+      }
+      .onScrollPhaseChange { _, phase, context in
+        switch phase {
+        case .idle:
+          scrolling = false
+          following = Self.atBottom(context.geometry)
+        case .animating:
+          break
+        default:
+          scrolling = true
+          following = false
+        }
       }
     } else {
       content

@@ -114,48 +114,53 @@ public struct LocalMeetingSummarizer: MeetingSummarizing {
     var sections: [[Supported]] = [[], [], []]
     var proposed = 0
     var omitted = 0
-    for batch in batches {
-      try Task.checkCancellation()
-      let transcript = batch.map { "[\($0.index)] \($0.text)" }.joined(separator: "\n")
-      let result: BatchOutput = try await generate(
-        system: Self.batchInstructions, prompt: notes + "TRANSCRIPT\n" + transcript,
-        schema: Self.batchSchema,
-        // Keep the model loaded between batches; the final request unloads it.
-        keepAlive: batches.count == 1 ? "0" : "5m")
-      for (section, items) in [result.summary, result.decisions, result.actions].enumerated() {
-        for item in items.prefix(12) {
-          proposed += 1
-          guard let supported = Self.validate(item, in: batch) else {
-            omitted += 1
-            continue
-          }
-          let key = Self.normalized(supported.text)
-          if !sections[section].contains(where: { Self.normalized($0.text) == key }) {
-            sections[section].append(supported)
+    // Intermediate batches keep the model loaded; every exit path below releases it.
+    var keepsModelLoaded = batches.count > 1
+    var rendered: [[String]]
+    do {
+      for batch in batches {
+        try Task.checkCancellation()
+        let transcript = batch.map { "[\($0.index)] \($0.text)" }.joined(separator: "\n")
+        let result: BatchOutput = try await generate(
+          system: Self.batchInstructions, prompt: notes + "TRANSCRIPT\n" + transcript,
+          schema: Self.batchSchema, keepAlive: keepsModelLoaded ? "5m" : "0")
+        for (section, items) in [result.summary, result.decisions, result.actions].enumerated() {
+          for item in items.prefix(12) {
+            proposed += 1
+            guard let supported = Self.validate(item, in: batch) else {
+              omitted += 1
+              continue
+            }
+            let key = Self.normalized(supported.text)
+            if !sections[section].contains(where: { Self.normalized($0.text) == key }) {
+              sections[section].append(supported)
+            }
           }
         }
       }
-    }
-    if proposed > 0 && omitted == proposed {
-      throw MeetingError.summary(
-        "The summary could not be matched to its transcript. Your previous summary is preserved; try again."
-      )
-    }
-    var rendered = sections.map { $0.map(Self.render) }
-    if batches.count > 1 {
-      let total = sections.reduce(0) { $0 + $1.count }
-      if total > 1 && total <= 120 {
+      if proposed > 0 && omitted == proposed {
+        throw MeetingError.summary(
+          "The summary could not be matched to its transcript. Your previous summary is preserved; try again."
+        )
+      }
+      rendered = sections.map { $0.map { Self.render($0.text, evidence: [$0]) } }
+      if keepsModelLoaded && sections.reduce(0, { $0 + $1.count }) > 1,
+        let request = Self.consolidationRequest(sections, notes: notes)
+      {
         do {
-          rendered = try await consolidate(sections, notes: notes)
+          rendered = try await consolidate(sections, prompt: request)
+          keepsModelLoaded = false  // The consolidation request itself unloaded the model.
         } catch is CancellationError {
           throw CancellationError()
         } catch {
           // The de-duplicated batch output is still fully supported by quotes.
         }
-      } else {
-        await unload()
       }
+    } catch {
+      if keepsModelLoaded { await releaseModel() }
+      throw error
     }
+    if keepsModelLoaded { await releaseModel() }
     var text = zip(Self.titles, rendered).map { title, items in
       title + "\n"
         + (items.isEmpty ? "None explicitly identified." : items.joined(separator: "\n\n"))
@@ -188,7 +193,9 @@ public struct LocalMeetingSummarizer: MeetingSummarizing {
   {
     let quote = normalized(item.quote)
     guard !item.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-      item.text.count <= 1200, quote.count >= 4,
+      item.text.count <= 1200,
+      // A quote must be specific enough to locate: three words or twelve characters.
+      quote.split(separator: " ").count >= 3 || quote.count >= 12,
       let original = batch.first(where: { $0.index == item.segment }),
       // Whole words only: padding stops "aunch on" from matching inside "launch on".
       " \(normalized(original.text)) ".contains(" \(quote) ")
@@ -207,8 +214,18 @@ public struct LocalMeetingSummarizer: MeetingSummarizing {
     ).split(separator: " ").joined(separator: " ")
   }
 
-  private static func render(_ item: Supported) -> String {
-    "• \(item.text) [\(meetingTimestamp(item.offset))]\n  Source: “\(item.quote)”"
+  /// One statement with every quote that supports it, in time order.
+  static func render(_ text: String, evidence: [Supported]) -> String {
+    let ordered = evidence.sorted { $0.offset < $1.offset }
+    var times: [String] = []
+    for time in ordered.map({ meetingTimestamp($0.offset) }) where !times.contains(time) {
+      times.append(time)
+    }
+    let sources =
+      ordered.count == 1
+      ? ["  Source: “\(ordered[0].quote)”"]
+      : ordered.map { "  Source: “\($0.quote)” [\(meetingTimestamp($0.offset))]" }
+    return (["• \(text) [\(times.joined(separator: ", "))]"] + sources).joined(separator: "\n")
   }
 
   /// User notes guide emphasis only. They are bounded, delimited and treated as untrusted data.
@@ -223,43 +240,74 @@ public struct LocalMeetingSummarizer: MeetingSummarizing {
 
   // MARK: - Consolidation
 
-  /// Merges duplicate batch items. Every merged item must cite validated items of the same
-  /// section by index, so each statement keeps its transcript quote and time.
-  private func consolidate(_ sections: [[Supported]], notes: String) async throws -> [[String]] {
+  static let contextTokens = 8192
+  static let predictedTokens = 1800
+
+  /// A deliberately high estimate (about three UTF-8 bytes per token) so the prompt and the
+  /// model's answer always fit the context window.
+  static func estimatedTokens(_ text: String) -> Int { text.utf8.count / 3 + 1 }
+
+  /// The consolidation prompt, or nil when it would not fit the context window with its answer.
+  static func consolidationRequest(_ sections: [[Supported]], notes: String) -> String? {
+    var number = 0
+    var lines: [String] = []
+    for (section, items) in sections.enumerated() {
+      for item in items {
+        lines.append("[\(number)] (\(titles[section])) \(item.text) | quote: \(item.quote)")
+        number += 1
+      }
+    }
+    let prompt = notes + "ITEMS\n" + lines.joined(separator: "\n")
+    let tokens = estimatedTokens(mergeInstructions) + estimatedTokens(prompt) + predictedTokens
+    return tokens <= contextTokens ? prompt : nil
+  }
+
+  /// Merges duplicate batch items. A merged item must cite validated items of its own section
+  /// and may not introduce numbers or names absent from them; it is shown with all their quotes.
+  /// Any validated item left uncited is kept as it was, so consolidation never loses evidence.
+  private func consolidate(_ sections: [[Supported]], prompt: String) async throws -> [[String]] {
     var indexed: [(section: Int, item: Supported)] = []
     for (section, items) in sections.enumerated() {
       for item in items { indexed.append((section, item)) }
     }
-    let list = indexed.enumerated().map { index, entry in
-      "[\(index)] (\(Self.titles[entry.section])) \(entry.item.text) | quote: \(entry.item.quote)"
-    }.joined(separator: "\n")
     let merged: MergedOutput = try await generate(
-      system: Self.mergeInstructions, prompt: notes + "ITEMS\n" + list,
-      schema: Self.mergeSchema, keepAlive: "0")
+      system: Self.mergeInstructions, prompt: prompt, schema: Self.mergeSchema, keepAlive: "0")
     var rendered: [[String]] = [[], [], []]
+    var cited = Set<Int>()
     for (section, items) in [merged.summary, merged.decisions, merged.actions].enumerated() {
       for item in items.prefix(Self.consolidatedLimits[section]) {
-        let sources = item.sources.filter {
-          indexed.indices.contains($0) && indexed[$0].section == section
-        }
+        let sources = Array(Set(item.sources)).sorted()
         guard !item.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-          item.text.count <= 1200, !sources.isEmpty, sources.count == item.sources.count
+          item.text.count <= 1200, !sources.isEmpty,
+          sources.allSatisfy({ indexed.indices.contains($0) && indexed[$0].section == section })
         else { continue }
         let evidence = sources.map { indexed[$0].item }
-        var times: [String] = []
-        for time in evidence.sorted(by: { $0.offset < $1.offset }).map({
-          meetingTimestamp($0.offset)
-        }) where !times.contains(time) {
-          times.append(time)
-        }
-        rendered[section].append(
-          "• \(item.text) [\(times.joined(separator: ", "))]\n  Source: “\(evidence[0].quote)”")
+        guard Self.introducesNoNewFacts(item.text, evidence: evidence) else { continue }
+        cited.formUnion(sources)
+        rendered[section].append(Self.render(item.text, evidence: evidence))
       }
     }
-    guard rendered.contains(where: { !$0.isEmpty }) else {
-      throw MeetingError.summary("The consolidated summary had no supported items.")
+    for (index, entry) in indexed.enumerated() where !cited.contains(index) {
+      rendered[entry.section].append(Self.render(entry.item.text, evidence: [entry.item]))
     }
     return rendered
+  }
+
+  /// Numbers, dates and capitalized names in a merged statement must already appear in the
+  /// statements or quotes it cites. The first word may be capitalized as a sentence start.
+  static func introducesNoNewFacts(_ text: String, evidence: [Supported]) -> Bool {
+    let known = Set(
+      evidence.flatMap { normalized($0.text + " " + $0.quote).split(separator: " ") }.map(
+        String.init))
+    let words = text.components(separatedBy: CharacterSet.alphanumerics.inverted)
+      .filter { !$0.isEmpty }
+    for (position, word) in words.enumerated() {
+      let hasDigit = word.rangeOfCharacter(from: .decimalDigits) != nil
+      let capitalized = word.first?.isUppercase == true && position > 0 && word != "I"
+      guard hasDigit || capitalized else { continue }
+      if !known.contains(normalized(word)) { return false }
+    }
+    return true
   }
 
   // MARK: - Local model requests
@@ -357,7 +405,12 @@ public struct LocalMeetingSummarizer: MeetingSummarizing {
     }
   }
 
-  /// Best effort: asks Ollama to release the model when no final request will do so.
+  /// Asks Ollama to release the model even if the summary was cancelled or failed.
+  private func releaseModel() async {
+    await Task.detached { await self.unload() }.value
+  }
+
+  /// Best effort: a keep-alive of zero with no prompt unloads the model.
   private func unload() async {
     var request = URLRequest(url: Self.endpoint)
     request.httpMethod = "POST"
