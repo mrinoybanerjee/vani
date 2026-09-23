@@ -143,3 +143,101 @@ for copy-out/append/write-back, versus 0.00121–0.00131 s for Dictionary's in-p
 modifying subscript. This isolates avoidable Array copy-on-write; it excludes PCM
 conversion, disk writes, capture, transcription and summaries. It is not a whole-app
 speedup or a competitive benchmark. Functional tests separately verify persisted samples.
+
+## Long meetings — September 23, 2026
+
+Apple M4, 16 GB, macOS 26.6.2, Swift 6.1.2, release test builds at commit `2cfd066`
+(v0.7.0 plus the summary fix below). Three opt-in tests, skipped by default:
+
+```bash
+# Two-hour soak: synthetic ScreenCaptureKit-shaped callbacks, fake recognizer (about 25 s)
+VANI_RUN_LONG_MEETING_SOAK=1 swift test -c release --filter LongMeetingSoakTests
+# 30-minute LibriSpeech meeting with the real Parakeet Unified model (about 80 s)
+VANI_LIBRISPEECH_DIR=<path>/LibriSpeech/test-clean \
+VANI_UNIFIED_MODEL_DIR="$HOME/Library/Application Support/Vani/Models/parakeet-unified-en-0.6b-int8" \
+VANI_LONG_MEETING_OUTPUT=<folder> swift test -c release --filter thirtyMinuteMeeting
+# Summaries at scale against local Ollama qwen3:4b (about 10 minutes)
+VANI_RUN_MEETING_SUMMARY_SCALE=1 VANI_LONG_MEETING_RECORD=<folder>/librispeech-30min-meeting.json \
+  swift test -c release --filter longTranscriptsStayWithinContext
+```
+
+**Method.** The tests drive the production `MeetingStreamOutput.append` (chunking, 16 kHz
+conversion, atomic chunk files), `MeetingStore` and `MeetingModel` (drain, retry, echo
+marking, saves) from a background thread standing in for ScreenCaptureKit's serial queue, while
+the main actor transcribes concurrently. Callbacks carry 1,024 frames of Mac audio and 480
+frames of microphone at 48 kHz with timestamp jitter. Nothing touches the microphone, screen
+capture or TCC.
+
+**Two-hour soak** (synthetic voiced signal: alternating turns of 2–45 s, 0.3–2 s pauses, a
+20–90 s silence every 10–20 minutes, room noise on the microphone; one 3-second Mac-audio
+delivery gap at 40:00 and 10 minutes at 44.1 kHz from 60:00):
+
+| Metric | Result |
+| --- | --- |
+| Callbacks / chunks / segments | 1,055,076 / 858 / 858 (limit 1,440) |
+| Longest chunk | 23.90 s (limit 25 s); 4 Mac-audio chunks under 15 s; the gap and both rate changes each end a chunk early |
+| Audio covered | Mac 7,197.04 s of 7,197 s (gap excluded); microphone 7,200.000 s of 7,200 s |
+| Worst join between consecutive chunks | 4.7 ms (timestamp jitter); offsets strictly increasing |
+| Final record | 225,531 bytes (limit 8 MiB) |
+| `store.save` p50/p95, first vs last 100 saves | 1.03/1.30 ms vs 2.65/2.93 ms (linear in record size) |
+| Per-chunk drain cycle p50/p95, first vs last 100 | 17.4/30.4 ms vs 24.4/39.5 ms |
+| Echo marking over the full transcript | 858 segments in 39 ms; 80 of 80 planted echo copies marked |
+| Wall time / peak resident memory | 9.1 s (stop and final drain 0.6 s) / 90.1 MiB |
+
+If Mac audio callbacks stopped during silence instead of carrying zeros (unverified for
+ScreenCaptureKit), every pause over 0.5 s would end a chunk: 805 chunks for the conversation
+above and 1,091 for a brisk one with 746 remote turns of 1–8 s. Both fit the 1,440 limit;
+the margin shrinks with more, shorter turns.
+
+**30-minute real speech.** Six LibriSpeech test-clean speakers (1089, 1188, 121, 1221 and 1284
+as Mac audio; 1320 as the microphone), 95 turns of one to three utterances (180 utterances, 37
+on the microphone), 0.25–0.6 s pauses inside turns and 0.3–2 s between, 30.2 minutes,
+upsampled to 48 kHz and fed through the pipeline above to `FluidAudioSpeechRecognizer`
+(Parakeet Unified). The baseline transcribes each whole turn alone from its 16 kHz source.
+WER uses the normalization of `Benchmarks/wer.py`.
+
+| Source | Pipeline WER | Isolated turns WER | Chunks (transcribed) | Chunk cuts inside an utterance |
+| --- | ---: | ---: | ---: | ---: |
+| Mac audio (3,567 words) | 1.74% | 1.51% | 113 (103) | 84 |
+| Microphone (905 words) | 1.55% | 1.55% | 117 (30) | 17 |
+
+The pipeline ran in 16.5 s for 30.2 minutes (about 110× real time) with 504 MiB peak process
+memory. Mac audio has 8 more errors in 3,567 words (+0.22 points). Diffing both outputs shows
+three duplicated words inside a chunk ("Saint George George", "Another Another", "This out This
+outward") in 16.5–21.1 s chunks, and one word lost at a chunk start ("hussy"); the remaining
+differences are spelling variants that both runs share or trade. FluidAudio's offline Unified
+path decodes in fixed 15-second windows with a 2-second overlap merge, so every 15–24 s chunk
+has one merge seam; the duplications are consistent with that seam, not with Vani's cuts, but
+this run does not isolate the cause.
+
+No-headphones run: the microphone also carries the Mac audio at −20 dB, delayed 30–120 ms per
+utterance. 83 of 87 echo-only microphone chunks with at least 8 words were marked as echo; none
+of the 30 chunks containing at least 0.5 s of the user's speech was hidden, and 98.78% of the
+user's reference words remained visible (98.67% when transcribed alone). Four chunks that
+overlap the user's turn only in the leading or trailing silence of a LibriSpeech file were
+hidden correctly. Mac audio WER was unchanged at 1.74%.
+
+**Summaries at scale** (qwen3:4b, 8,192-token context; token counts are Ollama's own
+`prompt_eval_count`):
+
+| Transcript | Batches | Largest prompt | Consolidation | Time | Quotes matched |
+| --- | ---: | ---: | --- | ---: | ---: |
+| LibriSpeech, 30 min, 24,396 characters | 3 | 3,084 tokens | Ran, 1,672 tokens | 144.5 s | 31 of 31 |
+| Synthetic 2-hour product meeting, 108,977 characters | 10 | 3,065 tokens | Ran, 3,047 tokens | 452.2 s | 70 of 70 |
+
+Every request stayed below 8,192 − 1,800 prompt tokens; the character-based estimate
+(3 bytes per token) overestimates real English by about 45%, so consolidation of a two-hour
+meeting fits with room to spare. Before the fix in this change, the two-hour consolidation
+merged 33 different action items into one line ("Multiple people will draft customer notices
+…"), which passed the new-facts check because every name and day appeared somewhere in the
+cited items. Merged items now cite only items sharing at least two distinctive words; the
+rerun kept 27 distinct actions. Output varies between runs even at temperature 0, and the
+30-minute audiobook transcript yielded "decisions" and "actions" drawn from fiction, all
+correctly quoted: quote validation proves provenance, not relevance.
+
+**Limits.** Delivery is synthetic: no live ScreenCaptureKit session, device change, sleep,
+Bluetooth route change or real acoustic echo was exercised, and whether ScreenCaptureKit
+delivers silent Mac-audio buffers was not observed. The soak signal is tonal, not speech.
+LibriSpeech is read speech with clean turn-taking and no overlapping talk; the echo is a
+delayed, attenuated copy, not a room response. The synthetic two-hour summary transcript is
+template text. Peak memory is for the whole test process, including test fixtures.

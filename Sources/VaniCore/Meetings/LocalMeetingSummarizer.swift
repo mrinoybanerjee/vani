@@ -281,9 +281,13 @@ public struct LocalMeetingSummarizer: MeetingSummarizing {
           item.text.count <= 1200, !sources.isEmpty,
           sources.allSatisfy({ indexed.indices.contains($0) && indexed[$0].section == section })
         else { continue }
-        let evidence = sources.map { indexed[$0].item }
+        // A merged statement cites only items it restates. On long meetings the model can fold
+        // unrelated items into one vague line; those stay uncited and are shown as they were.
+        let related = sources.filter { Self.restates(item.text, indexed[$0].item) }
+        guard !related.isEmpty else { continue }
+        let evidence = related.map { indexed[$0].item }
         guard Self.introducesNoNewFacts(item.text, evidence: evidence) else { continue }
-        cited.formUnion(sources)
+        cited.formUnion(related)
         rendered[section].append(Self.render(item.text, evidence: evidence))
       }
     }
@@ -291,6 +295,29 @@ public struct LocalMeetingSummarizer: MeetingSummarizing {
       rendered[entry.section].append(Self.render(entry.item.text, evidence: [entry.item]))
     }
     return rendered
+  }
+
+  /// Words too common to show that two statements are about the same thing.
+  private static let commonWords: Set<String> = [
+    "the", "and", "for", "with", "will", "that", "this", "from", "have", "has", "had", "are",
+    "was", "were", "been", "they", "them", "their", "our", "you", "your", "not", "but", "all",
+    "can", "its", "into", "about", "also", "then", "than", "there", "which", "what", "when",
+    "who", "should", "would", "could", "must", "need", "needs", "agreed", "agree", "team",
+    "next", "week", "some", "more", "many", "multiple", "people", "everyone",
+  ]
+
+  /// Distinctive words, compared by their first five letters so "notice" matches "notices".
+  static func contentStems(_ text: String) -> Set<String> {
+    Set(
+      normalized(text).split(separator: " ").map { $0.lowercased() }
+        .filter { $0.count >= 3 && !commonWords.contains($0) }.map { String($0.prefix(5)) })
+  }
+
+  /// True when a merged statement shares at least two distinctive words (or all of them, for
+  /// a shorter item) with a cited item's statement and quote.
+  static func restates(_ merged: String, _ item: Supported) -> Bool {
+    let stems = contentStems(item.text + " " + item.quote)
+    return stems.intersection(contentStems(merged)).count >= min(2, stems.count)
   }
 
   /// Numbers, dates and capitalized names in a merged statement must already appear in the

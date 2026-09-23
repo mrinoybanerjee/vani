@@ -21,3 +21,7 @@ python3 Benchmarks/wer.py hyp.tsv
 
 Scoring lowercases, strips punctuation and maps single-digit numerals to words; it
 does not otherwise normalize spelling. Results are in [docs/BENCHMARKS.md](../docs/BENCHMARKS.md).
+
+The same LibriSpeech test-clean folder drives the opt-in 30-minute meeting test
+(`VANI_LIBRISPEECH_DIR=…/LibriSpeech/test-clean`); see "Long meetings" in
+[docs/BENCHMARKS.md](../docs/BENCHMARKS.md) for that and the two-hour soak commands.
