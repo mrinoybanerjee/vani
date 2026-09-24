@@ -118,6 +118,42 @@ struct MeetingSummaryTests {
     await #expect(throws: MeetingError.self) { try await summarizer.summarize(meeting()) }
   }
 
+  @Test func quotesIgnoreHesitationsAndShowTheTranscriptsOwnWords() {
+    let batch = [
+      (index: 0, text: "Okay, um so we're gonna, uh, keep it simple.", offset: 10.0),
+      (index: 1, text: "Right. The price is twenty five Euro, um, per unit.", offset: 30.0),
+      (index: 2, text: "Something else entirely.", offset: 50.0),
+      (index: 3, text: "Filler words only here.", offset: 70.0),
+      (index: 4, text: "Nothing relevant.", offset: 90.0),
+    ]
+    typealias Item = LocalMeetingSummarizer.Item
+    let cleaned = LocalMeetingSummarizer.validate(
+      Item(text: "Keep it simple.", segment: 0, quote: "so we're gonna keep it simple"), in: batch)
+    #expect(cleaned?.quote == "so we're gonna, uh, keep it simple")
+    #expect(cleaned?.offset == 10)
+    // An exact quote cited one or two segments away is attributed to the segment holding it.
+    let neighbour = LocalMeetingSummarizer.validate(
+      Item(text: "Price.", segment: 2, quote: "the price is twenty five Euro per unit"), in: batch)
+    #expect(neighbour?.quote == "The price is twenty five Euro, um, per unit")
+    #expect(neighbour?.offset == 30)
+    // A sentence cut by a chunk boundary can be quoted across the two segments.
+    let across = LocalMeetingSummarizer.validate(
+      Item(text: "Simple, then the price.", segment: 1, quote: "keep it simple Right the price"),
+      in: batch)
+    #expect(across?.quote == "keep it simple. Right. The price")
+    #expect(across?.offset == 10)
+    // Farther away, missing, reworded or hesitation-only quotes are still rejected.
+    for (segment, quote) in [
+      (3, "keep it simple Right the price"),
+      (4, "the price is twenty five Euro"), (9, "the price is twenty five Euro"),
+      (1, "the price is twenty-six Euro"), (1, "price was twenty five Euro"), (0, "um uh um"),
+    ] {
+      #expect(
+        LocalMeetingSummarizer.validate(Item(text: "x", segment: segment, quote: quote), in: batch)
+          == nil)
+    }
+  }
+
   @Test func unsupportedItemsAreOmittedAndCounted() async throws {
     MeetingSummaryProtocol.reset([
       try envelope([

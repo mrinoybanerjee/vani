@@ -22,9 +22,16 @@ final class OllamaRecorder: URLProtocol, @unchecked Sendable {
     defer { lock.unlock() }
     return recorded
   }
-  static func reset() {
+  nonisolated(unsafe) private static var prefix = "call"
+  static var dumpPrefix: String {
+    lock.lock()
+    defer { lock.unlock() }
+    return prefix
+  }
+  static func reset(dumpPrefix: String = "call") {
     lock.lock()
     recorded = []
+    prefix = dumpPrefix
     lock.unlock()
   }
 
@@ -44,6 +51,7 @@ final class OllamaRecorder: URLProtocol, @unchecked Sendable {
       }
       stream.close()
     }
+    let requestBody = body
     let fields = (try? JSONSerialization.jsonObject(with: body)) as? [String: Any] ?? [:]
     let consolidation = (fields["system"] as? String)?.hasPrefix("Merge numbered") == true
     let unload = fields["prompt"] == nil
@@ -73,7 +81,15 @@ final class OllamaRecorder: URLProtocol, @unchecked Sendable {
         seconds: Date().timeIntervalSince(started))
       Self.lock.lock()
       Self.recorded.append(call)
+      let number = Self.recorded.count
       Self.lock.unlock()
+      // Diagnostics only: VANI_OLLAMA_DUMP names a folder that receives each request and reply.
+      if let folder = ProcessInfo.processInfo.environment["VANI_OLLAMA_DUMP"], !unload {
+        let base = URL(fileURLWithPath: folder)
+          .appendingPathComponent("\(Self.dumpPrefix)-\(number)")
+        try? requestBody.write(to: base.appendingPathExtension("request.json"))
+        try? data.write(to: base.appendingPathExtension("response.json"))
+      }
       client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
       client?.urlProtocol(self, didLoad: data)
       client?.urlProtocolDidFinishLoading(self)
@@ -325,7 +341,7 @@ struct AMISummaryTests {
       if let only, !only.contains(id) { continue }
       let meeting = try JSONDecoder().decode(
         MeetingRecord.self, from: Data(contentsOf: input.appendingPathComponent(name)))
-      OllamaRecorder.reset()
+      OllamaRecorder.reset(dumpPrefix: id)
       let started = Date()
       let text: String
       do { text = try await summarizer.summarize(meeting) } catch {

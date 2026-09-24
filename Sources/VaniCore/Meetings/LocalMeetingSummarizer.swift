@@ -216,16 +216,75 @@ public struct LocalMeetingSummarizer: MeetingSummarizing {
   static func validate(_ item: Item, in batch: [(index: Int, text: String, offset: Double)])
     -> Supported?
   {
-    let quote = normalized(item.quote)
+    let quote = words(item.quote).map(\.word).filter { !fillerWords.contains($0) }
     guard !item.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
       item.text.count <= 1200,
       // A quote must be specific enough to locate: three words or twelve characters.
-      quote.split(separator: " ").count >= 3 || quote.count >= 12,
-      let original = batch.first(where: { $0.index == item.segment }),
-      // Whole words only: padding stops "aunch on" from matching inside "launch on".
-      " \(normalized(original.text)) ".contains(" \(quote) ")
+      quote.count >= 3 || quote.joined(separator: " ").count >= 12,
+      let cited = batch.firstIndex(where: { $0.index == item.segment })
     else { return nil }
-    return Supported(text: item.text, quote: item.quote, offset: original.offset)
+    // The cited segment first, then its neighbours: on real meetings the model often copies a
+    // quote exactly but cites the segment next to it. The quote must still occur verbatim.
+    let candidates = [cited, cited - 1, cited + 1, cited - 2, cited + 2].filter(
+      batch.indices.contains)
+    for position in candidates {
+      if let excerpt = excerpt(of: quote, in: batch[position].text) {
+        return Supported(text: item.text, quote: excerpt, offset: batch[position].offset)
+      }
+    }
+    // Chunks end at fixed lengths, often mid-sentence, so a quote may run from the end of one
+    // segment into the start of the next. It is shown joined and timed at its start.
+    for first in [cited - 1, cited] where batch.indices.contains(first) && first + 1 < batch.count {
+      let joined = batch[first].text + " " + batch[first + 1].text
+      if let excerpt = excerpt(of: quote, in: joined) {
+        return Supported(text: item.text, quote: excerpt, offset: batch[first].offset)
+      }
+    }
+    return nil
+  }
+
+  /// Hesitations that speech recognition transcribes but the model tends to drop when quoting.
+  static let fillerWords: Set<String> = [
+    "um", "umm", "uh", "uhm", "er", "erm", "ah", "hmm", "hm", "mm", "mmm",
+  ]
+
+  /// Normalized words of `text` with their ranges in `text`.
+  static func words(_ text: String) -> [(word: String, range: Range<String.Index>)] {
+    var result: [(word: String, range: Range<String.Index>)] = []
+    var start: String.Index?
+    var index = text.startIndex
+    func close(at end: String.Index) {
+      guard let first = start else { return }
+      for word in normalized(String(text[first..<end])).split(separator: " ") {
+        result.append((String(word), first..<end))
+      }
+      start = nil
+    }
+    while index < text.endIndex {
+      let isWord = text[index].unicodeScalars.allSatisfy { CharacterSet.alphanumerics.contains($0) }
+      if isWord {
+        if start == nil { start = index }
+      } else {
+        close(at: index)
+      }
+      index = text.index(after: index)
+    }
+    close(at: text.endIndex)
+    return result
+  }
+
+  /// The transcript's own text for `quote`: whole words in order, compared case-, accent- and
+  /// punctuation-insensitively and ignoring hesitations such as "um". Nil when absent.
+  static func excerpt(of quote: [String], in text: String) -> String? {
+    guard !quote.isEmpty else { return nil }
+    let spoken = words(text).filter { !fillerWords.contains($0.word) }
+    guard spoken.count >= quote.count else { return nil }
+    for start in 0...(spoken.count - quote.count)
+    where spoken[start..<(start + quote.count)].map(\.word) == quote {
+      let range = spoken[start].range.lowerBound..<spoken[start + quote.count - 1].range.upperBound
+      return String(text[range])
+    }
+    return nil
   }
 
   /// Case-folded letters and digits separated by single spaces. Quotes, punctuation and
