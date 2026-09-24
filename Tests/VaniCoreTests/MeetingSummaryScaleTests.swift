@@ -5,7 +5,7 @@ import Testing
 
 /// Forwards each summarizer request to the real loopback Ollama and records its measured cost.
 /// Test-only: the app's `LocalMeetingSummarizer()` never installs a protocol class.
-private final class OllamaRecorder: URLProtocol, @unchecked Sendable {
+final class OllamaRecorder: URLProtocol, @unchecked Sendable {
   struct Call {
     let consolidation: Bool
     let unload: Bool
@@ -22,9 +22,16 @@ private final class OllamaRecorder: URLProtocol, @unchecked Sendable {
     defer { lock.unlock() }
     return recorded
   }
-  static func reset() {
+  nonisolated(unsafe) private static var prefix = "call"
+  static var dumpPrefix: String {
+    lock.lock()
+    defer { lock.unlock() }
+    return prefix
+  }
+  static func reset(dumpPrefix: String = "call") {
     lock.lock()
     recorded = []
+    prefix = dumpPrefix
     lock.unlock()
   }
 
@@ -44,7 +51,12 @@ private final class OllamaRecorder: URLProtocol, @unchecked Sendable {
       }
       stream.close()
     }
+    let requestBody = body
     let fields = (try? JSONSerialization.jsonObject(with: body)) as? [String: Any] ?? [:]
+    let consolidation = (fields["system"] as? String)?.hasPrefix("Merge numbered") == true
+    let unload = fields["prompt"] == nil
+    let promptCharacters =
+      ((fields["system"] as? String) ?? "").count + ((fields["prompt"] as? String) ?? "").count
     var forward = URLRequest(url: request.url!)
     forward.httpMethod = request.httpMethod
     forward.httpBody = body
@@ -62,17 +74,22 @@ private final class OllamaRecorder: URLProtocol, @unchecked Sendable {
       }
       let answer = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
       let call = Call(
-        consolidation: (fields["system"] as? String)?.hasPrefix("Merge numbered") == true,
-        unload: fields["prompt"] == nil,
-        promptCharacters: ((fields["system"] as? String) ?? "").count
-          + ((fields["prompt"] as? String) ?? "").count,
+        consolidation: consolidation, unload: unload, promptCharacters: promptCharacters,
         promptTokens: answer["prompt_eval_count"] as? Int ?? 0,
         outputTokens: answer["eval_count"] as? Int ?? 0,
         doneReason: answer["done_reason"] as? String ?? "",
         seconds: Date().timeIntervalSince(started))
       Self.lock.lock()
       Self.recorded.append(call)
+      let number = Self.recorded.count
       Self.lock.unlock()
+      // Diagnostics only: VANI_OLLAMA_DUMP names a folder that receives each request and reply.
+      if let folder = ProcessInfo.processInfo.environment["VANI_OLLAMA_DUMP"], !unload {
+        let base = URL(fileURLWithPath: folder)
+          .appendingPathComponent("\(Self.dumpPrefix)-\(number)")
+        try? requestBody.write(to: base.appendingPathExtension("request.json"))
+        try? data.write(to: base.appendingPathExtension("response.json"))
+      }
       client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
       client?.urlProtocol(self, didLoad: data)
       client?.urlProtocolDidFinishLoading(self)
@@ -92,10 +109,10 @@ private struct SplitMix {
   mutating func unit() -> Double { Double(next() >> 11) / Double(1 << 53) }
 }
 
-/// A deterministic two-hour product meeting: twelve ten-minute topics, Mac audio and
-/// microphone chunks every 20 seconds, silence in some chunks, and explicit decisions and
-/// actions that the summary must quote.
-func syntheticTwoHourMeeting() -> MeetingRecord {
+/// A deterministic product meeting (two hours by default): twelve topics of equal length, Mac
+/// audio and microphone chunks every 20 seconds, silence in some chunks, and explicit decisions
+/// and actions that the summary must quote.
+func syntheticTwoHourMeeting(hours: Double = 2) -> MeetingRecord {
   let topics: [(name: String, problem: String, detail: String, decision: String, action: String)] =
     [
       (
@@ -180,11 +197,12 @@ func syntheticTwoHourMeeting() -> MeetingRecord {
     default: return "Sorry, you cut out for a moment there, could you repeat the last part?"
     }
   }
-  var meeting = MeetingRecord(title: "Two-hour planning meeting")
+  var meeting = MeetingRecord(title: "\(Int(hours))-hour planning meeting")
+  let topicLength = hours * 3600 / Double(topics.count)
   for source in [MeetingAudioSource.system, .microphone] {
-    for index in 0..<360 {
+    for index in 0..<Int(hours * 180) {
       let offset = Double(index) * 20 + (source == .microphone ? 7 : 0)
-      let topic = min(topics.count - 1, Int(offset / 600))
+      let topic = min(topics.count - 1, Int(offset / topicLength))
       let speaking = random.unit() < (source == .system ? 0.9 : 0.35)
       var words: [String] = []
       while speaking && words.count < (source == .system ? 45 : 20) {
@@ -206,11 +224,18 @@ struct MeetingSummaryScaleTests {
       if: ProcessInfo.processInfo.environment["VANI_RUN_MEETING_SUMMARY_SCALE"] == "1",
       "Requires Ollama with qwen3:4b on 127.0.0.1:11434; takes several minutes"))
   func longTranscriptsStayWithinContextAndQuoteTheirSources() async throws {
-    var meetings = [("synthetic 2 h", syntheticTwoHourMeeting())]
-    if let path = ProcessInfo.processInfo.environment["VANI_LONG_MEETING_RECORD"] {
+    let environment = ProcessInfo.processInfo.environment
+    var meetings = [("synthetic 4 h", syntheticTwoHourMeeting(hours: 4))]
+    if environment["VANI_SUMMARY_SCALE_ONLY_4H"] == nil {
+      meetings.insert(("synthetic 2 h", syntheticTwoHourMeeting()), at: 0)
+    }
+    if let path = environment["VANI_LONG_MEETING_RECORD"] {
       let record = try JSONDecoder().decode(
         MeetingRecord.self, from: Data(contentsOf: URL(fileURLWithPath: path)))
       meetings.insert(("LibriSpeech 30 min", record), at: 0)
+    }
+    if let folder = environment["VANI_AMI_RECORDS"] {
+      meetings.append(("AMI meetings back to back", try amiMeetingsBackToBack(in: folder)))
     }
     let summarizer = LocalMeetingSummarizer(protocolClasses: [OllamaRecorder.self])
     for (name, meeting) in meetings {
@@ -222,7 +247,8 @@ struct MeetingSummaryScaleTests {
       let calls = OllamaRecorder.calls
       let generations = calls.filter { !$0.unload }
       let batches = generations.filter { !$0.consolidation }
-      let merge = generations.first(where: \.consolidation)
+      let merges = generations.filter(\.consolidation)
+      let merge = merges.last
       let lines = text.split(separator: "\n").map(String.init)
       let quotes = lines.filter { $0.hasPrefix("  Source: “") }.map {
         String($0.dropFirst("  Source: “".count).prefix { $0 != "”" })
@@ -241,8 +267,10 @@ struct MeetingSummaryScaleTests {
         "VANI_SUMMARY_SCALE \(name): \(speech.count) speech segments, "
           + "\(speech.map(\.text.count).reduce(0, +)) characters, \(String(format: "%.1f", seconds)) s, "
           + "\(batches.count) batches, consolidation "
-          + (merge.map { "ran (\($0.doneReason), \($0.promptTokens) prompt tokens)" }
-            ?? "skipped")
+          + (merge.map {
+            "ran in \(merges.count) request(s) (last \($0.doneReason), largest "
+              + "\(merges.map(\.promptTokens).max() ?? 0) prompt tokens)"
+          } ?? "skipped")
           + ", items summary \(sections["Summary"] ?? 0) / decisions \(sections["Decisions"] ?? 0)"
           + " / actions \(sections["Action items"] ?? 0), \(quotes.count) quotes, "
           + "\(unsupported.count) unmatched; omitted note: "
@@ -260,6 +288,79 @@ struct MeetingSummaryScaleTests {
       #expect(unsupported.isEmpty)
       #expect(!quotes.isEmpty)
       print("VANI_SUMMARY_SCALE_TEXT \(name)\n\(text)\n")
+    }
+  }
+}
+
+/// The AMI records Vani transcribed, joined into one long meeting in the order given by
+/// VANI_AMI_MEETINGS (or file name order), each starting where the previous one ended.
+func amiMeetingsBackToBack(in folder: String) throws -> MeetingRecord {
+  let directory = URL(fileURLWithPath: folder)
+  let names = try FileManager.default.contentsOfDirectory(atPath: folder)
+    .filter { $0.hasSuffix(".meeting.json") }.sorted()
+  var combined = MeetingRecord(title: "AMI meetings back to back")
+  var start: TimeInterval = 0
+  for name in names {
+    let record = try JSONDecoder().decode(
+      MeetingRecord.self, from: Data(contentsOf: directory.appendingPathComponent(name)))
+    for segment in record.transcript {
+      combined.transcript.append(
+        MeetingTranscriptSegment(
+          id: segment.id, source: segment.source, offset: start + segment.offset,
+          duration: segment.duration, text: segment.text,
+          echoOfSystemAudio: segment.echoOfSystemAudio, failed: segment.failed))
+    }
+    start += (record.transcript.map { $0.offset + $0.duration }.max() ?? 0).rounded(.up)
+  }
+  return combined
+}
+
+/// Summaries of real meetings (AMI records transcribed by `AMIMeetingTests`) with the local
+/// model, written for evaluation against the AMI human summaries. Opt-in: VANI_AMI_RECORDS
+/// (folder of `<ID>.meeting.json`) and VANI_AMI_SUMMARY_OUTPUT. VANI_SUMMARY_MODEL selects
+/// another installed Ollama model for comparison.
+@Suite(.serialized)
+struct AMISummaryTests {
+  @Test(
+    .enabled(
+      if: ProcessInfo.processInfo.environment["VANI_AMI_RECORDS"] != nil
+        && ProcessInfo.processInfo.environment["VANI_AMI_SUMMARY_OUTPUT"] != nil,
+      "Requires AMI records transcribed by Vani and Ollama on 127.0.0.1:11434"))
+  func realMeetingSummariesQuoteTheirSources() async throws {
+    let environment = ProcessInfo.processInfo.environment
+    let input = URL(fileURLWithPath: try #require(environment["VANI_AMI_RECORDS"]))
+    let output = URL(fileURLWithPath: try #require(environment["VANI_AMI_SUMMARY_OUTPUT"]))
+    try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
+    let model = environment["VANI_SUMMARY_MODEL"] ?? LocalMeetingSummarizer.model
+    let summarizer = LocalMeetingSummarizer(protocolClasses: [OllamaRecorder.self], model: model)
+    let names = try FileManager.default.contentsOfDirectory(atPath: input.path)
+      .filter { $0.hasSuffix(".meeting.json") }.sorted()
+    let only = environment["VANI_AMI_MEETINGS"]?.split(separator: ",").map(String.init)
+    for name in names {
+      let id = String(name.dropLast(".meeting.json".count))
+      if let only, !only.contains(id) { continue }
+      let meeting = try JSONDecoder().decode(
+        MeetingRecord.self, from: Data(contentsOf: input.appendingPathComponent(name)))
+      OllamaRecorder.reset(dumpPrefix: id)
+      let started = Date()
+      let text: String
+      do { text = try await summarizer.summarize(meeting) } catch {
+        text = "FAILED: \(error.localizedDescription)"
+      }
+      let seconds = Date().timeIntervalSince(started)
+      let calls = OllamaRecorder.calls.filter { !$0.unload }
+      let stats =
+        "model \(model), \(String(format: "%.1f", seconds)) s, "
+        + "\(calls.filter { !$0.consolidation }.count) batches, "
+        + "\(calls.filter(\.consolidation).count) consolidation requests, largest prompt "
+        + "\(calls.map(\.promptTokens).max() ?? 0) tokens, done reasons "
+        + Set(calls.map(\.doneReason)).sorted().joined(separator: "/")
+      try text.write(
+        to: output.appendingPathComponent("\(id).summary.txt"), atomically: true, encoding: .utf8)
+      try stats.write(
+        to: output.appendingPathComponent("\(id).stats.txt"), atomically: true, encoding: .utf8)
+      print("VANI_AMI_SUMMARY \(id): \(stats)")
+      #expect(!text.hasPrefix("FAILED"))
     }
   }
 }

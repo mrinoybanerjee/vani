@@ -349,9 +349,9 @@ final class MeetingStreamOutput: NSObject, SCStreamOutput, SCStreamDelegate, @un
         return
       }
       if source == .microphone { noteMicrophoneBuffer() }
-      guard offset < 2 * 60 * 60 else {
+      guard offset < MeetingLimits.maximumDuration else {
         throw MeetingError.capture(
-          "The two-hour recording limit was reached. Stop this meeting and start a new one to continue."
+          "The four-hour recording limit was reached. Everything captured is saved; start a new meeting to continue."
         )
       }
       try append(samples, rate: rate, offset: offset, source: source)

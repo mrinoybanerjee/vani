@@ -147,7 +147,7 @@ drains one saved file at a time through the existing recognizer. Capture callbac
 session identity, and a stopped stream can retry a failed final flush without restarting capture.
 
 `LocalMeetingSummarizer` sends bounded transcript batches to a fixed loopback-only Ollama
-endpoint. It validates structured output against exact transcript quotes and renders separate
+endpoint. It validates structured output against verbatim transcript quotes and renders separate
 summary, decisions and actions. Personal notes are not overwritten by generation. The existing
 quick-note schema and dictation state machine do not migrate. See [MEETINGS_DESIGN.md](MEETINGS_DESIGN.md)
 for persistence limits, failure behavior and local runtime requirements.

@@ -1,8 +1,8 @@
 import Foundation
 
 public actor MeetingStore {
-  public let directory: URL
-  public static let maximumRecordBytes = 8 * 1_024 * 1_024
+  public nonisolated let directory: URL
+  public static let maximumRecordBytes = MeetingLimits.maximumRecordBytes
 
   /// The record this actor last wrote. While the file on disk still matches it, that record can
   /// become the backup without being read and decoded again.
@@ -110,7 +110,7 @@ public actor MeetingStore {
       at: folder, includingPropertiesForKeys: nil
     )
     .filter { $0.pathExtension == MeetingAudioChunk.fileExtension }
-    guard files.count <= 1440 else { throw MeetingError.invalidData }
+    guard files.count <= MeetingLimits.maximumSegments else { throw MeetingError.invalidData }
     var pending: [(file: URL, offset: TimeInterval)] = []
     for file in files {
       guard let identity = MeetingAudioChunk.identity(fromFileName: file.lastPathComponent),
@@ -213,13 +213,14 @@ public actor MeetingStore {
 
   static func validate(_ meeting: MeetingRecord) throws {
     guard meeting.title.utf8.count <= 4096, meeting.notes.utf8.count <= 1_048_576,
-      meeting.summary.utf8.count <= 1_048_576, meeting.transcript.count <= 1440,
+      meeting.summary.utf8.count <= 1_048_576,
+      meeting.transcript.count <= MeetingLimits.maximumSegments,
       Set(meeting.transcript.map(\.id)).count == meeting.transcript.count,
       meeting.createdAt.timeIntervalSince1970.isFinite,
       meeting.endedAt?.timeIntervalSince1970.isFinite != false,
       meeting.deletedAt?.timeIntervalSince1970.isFinite != false,
       meeting.transcript.allSatisfy({
-        $0.offset.isFinite && $0.offset >= 0 && $0.offset <= 7200
+        $0.offset.isFinite && $0.offset >= 0 && $0.offset <= MeetingLimits.maximumDuration
           && $0.duration.isFinite && $0.duration >= 0 && $0.duration <= 25
           && $0.text.utf8.count <= 48_000
       })

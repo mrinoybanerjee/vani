@@ -33,8 +33,16 @@ public struct LocalMeetingSummarizer: MeetingSummarizing {
   static let maximumResponseBytes = 262_144
 
   private let protocolClasses: [AnyClass]?
-  public init() { protocolClasses = nil }
-  init(protocolClasses: [AnyClass]) { self.protocolClasses = protocolClasses }
+  /// The installed model to use. Only tests comparing local models choose another one.
+  private let modelName: String
+  public init() {
+    protocolClasses = nil
+    modelName = Self.model
+  }
+  init(protocolClasses: [AnyClass], model: String = LocalMeetingSummarizer.model) {
+    self.protocolClasses = protocolClasses
+    modelName = model
+  }
 
   struct Item: Codable, Sendable {
     let text: String
@@ -77,6 +85,25 @@ public struct LocalMeetingSummarizer: MeetingSummarizing {
     let text: String
     let quote: String
     let offset: TimeInterval
+  }
+  /// A statement for one section with every validated batch item supporting it. A batch item
+  /// is a claim with itself as evidence; consolidation merges claims and unions their evidence.
+  struct Claim: Sendable {
+    let section: Int
+    let text: String
+    let evidence: [Supported]
+
+    init(section: Int, text: String, evidence: [Supported]) {
+      self.section = section
+      self.text = text
+      self.evidence = evidence
+    }
+
+    init(section: Int, _ item: Supported) {
+      self.init(section: section, text: item.text, evidence: [item])
+    }
+
+    var start: TimeInterval { evidence.map(\.offset).min() ?? 0 }
   }
   /// Output limits after consolidation: summary, decisions, actions.
   static let consolidatedLimits = [8, 8, 10]
@@ -143,18 +170,16 @@ public struct LocalMeetingSummarizer: MeetingSummarizing {
           "The summary could not be matched to its transcript. Your previous summary is preserved; try again."
         )
       }
-      rendered = sections.map { $0.map { Self.render($0.text, evidence: [$0]) } }
-      if keepsModelLoaded && sections.reduce(0, { $0 + $1.count }) > 1,
-        let request = Self.consolidationRequest(sections, notes: notes)
-      {
-        do {
-          rendered = try await consolidate(sections, prompt: request)
-          keepsModelLoaded = false  // The consolidation request itself unloaded the model.
-        } catch is CancellationError {
-          throw CancellationError()
-        } catch {
-          // The de-duplicated batch output is still fully supported by quotes.
+      var claims = sections.enumerated().flatMap { section, items in
+        items.map { Claim(section: section, $0) }
+      }
+      if keepsModelLoaded && claims.count > 1 {
+        claims = try await consolidateHierarchically(claims, notes: notes) {
+          keepsModelLoaded = false  // The final consolidation request itself unloads the model.
         }
+      }
+      rendered = (0..<3).map { section in
+        claims.filter { $0.section == section }.map { Self.render($0.text, evidence: $0.evidence) }
       }
     } catch {
       if keepsModelLoaded { await releaseModel() }
@@ -191,16 +216,75 @@ public struct LocalMeetingSummarizer: MeetingSummarizing {
   static func validate(_ item: Item, in batch: [(index: Int, text: String, offset: Double)])
     -> Supported?
   {
-    let quote = normalized(item.quote)
+    let quote = words(item.quote).map(\.word).filter { !fillerWords.contains($0) }
     guard !item.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
       item.text.count <= 1200,
       // A quote must be specific enough to locate: three words or twelve characters.
-      quote.split(separator: " ").count >= 3 || quote.count >= 12,
-      let original = batch.first(where: { $0.index == item.segment }),
-      // Whole words only: padding stops "aunch on" from matching inside "launch on".
-      " \(normalized(original.text)) ".contains(" \(quote) ")
+      quote.count >= 3 || quote.joined(separator: " ").count >= 12,
+      let cited = batch.firstIndex(where: { $0.index == item.segment })
     else { return nil }
-    return Supported(text: item.text, quote: item.quote, offset: original.offset)
+    // The cited segment first, then its neighbours: on real meetings the model often copies a
+    // quote exactly but cites the segment next to it. The quote must still occur verbatim.
+    let candidates = [cited, cited - 1, cited + 1, cited - 2, cited + 2].filter(
+      batch.indices.contains)
+    for position in candidates {
+      if let excerpt = excerpt(of: quote, in: batch[position].text) {
+        return Supported(text: item.text, quote: excerpt, offset: batch[position].offset)
+      }
+    }
+    // Chunks end at fixed lengths, often mid-sentence, so a quote may run from the end of one
+    // segment into the start of the next. It is shown joined and timed at its start.
+    for first in [cited - 1, cited] where batch.indices.contains(first) && first + 1 < batch.count {
+      let joined = batch[first].text + " " + batch[first + 1].text
+      if let excerpt = excerpt(of: quote, in: joined) {
+        return Supported(text: item.text, quote: excerpt, offset: batch[first].offset)
+      }
+    }
+    return nil
+  }
+
+  /// Hesitations that speech recognition transcribes but the model tends to drop when quoting.
+  static let fillerWords: Set<String> = [
+    "um", "umm", "uh", "uhm", "er", "erm", "ah", "hmm", "hm", "mm", "mmm",
+  ]
+
+  /// Normalized words of `text` with their ranges in `text`.
+  static func words(_ text: String) -> [(word: String, range: Range<String.Index>)] {
+    var result: [(word: String, range: Range<String.Index>)] = []
+    var start: String.Index?
+    var index = text.startIndex
+    func close(at end: String.Index) {
+      guard let first = start else { return }
+      for word in normalized(String(text[first..<end])).split(separator: " ") {
+        result.append((String(word), first..<end))
+      }
+      start = nil
+    }
+    while index < text.endIndex {
+      let isWord = text[index].unicodeScalars.allSatisfy { CharacterSet.alphanumerics.contains($0) }
+      if isWord {
+        if start == nil { start = index }
+      } else {
+        close(at: index)
+      }
+      index = text.index(after: index)
+    }
+    close(at: text.endIndex)
+    return result
+  }
+
+  /// The transcript's own text for `quote`: whole words in order, compared case-, accent- and
+  /// punctuation-insensitively and ignoring hesitations such as "um". Nil when absent.
+  static func excerpt(of quote: [String], in text: String) -> String? {
+    guard !quote.isEmpty else { return nil }
+    let spoken = words(text).filter { !fillerWords.contains($0.word) }
+    guard spoken.count >= quote.count else { return nil }
+    for start in 0...(spoken.count - quote.count)
+    where spoken[start..<(start + quote.count)].map(\.word) == quote {
+      let range = spoken[start].range.lowerBound..<spoken[start + quote.count - 1].range.upperBound
+      return String(text[range])
+    }
+    return nil
   }
 
   /// Case-folded letters and digits separated by single spaces. Quotes, punctuation and
@@ -247,54 +331,126 @@ public struct LocalMeetingSummarizer: MeetingSummarizing {
   /// model's answer always fit the context window.
   static func estimatedTokens(_ text: String) -> Int { text.utf8.count / 3 + 1 }
 
-  /// The consolidation prompt, or nil when it would not fit the context window with its answer.
-  static func consolidationRequest(_ sections: [[Supported]], notes: String) -> String? {
-    var number = 0
-    var lines: [String] = []
-    for (section, items) in sections.enumerated() {
-      for item in items {
-        lines.append("[\(number)] (\(titles[section])) \(item.text) | quote: \(item.quote)")
-        number += 1
+  /// Consolidation passes above the first. Each pass shrinks the claim count, and three
+  /// passes cover far more than four hours of batch output.
+  static let maximumConsolidationLevels = 3
+
+  /// Merges duplicate claims. When every claim fits one request with its answer, one pass
+  /// runs, as before. Otherwise claims are grouped in time order into requests that fit, each
+  /// group is consolidated, and the groups' results are consolidated again, until one request
+  /// holds everything or no pass shrinks the list. Every pass applies the same provenance
+  /// checks against the original quoted evidence, and a failed pass keeps its input, so
+  /// consolidation never loses a validated item. `finalRequestUnloaded` runs once the request
+  /// that unloads the model has succeeded.
+  private func consolidateHierarchically(
+    _ claims: [Claim], notes: String, finalRequestUnloaded: () -> Void
+  ) async throws -> [Claim] {
+    var current = claims
+    for _ in 0...Self.maximumConsolidationLevels {
+      try Task.checkCancellation()
+      guard let groups = Self.consolidationGroups(current, notes: notes) else { return current }
+      if groups.count == 1 {
+        do {
+          let merged = try await consolidate(groups[0], notes: notes, keepAlive: "0")
+          finalRequestUnloaded()
+          return merged
+        } catch is CancellationError { throw CancellationError() } catch { return current }
       }
+      var next: [Claim] = []
+      for group in groups {
+        try Task.checkCancellation()
+        do {
+          next += try await consolidate(group, notes: notes, keepAlive: "5m")
+        } catch is CancellationError { throw CancellationError() } catch { next += group }
+      }
+      // A pass that merged nothing cannot make the next one fit.
+      guard next.count < current.count else { return next }
+      current = next.sorted { $0.start < $1.start }
     }
-    let prompt = notes + "ITEMS\n" + lines.joined(separator: "\n")
-    let tokens = estimatedTokens(mergeInstructions) + estimatedTokens(prompt) + predictedTokens
-    return tokens <= contextTokens ? prompt : nil
+    return current
   }
 
-  /// Merges duplicate batch items. A merged item must cite validated items of its own section
-  /// and may not introduce numbers or names absent from them; it is shown with all their quotes.
-  /// Any validated item left uncited is kept as it was, so consolidation never loses evidence.
-  private func consolidate(_ sections: [[Supported]], prompt: String) async throws -> [[String]] {
-    var indexed: [(section: Int, item: Supported)] = []
-    for (section, items) in sections.enumerated() {
-      for item in items { indexed.append((section, item)) }
+  /// The prompt for merging `claims`, numbered from zero and listed by section.
+  static func consolidationPrompt(_ claims: [Claim], notes: String) -> String {
+    var lines: [String] = []
+    for (section, title) in titles.enumerated() {
+      for (number, claim) in claims.enumerated() where claim.section == section {
+        let quotes = claim.evidence.prefix(2).map(\.quote).joined(separator: " / ")
+        lines.append("[\(number)] (\(title)) \(claim.text) | quote: \(quotes)")
+      }
     }
+    return notes + "ITEMS\n" + lines.joined(separator: "\n")
+  }
+
+  /// The consolidation prompt, or nil when it would not fit the context window with its answer.
+  static func consolidationRequest(_ claims: [Claim], notes: String) -> String? {
+    let prompt = consolidationPrompt(claims, notes: notes)
+    return fitsContext(prompt) ? prompt : nil
+  }
+
+  /// Whether a consolidation prompt and the largest allowed answer fit the context window.
+  static func fitsContext(_ prompt: String) -> Bool {
+    estimatedTokens(mergeInstructions) + estimatedTokens(prompt) + predictedTokens
+      <= contextTokens
+  }
+
+  /// Claims split in time order into the fewest consecutive groups whose prompts fit the
+  /// context, or nil when one claim alone cannot fit. A single group means one request.
+  static func consolidationGroups(_ claims: [Claim], notes: String) -> [[Claim]]? {
+    if consolidationRequest(claims, notes: notes) != nil { return [claims] }
+    var groups: [[Claim]] = []
+    var group: [Claim] = []
+    for claim in claims.sorted(by: { $0.start < $1.start }) {
+      if consolidationRequest(group + [claim], notes: notes) != nil {
+        group.append(claim)
+        continue
+      }
+      guard !group.isEmpty, consolidationRequest([claim], notes: notes) != nil else { return nil }
+      groups.append(group)
+      group = [claim]
+    }
+    if !group.isEmpty { groups.append(group) }
+    return groups
+  }
+
+  /// Merges duplicate claims in one request.
+  private func consolidate(_ claims: [Claim], notes: String, keepAlive: String) async throws
+    -> [Claim]
+  {
     let merged: MergedOutput = try await generate(
-      system: Self.mergeInstructions, prompt: prompt, schema: Self.mergeSchema, keepAlive: "0")
-    var rendered: [[String]] = [[], [], []]
+      system: Self.mergeInstructions, prompt: Self.consolidationPrompt(claims, notes: notes),
+      schema: Self.mergeSchema, keepAlive: keepAlive)
+    return Self.applyMerge(merged, to: claims)
+  }
+
+  /// A merged claim must cite claims of its own section that it restates, and may not introduce
+  /// numbers or names absent from their statements and quotes; it carries all their evidence.
+  /// Each claim supports at most one merged claim. Any claim left uncited is kept as it was,
+  /// so consolidation never loses evidence.
+  static func applyMerge(_ merged: MergedOutput, to claims: [Claim]) -> [Claim] {
+    var result: [Claim] = []
     var cited = Set<Int>()
     for (section, items) in [merged.summary, merged.decisions, merged.actions].enumerated() {
-      for item in items.prefix(Self.consolidatedLimits[section]) {
+      for item in items.prefix(consolidatedLimits[section]) {
         let sources = Array(Set(item.sources)).sorted()
         guard !item.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
           item.text.count <= 1200, !sources.isEmpty,
-          sources.allSatisfy({ indexed.indices.contains($0) && indexed[$0].section == section })
+          sources.allSatisfy({ claims.indices.contains($0) && claims[$0].section == section })
         else { continue }
-        // A merged statement cites only items it restates. On long meetings the model can fold
+        // A merged statement cites only claims it restates. On long meetings the model can fold
         // unrelated items into one vague line; those stay uncited and are shown as they were.
-        let related = sources.filter { Self.restates(item.text, indexed[$0].item) }
+        let related = sources.filter { !cited.contains($0) && restates(item.text, claims[$0]) }
         guard !related.isEmpty else { continue }
-        let evidence = related.map { indexed[$0].item }
-        guard Self.introducesNoNewFacts(item.text, evidence: evidence) else { continue }
+        let evidence = related.flatMap { claims[$0].evidence }
+        guard introducesNoNewFacts(item.text, evidence: evidence) else { continue }
         cited.formUnion(related)
-        rendered[section].append(Self.render(item.text, evidence: evidence))
+        result.append(Claim(section: section, text: item.text, evidence: evidence))
       }
     }
-    for (index, entry) in indexed.enumerated() where !cited.contains(index) {
-      rendered[entry.section].append(Self.render(entry.item.text, evidence: [entry.item]))
+    for (index, claim) in claims.enumerated() where !cited.contains(index) {
+      result.append(claim)
     }
-    return rendered
+    return result
   }
 
   /// Words too common to show that two statements are about the same thing.
@@ -318,6 +474,14 @@ public struct LocalMeetingSummarizer: MeetingSummarizing {
   static func restates(_ merged: String, _ item: Supported) -> Bool {
     let stems = contentStems(item.text + " " + item.quote)
     return stems.intersection(contentStems(merged)).count >= min(2, stems.count)
+  }
+
+  /// A claim is restated when the merged statement restates any item supporting it, or the
+  /// claim's own (already merged) statement together with its first quote.
+  static func restates(_ merged: String, _ claim: Claim) -> Bool {
+    claim.evidence.contains { restates(merged, $0) }
+      || restates(
+        merged, Supported(text: claim.text, quote: claim.evidence.first?.quote ?? "", offset: 0))
   }
 
   /// Numbers, dates and capitalized names in a merged statement must already appear in the
@@ -400,7 +564,7 @@ public struct LocalMeetingSummarizer: MeetingSummarizing {
     system: String, prompt: String, schema: [String: Any], keepAlive: String
   ) async throws -> Output {
     let body: [String: Any] = [
-      "model": Self.model, "stream": false, "think": false, "format": schema,
+      "model": modelName, "stream": false, "think": false, "format": schema,
       "keep_alive": keepAlive,
       "options": ["temperature": 0, "num_ctx": 8192, "num_predict": 1800],
       "system": system, "prompt": prompt,
@@ -444,7 +608,7 @@ public struct LocalMeetingSummarizer: MeetingSummarizing {
     request.timeoutInterval = 10
     request.setValue("application/json", forHTTPHeaderField: "Content-Type")
     request.httpBody = try? JSONSerialization.data(withJSONObject: [
-      "model": Self.model, "keep_alive": 0,
+      "model": modelName, "keep_alive": 0,
     ])
     _ = try? await fetch(request)
   }

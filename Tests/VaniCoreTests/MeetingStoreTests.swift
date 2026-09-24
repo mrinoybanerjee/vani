@@ -106,6 +106,46 @@ struct MeetingStoreTests {
         == Data("orphan audio".utf8))
   }
 
+  @Test func fourHourRecordsFitTheLimitsAndLongerOnesFailClosed() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let store = MeetingStore(directory: directory)
+    #expect(MeetingLimits.maximumDuration == 14_400)
+    #expect(MeetingLimits.maximumSegments == 2_880)
+    var meeting = MeetingRecord(title: "Four hours")
+    let text = String(repeating: "We agreed to ship the pricing page on Monday. ", count: 5)
+    meeting.transcript = (0..<MeetingLimits.maximumSegments).map { index in
+      .init(
+        id: UUID(), source: index % 2 == 0 ? .system : .microphone,
+        offset: Double(index / 2) * 10, duration: 10, text: text)
+    }
+    meeting.transcript[meeting.transcript.count - 1] = .init(
+      id: UUID(), source: .microphone, offset: MeetingLimits.maximumDuration, duration: 4,
+      text: text)
+    try await store.save(meeting)
+    #expect(try await MeetingStore(directory: directory).load() == [meeting])
+    var tooMany = meeting
+    tooMany.transcript.append(
+      .init(id: UUID(), source: .system, offset: 1, duration: 1, text: "One more"))
+    await #expect(throws: MeetingError.self) { try await store.save(tooMany) }
+    var tooLate = meeting
+    tooLate.transcript[0] = .init(
+      id: UUID(), source: .system, offset: MeetingLimits.maximumDuration + 1, duration: 1,
+      text: "Late")
+    await #expect(throws: MeetingError.self) { try await store.save(tooLate) }
+    // Chunk names and audio carry offsets up to the same bound.
+    let id = UUID()
+    #expect(
+      MeetingAudioChunk.identity(fromFileName: "\(id.uuidString)_sys_14399500.vani-audio")?.offset
+        == 14_399.5)
+    #expect(
+      MeetingAudioChunk.identity(fromFileName: "\(id.uuidString)_sys_14400001.vani-audio") == nil)
+    let late = MeetingAudioChunk(source: .system, offset: 14_390, samples: [0.1, 0.2])
+    #expect(try late.audio().samples.count == 2)
+    let beyond = MeetingAudioChunk(source: .system, offset: 14_401, samples: [0.1])
+    #expect(throws: MeetingError.self) { try beyond.audio() }
+  }
+
   @Test func invalidTranscriptOffsetsCannotReachDisplayOrExport() async throws {
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: directory) }

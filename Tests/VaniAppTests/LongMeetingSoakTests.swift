@@ -93,20 +93,45 @@ private func speechSignal(_ turns: [Turn], noise: Float) -> (inout [Float], Time
   }
 }
 
-private let soakDuration: TimeInterval = 2 * 60 * 60
+/// Four hours by default; VANI_LONG_MEETING_HOURS selects another length (for example 2 to
+/// compare with the earlier two-hour limit).
+private let soakDuration: TimeInterval =
+  (ProcessInfo.processInfo.environment["VANI_LONG_MEETING_HOURS"].flatMap(Double.init) ?? 4) * 3600
 /// One 3-second delivery gap, and ten minutes of Mac audio at 44.1 kHz.
 private let soakGap = (start: 2_400.0, end: 2_403.0)
 private let soakLowRate = (start: 3_600.0, end: 4_200.0)
 
-/// A two-hour, two-source meeting driven through the production chunker, store and
+/// Empties chunk files whose transcript segment is saved. Names (and so directory listings and
+/// pending-audio scans) are unchanged, and a transcribed chunk is never read again; this keeps
+/// a four-hour soak from needing 1.7 GiB of free disk. Returns the bytes the files held.
+@MainActor
+private func reclaimTranscribedAudio(in directory: URL, transcribed: Set<UUID>) -> Int {
+  var reclaimed = 0
+  let files =
+    (try? FileManager.default.contentsOfDirectory(
+      at: directory, includingPropertiesForKeys: [.fileSizeKey])) ?? []
+  for file in files {
+    guard let identity = MeetingAudioChunk.identity(fromFileName: file.lastPathComponent),
+      transcribed.contains(identity.id),
+      let size = try? file.resourceValues(forKeys: [.fileSizeKey]).fileSize, size > 0,
+      let handle = try? FileHandle(forWritingTo: file)
+    else { continue }
+    try? handle.truncate(atOffset: 0)
+    try? handle.close()
+    reclaimed += size
+  }
+  return reclaimed
+}
+
+/// A multi-hour, two-source meeting driven through the production chunker, store and
 /// `MeetingModel` drain with a fast fake recognizer. Opt-in: VANI_RUN_LONG_MEETING_SOAK=1.
 @Suite(.serialized) @MainActor
 struct LongMeetingSoakTests {
   @Test(
     .enabled(
       if: ProcessInfo.processInfo.environment["VANI_RUN_LONG_MEETING_SOAK"] == "1",
-      "Two hours of synthetic capture; about a minute in release"))
-  func twoHourMeetingStaysWithinLimitsAndLosesNoAudio() async throws {
+      "Four hours of synthetic capture; under a minute in release"))
+  func fourHourMeetingStaysWithinLimitsAndLosesNoAudio() async throws {
     guard #available(macOS 15.0, *) else { return }
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: root) }
@@ -118,13 +143,22 @@ struct LongMeetingSoakTests {
     let store = MeetingStore(directory: root)
     let model = MeetingModel(
       store: store, recognizer: recognizer, summarizer: NoSummary(), makeCapture: { capture },
-      reserveSpeech: { true }, releaseSpeech: {}, transcriptionRetryDelay: .zero)
+      reserveSpeech: { true }, releaseSpeech: {}, transcriptionRetryDelay: .zero,
+      availableDiskSpace: { _ in nil })
     await model.start()
     #expect(model.phase == .recording)
     let output = try #require(capture.output)
     let directory = try #require(capture.directory)
     let turns = conversation(duration: soakDuration, seed: 11)
 
+    var audioBytes = 0
+    let reclaimer = Task { @MainActor in
+      while !Task.isCancelled {
+        try? await Task.sleep(for: .milliseconds(500))
+        audioBytes += reclaimTranscribedAudio(
+          in: directory, transcribed: Set(model.draft?.transcript.map(\.id) ?? []))
+      }
+    }
     // ScreenCaptureKit's serial queue: runs while the main actor drains saved chunks.
     let callbacks = try await Task.detached {
       var streams = [
@@ -143,33 +177,43 @@ struct LongMeetingSoakTests {
     let liveSegments = model.draft?.transcript.count ?? 0
     await model.stop(summarize: false)
     let finished = clock.now
+    reclaimer.cancel()
+    audioBytes += reclaimTranscribedAudio(
+      in: directory, transcribed: Set(model.draft?.transcript.map(\.id) ?? []))
     let peak = memory.stop()
 
     #expect(model.error == nil)
     #expect(!model.transcriptionFailed)
     let meeting = try #require(model.draft)
-    let chunks = try savedChunks(in: directory)
+    let chunkIDs = try FileManager.default.contentsOfDirectory(atPath: directory.path)
+      .compactMap { MeetingAudioChunk.identity(fromFileName: $0)?.id }
     let recordSize =
       try FileManager.default.attributesOfItem(
         atPath: directory.appendingPathComponent("meeting.json").path)[.size] as? Int ?? 0
 
-    #expect(chunks.count <= 1_440)
-    #expect(meeting.transcript.count == chunks.count)
-    #expect(Set(meeting.transcript.map(\.id)) == Set(chunks.map(\.id)))
+    // Each segment's duration is its chunk's audio duration.
+    #expect(chunkIDs.count <= MeetingLimits.maximumSegments)
+    #expect(meeting.transcript.count == chunkIDs.count)
+    #expect(Set(meeting.transcript.map(\.id)) == Set(chunkIDs))
     #expect(meeting.transcript.allSatisfy { !$0.isFailed })
     #expect(recordSize <= MeetingStore.maximumRecordBytes)
-    let durations = try chunks.map { try $0.audio().duration }
+    let durations = meeting.transcript.map(\.duration)
     #expect(durations.allSatisfy { $0 <= 25 })
 
     var report = [
-      "callbacks \(callbacks)", "chunks \(chunks.count)", "segments \(meeting.transcript.count)",
-      "live segments at stop \(liveSegments)",
+      String(format: "duration %.1f h", soakDuration / 3600),
+      "callbacks \(callbacks)", "chunks \(chunkIDs.count)", "segments \(meeting.transcript.count)",
+      "limit \(MeetingLimits.maximumSegments)", "live segments at stop \(liveSegments)",
       String(format: "longest chunk %.2f s", durations.max() ?? 0),
       "record \(recordSize) bytes",
+      String(
+        format: "audio written %.1f MiB (%.0f MiB per hour)", Double(audioBytes) / 1_048_576,
+        Double(audioBytes) / 1_048_576 / (soakDuration / 3600)),
     ]
     for source in [MeetingAudioSource.system, .microphone] {
-      let ordered = try chunks.filter { $0.source == source }.sorted { $0.offset < $1.offset }
-        .map { (offset: $0.offset, duration: try $0.audio().duration) }
+      let ordered = meeting.transcript.filter { $0.source == source }.sorted {
+        $0.offset < $1.offset
+      }
       var covered = 0.0
       var holes: [TimeInterval] = []
       var worstJoin = 0.0
@@ -207,6 +251,7 @@ struct LongMeetingSoakTests {
         percentile(Array(intervals.prefix(100)), 0.95),
         percentile(Array(intervals.suffix(100)), 0.5),
         percentile(Array(intervals.suffix(100)), 0.95)))
+    #expect(percentile(Array(intervals.suffix(100)), 0.95) < 250)
 
     // Re-save the final transcript one segment at a time, as the live drain does.
     let replay = MeetingStore(directory: root.appendingPathComponent("replay"))
@@ -227,13 +272,33 @@ struct LongMeetingSoakTests {
         percentile(late, 0.95)))
     #expect(percentile(late, 0.95) < 100)
 
-    let (echoSeconds, marked, expectedEchoes) = echoMarkingOverFullTranscript(meeting.transcript)
+    let (echoSeconds, marked, expectedEchoes, lastAdd) = echoMarkingOverFullTranscript(
+      meeting.transcript)
     report.append(
       String(
-        format: "echo marking: %d segments in %.1f ms, %d of %d echo copies marked",
-        meeting.transcript.count, echoSeconds * 1000, marked, expectedEchoes))
+        format:
+          "echo marking: %d segments in %.1f ms (last 100 additions p95 %.3f ms), %d of %d echo copies marked",
+        meeting.transcript.count, echoSeconds * 1000, lastAdd, marked, expectedEchoes))
     #expect(marked == expectedEchoes)
     #expect(echoSeconds < 5)
+
+    // What the transcript view and Copy/Export do with the full four-hour record.
+    var begin = clock.now
+    model.showingEchoes.toggle()
+    model.showingEchoes.toggle()
+    let refresh = (clock.now - begin) / .milliseconds(1) / 2
+    begin = clock.now
+    let exported = meeting.exportedText
+    let export = (clock.now - begin) / .milliseconds(1)
+    begin = clock.now
+    let markdown = meeting.markdownText
+    let copy = (clock.now - begin) / .milliseconds(1)
+    report.append(
+      String(
+        format:
+          "transcript view refresh %.1f ms for %d visible segments; export %.1f ms (%d characters); Markdown copy %.1f ms (%d characters)",
+        refresh, model.visibleTranscript.count, export, exported.count, copy, markdown.count))
+    #expect(refresh < 250 && export < 1_000 && copy < 1_000)
 
     report.append(
       String(
@@ -244,12 +309,12 @@ struct LongMeetingSoakTests {
   }
 
   /// If Mac audio callbacks stopped during silence instead of carrying zeros, every pause
-  /// longer than 0.5 s would end a chunk. This measures how many chunks two hours would
-  /// produce then, against the 1,440 chunk and segment limit.
+  /// longer than 0.5 s would end a chunk. This measures how many chunks the soak length would
+  /// produce then, against the chunk and segment limit.
   @Test(
     .enabled(
       if: ProcessInfo.processInfo.environment["VANI_RUN_LONG_MEETING_SOAK"] == "1",
-      "Two hours of synthetic capture per conversation"))
+      "Four hours of synthetic capture per conversation"))
   func macAudioThatPausesDuringSilenceMultipliesChunks() async throws {
     guard #available(macOS 15.0, *) else { return }
     var report: [String] = []
@@ -280,12 +345,21 @@ struct LongMeetingSoakTests {
             source: .microphone, frames: 480, end: soakDuration,
             signal: speechSignal(turns.filter { $0.source == .microphone }, noise: 0.0008)),
         ]
-        _ = try deliver(&streams, to: output, seed: 5)
+        // Only the chunk count matters here: empty written chunks as delivery proceeds.
+        _ = try deliver(&streams, to: output, seed: 5) {
+          for file
+            in (try? FileManager.default.contentsOfDirectory(
+              at: directory, includingPropertiesForKeys: nil)) ?? []
+          {
+            try? FileHandle(forWritingTo: file).truncate(atOffset: 0)
+          }
+        }
         try output.finish()
       }.value
-      let chunks = try savedChunks(in: directory)
+      let chunks = try FileManager.default.contentsOfDirectory(atPath: directory.path)
+        .compactMap { MeetingAudioChunk.identity(fromFileName: $0) }
       let system = chunks.filter { $0.source == .system }.count
-      #expect(chunks.count <= 1_440)
+      #expect(chunks.count <= MeetingLimits.maximumSegments)
       report.append(
         "\(brisk ? "brisk" : "default") conversation: \(remote.count) remote turns, "
           + "\(chunks.count) chunks (\(system) Mac audio, \(chunks.count - system) microphone)")
@@ -294,9 +368,11 @@ struct LongMeetingSoakTests {
   }
 
   /// Rebuilds the full transcript through `MeetingEchoDetector` in arrival order, where half of
-  /// the speaking microphone segments repeat the overlapping Mac audio word for word.
+  /// the speaking microphone segments repeat the overlapping Mac audio word for word. Returns
+  /// the total time, marked and expected echo copies, and the p95 of the last 100 additions in
+  /// milliseconds (the per-chunk cost at the end of the meeting).
   private func echoMarkingOverFullTranscript(_ transcript: [MeetingTranscriptSegment]) -> (
-    TimeInterval, Int, Int
+    TimeInterval, Int, Int, Double
   ) {
     var random = SeededGenerator(seed: 3)
     let words = (0..<400).map { "word\($0)" }
@@ -323,13 +399,19 @@ struct LongMeetingSoakTests {
     var result: [MeetingTranscriptSegment] = []
     let clock = ContinuousClock()
     let begin = clock.now
+    var additions: [Double] = []
     for segment in ordered {
+      let added = clock.now
       result = detector.adding(
         MeetingTranscriptSegment(
           id: segment.id, source: segment.source, offset: segment.offset,
           duration: segment.duration, text: texts[segment.id] ?? ""), to: result)
+      additions.append((clock.now - added) / .milliseconds(1))
     }
     let elapsed = (clock.now - begin) / .seconds(1)
-    return (elapsed, result.filter(\.isEcho).count, expected)
+    return (
+      elapsed, result.filter(\.isEcho).count, expected,
+      percentile(Array(additions.suffix(100)), 0.95)
+    )
   }
 }

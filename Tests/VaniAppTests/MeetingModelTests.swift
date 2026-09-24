@@ -904,3 +904,100 @@ struct MeetingModelTests {
         atPath: folder.appendingPathComponent("\(id.uuidString)_mic_40000.vani-audio").path))
   }
 }
+
+/// Free disk space reported to the model under test.
+private final class DiskSpace: @unchecked Sendable {
+  private let lock = NSLock()
+  private var bytes: Int64
+  init(_ bytes: Int64) { self.bytes = bytes }
+  var value: Int64 {
+    get {
+      lock.lock()
+      defer { lock.unlock() }
+      return bytes
+    }
+    set {
+      lock.lock()
+      bytes = newValue
+      lock.unlock()
+    }
+  }
+  static func holding(minutes: Double) -> Int64 {
+    MeetingModel.diskReserveBytes + Int64(minutes * 60) * Int64(MeetingLimits.audioBytesPerSecond)
+  }
+}
+
+@Suite(.serialized) @MainActor
+struct MeetingLongRecordingTests {
+  private func model(
+    _ directory: URL, capture: MeetingTestCapture, disk: DiskSpace,
+    now: @escaping @MainActor () -> ContinuousClock.Instant = { ContinuousClock.now }
+  ) -> MeetingModel {
+    MeetingModel(
+      store: MeetingStore(directory: directory), recognizer: MeetingTestRecognizer(),
+      summarizer: MeetingTestSummarizer(), makeCapture: { capture }, reserveSpeech: { true },
+      releaseSpeech: {}, availableDiskSpace: { _ in disk.value }, monitorInterval: .seconds(3600),
+      now: now)
+  }
+
+  @Test func aNearlyFullDiskIsExplainedBeforeAnythingIsRecorded() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let capture = MeetingTestCapture()
+    let model = model(directory, capture: capture, disk: DiskSpace(DiskSpace.holding(minutes: 5)))
+    await model.start()
+    #expect(model.phase == .idle)
+    #expect(capture.starts == 0)
+    #expect(model.error?.contains("Free up disk space before recording") == true)
+    #expect(model.draft == nil && model.meetings.isEmpty)
+  }
+
+  @Test func limitedDiskWarnsAtStartThenWarnsAndStopsCleanlyWhileRecording() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let capture = MeetingTestCapture()
+    let disk = DiskSpace(DiskSpace.holding(minutes: 90))
+    let model = model(directory, capture: capture, disk: disk)
+    await model.start()
+    #expect(model.phase == .recording)
+    #expect(model.notice?.contains("about 1 h 30 min of meeting audio") == true)
+    #expect(model.error == nil)
+    try capture.emitChunk(offset: 0)
+    disk.value = DiskSpace.holding(minutes: 5)
+    await model.checkDiskAndDuration()
+    #expect(model.phase == .recording)
+    #expect(model.notice?.contains("Disk space is low: about 5 min") == true)
+    disk.value = MeetingModel.diskReserveBytes - 1
+    await model.checkDiskAndDuration()
+    #expect(model.phase == .idle)
+    #expect(capture.stops == 1)
+    #expect(model.notice == nil)
+    #expect(model.error?.contains("disk is almost full") == true)
+    #expect(model.error?.contains("Everything captured so far is saved") == true)
+    // The live chunk and the final flush are both transcribed and saved.
+    #expect(model.draft?.transcript.count == 2)
+    #expect(model.draft?.endedAt != nil)
+    #expect(try await MeetingStore(directory: directory).load().first == model.draft)
+  }
+
+  @Test func theFourHourLimitIsAnnouncedTenMinutesAhead() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let capture = MeetingTestCapture()
+    var clock = ContinuousClock.now
+    let model = model(
+      directory, capture: capture, disk: DiskSpace(DiskSpace.holding(minutes: 600)),
+      now: { clock })
+    await model.start()
+    #expect(model.phase == .recording && model.notice == nil)
+    clock = clock.advanced(by: .seconds(3 * 3600 + 49 * 60))
+    await model.checkDiskAndDuration()
+    #expect(model.notice == nil)
+    clock = clock.advanced(by: .seconds(120))
+    await model.checkDiskAndDuration()
+    #expect(model.notice?.contains("four-hour limit in about 9 min") == true)
+    #expect(model.phase == .recording)
+    await model.stop(summarize: false)
+    #expect(model.notice == nil)
+  }
+}
