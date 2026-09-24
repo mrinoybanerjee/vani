@@ -17,7 +17,7 @@ private func formatted(_ text: String, snippets: [SnippetEntry] = []) -> String 
 @Test
 func speechCleanupRemovesFillersAndRepairsTheirCommas() {
   #expect(formatted("It was, like, really good.") == "It was really good.")
-  #expect(formatted("So, er, we should go.") == "So we should go.")
+  #expect(formatted("So, er, we should go.") == "So, we should go.")
   #expect(formatted("It's, you know, fine.") == "It's fine.")
   #expect(formatted("I think we should, uhm, leave now.") == "I think we should leave now.")
 }
@@ -30,6 +30,12 @@ func speechCleanupRepairsCommasAndSentencesAroundUmAndUh() {
   #expect(formatted("It's, uh, it's fine.") == "It's fine.")
   #expect(formatted("Ummm, sure.") == "Sure.")
   #expect(formatted("That's it, um.") == "That's it.")
+}
+
+@Test
+func speechCleanupKeepsTheCommaAfterAnOpeningWord() {
+  #expect(formatted("Anyway, uh, what do you think?") == "Anyway, what do you think?")
+  #expect(formatted("Great. So, um, what's next?") == "Great. So, what's next?")
 }
 
 @Test

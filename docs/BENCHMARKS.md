@@ -278,10 +278,11 @@ The rules were frozen before the fresh set was scored, once. Lower is better.
 
 On LibriSpeech test-clean fluent read speech (300 utterances), the cleanup changed 0.3%
 of utterances. The rules ran in about 0.6 ms p50 per utterance in the Python reference.
-The Swift port matches that reference byte for byte on 1,825 inputs (Parakeet
-transcripts after Smart Formatting, LibriSpeech and synthetic dictation cases) and measured
-0.17–0.18 ms p50 and 0.54–0.75 ms p99 per line over two release test builds on an Apple M4 (16 GB,
-macOS 26.6.2, Swift 6.1.2).
+The Swift port matched that reference byte for byte on 1,825 inputs (Parakeet transcripts
+after Smart Formatting, LibriSpeech and synthetic dictation cases) and measured 0.17–0.18 ms
+p50 and 0.54–0.75 ms p99 per line over two release test builds on an Apple M4 (16 GB,
+macOS 26.6.2, Swift 6.1.2). It now differs on 9 of them only by keeping the comma after an
+opening word when it removes a filler ("So, um, what" becomes "So, what", not "So what").
 
 Rejected alternatives: a local LLM (qwen3 1.7B) reached 11.2%, altered 5.7% of items,
 added words in 2% and took about 1 s per utterance; a DistilBERT disfluency tagger reached

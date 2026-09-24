@@ -264,9 +264,12 @@ struct SpeechTidier: Sendable {
         words[start - 1].text = text + mark.suffix(1)
       } else if lastTrail.contains(","), previous.text.hasSuffix(","), start < words.count {
         let next = words[start]
-        // Keep it when a repetition or an editing cue follows ("It's, uh, it's").
+        // Keep it when a repetition or an editing cue follows ("It's, uh, it's"), and after
+        // an opening discourse marker, where it is real punctuation ("Anyway, uh, what").
+        let opensSentence = start == 1 || words[start - 2].trailContains(".?!…")
         let keepsComma =
-          next.norm == previous.norm || Self.commaKeepingWords.contains(next.norm)
+          (opensSentence && Self.openingMarkers.contains(previous.norm))
+          || next.norm == previous.norm || Self.commaKeepingWords.contains(next.norm)
         if !keepsComma,
           next.core.unicodeScalars.first?.properties.isLowercase == true
             || Self.functionEnd.contains(previous.norm)
@@ -570,6 +573,12 @@ struct SpeechTidier: Sendable {
   // A comma before a repetition or an editing cue still separates it from the stumble.
   private static let commaKeepingWords: Set<String> = [
     "like", "you", "no", "wait", "sorry", "actually", "i", "or",
+  ]
+
+  // Sentence-opening words whose comma is punctuation, not a filler's comma pair.
+  private static let openingMarkers: Set<String> = [
+    "anyway", "anyways", "well", "so", "okay", "ok", "alright", "right", "yeah", "yes", "no",
+    "now", "oh", "sorry", "actually", "basically", "honestly", "look", "listen", "hey",
   ]
 
   // Longest first, so "no wait" wins over "no". A single-word cue needs a comma after it.
