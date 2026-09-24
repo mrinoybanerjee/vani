@@ -136,7 +136,8 @@ The model download is about 2.5 GB. There is no cloud fallback. If the service i
 your notes and transcript remain available; start Ollama and choose **Generate summary** again.
 A failed transcript can be retried through **Meeting actions → Recover transcript**.
 **Remove saved audio** permanently removes captured chunks only after their transcript is saved.
-Meetings last up to two hours; transcript labels "Me" (microphone) and "Others" (Mac audio)
+Meetings last up to four hours; Vani warns when about 10 minutes of recording time or disk
+space remain and stops cleanly, keeping everything, if the disk is nearly full. Transcript labels "Me" (microphone) and "Others" (Mac audio)
 identify sources, not individual speakers. Microphone echo of Mac audio is hidden by default. Review AI output before relying on it. See [meeting design and limits](docs/MEETINGS_DESIGN.md).
 
 ## Updating Vani

@@ -82,8 +82,10 @@ and diagnostics.
   nonregular files, unsafe sample rates/counts, nonfinite PCM, invalid offsets and oversized content.
 - Completed chunks survive transcription failure. Audio removal requires a durable transcript and explicit confirmation.
 - Save failure prevents navigation/quit that would discard drafts. Stop failure retains recorder ownership; final flush is retryable.
-- A two-hour capture limit bounds each source. Up to 24 seconds per source can remain volatile before persistence.
+- A four-hour capture limit bounds each source, and recording stops cleanly when free disk space falls to a 256 MiB reserve.
+  Up to 24 seconds per source can remain volatile before persistence.
 - Summary traffic is fixed to `127.0.0.1:11434`, uses an ephemeral session, disables proxies and refuses redirects.
   Responses are capped at 256 KiB and require completed structured output. Transcript text and the meeting's notes are delimited untrusted data in the prompt.
-- Generated items must quote their referenced transcript segment. This checks provenance, not semantic truth or prompt-injection immunity.
+- Generated items must quote the transcript verbatim (hesitations aside) from their cited segment or one up to two places away;
+  the transcript's own text is shown. This checks provenance, not semantic truth or prompt-injection immunity.
 - Ollama is a separately installed local service and model runtime. Vani does not isolate that service from the current user.

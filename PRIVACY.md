@@ -69,7 +69,8 @@ Audio chunks, transcript, personal notes, summary and a previous saved record li
 and files are owner-readable/writable. They are not encrypted by Vani. Completed audio
 chunks are retained until **Remove saved audio** succeeds after transcript persistence.
 There is no automatic purge. Up to about 24 seconds per source remain in memory before a
-chunk is saved; a process crash can lose that unfinished tail. Capture stops at two hours.
+chunk is saved; a process crash can lose that unfinished tail. Capture stops at four hours,
+or earlier if the disk is nearly full.
 
 Summaries use the local `qwen3:4b` model through an independently installed Ollama service.
 Installing that model downloads approximately 2.5 GB; meeting content is not part of that download.
