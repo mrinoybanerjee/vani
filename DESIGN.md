@@ -5,6 +5,8 @@ A quiet native writing tool. Warm paper, forest green, comfortable reading, imme
 - Light: paper #FAF9F6, sidebar #F0F0EA, accent #315E48.
 - Dark: paper #202321, sidebar #191C1A, accent #A4C9AD.
 - Text: native primary and secondary labels. Never encode state only in color.
+- Mark: five rounded bars sharing a top line, lengths 150 · 270 · 400 · 270 · 150 (width 56, gap 36), so the waveform forms a V. Paper bars on a forest tile for the app icon; accent bars beside the rounded `vani` wordmark; a monochrome template in the menu bar. Never redraw it by hand: `VaniMark` in code, and `swift scripts/make-app-icon.swift` regenerates the icon.
+- Recording motion: the listening icon's bars follow the real microphone level and rest in silence.
 - Typography: system sans for controls (12–14 pt) and editor body (15 pt, 6 pt extra line spacing); system serif for workspace headings (28–34 pt). Rounded system wordmark.
 - Spacing: 4, 8, 12, 16, 20, 24, 32. Notebook content measure bounded at 780 pt including padding.
 - Shape: 6 pt keycaps, 8 pt fields, 10 pt selected note; capsule for ambient status.

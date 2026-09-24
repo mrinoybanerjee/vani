@@ -144,6 +144,10 @@ extension NativeInteractionTests.NotesTests {
         ShortcutInactiveView(quit: {}, canRelaunch: true)
       }, name: "menu-shortcut-inactive", path: path)
 
+    try await captureView(
+      OverlayView(
+        state: .listening, listeningStartedAt: Date().addingTimeInterval(-7), level: { 0.08 }
+      ).frame(width: 240), name: "overlay-listening-speaking", path: path)
     let states: [(String, OverlayState)] = [
       ("listening", .listening), ("hands-free", .handsFree), ("processing", .processing),
       ("success", .success),

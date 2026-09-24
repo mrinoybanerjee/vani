@@ -79,19 +79,21 @@ struct MeetingTranscriptionTests {
     #expect(marked.filter(\.isEcho).isEmpty)
   }
 
-  @Test func addingSegmentsStaysFastForTwoHourMeetings() {
+  @Test func addingSegmentsStaysFastForFourHourMeetings() {
     var detector = MeetingEchoDetector()
     var transcript: [MeetingTranscriptSegment] = []
     let start = ContinuousClock.now
-    for index in 0..<720 {
+    for index in 0..<(MeetingLimits.maximumSegments / 2) {
       let offset = Double(index) * 10
       transcript = detector.adding(segment(.system, offset, remote, duration: 10), to: transcript)
       transcript = detector.adding(
         segment(.microphone, offset + 0.2, "unrelated words from me number \(index) today okay"),
         to: transcript)
     }
-    #expect(transcript.count == 1_440)
-    #expect(ContinuousClock.now - start < .seconds(5))
+    #expect(transcript.count == MeetingLimits.maximumSegments)
+    // A guard against runaway growth in unoptimized test builds on a busy machine (4.5–7 s
+    // measured). The release four-hour soak measures the real cost: about 0.2 s in total.
+    #expect(ContinuousClock.now - start < .seconds(15))
   }
 
   @Test func vocabularyAppliesDictionaryAndOnlyEnabledPersonalization() {

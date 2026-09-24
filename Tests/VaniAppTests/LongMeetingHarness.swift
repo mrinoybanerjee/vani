@@ -155,10 +155,12 @@ struct CallbackStream {
 }
 
 /// Delivers both streams in presentation order on the calling thread, as ScreenCaptureKit's
-/// serial queue does, and returns the number of callbacks.
+/// serial queue does, and returns the number of callbacks. `periodically` runs on the same
+/// thread every 100,000 callbacks.
 @available(macOS 15.0, *)
 func deliver(
-  _ streams: inout [CallbackStream], to output: MeetingStreamOutput, seed: UInt64
+  _ streams: inout [CallbackStream], to output: MeetingStreamOutput, seed: UInt64,
+  periodically: () -> Void = {}
 ) throws -> Int {
   var random = SeededGenerator(seed: seed)
   var count = 0
@@ -169,6 +171,7 @@ func deliver(
     try output.append(
       buffer.samples, rate: buffer.rate, offset: buffer.offset, source: streams[index].source)
     count += 1
+    if count % 100_000 == 0 { periodically() }
   }
   return count
 }

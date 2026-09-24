@@ -77,6 +77,8 @@ final class AppCoordinator: ObservableObject {
       history: historyStore,
       diagnostics: diagnosticStore
     )
+    let levelSource = session
+    overlay.level = { levelSource.currentInputLevel() }
     if startAutomatically {
       AppDelegate.coordinator = self
       Task { [weak self] in
@@ -85,14 +87,20 @@ final class AppCoordinator: ObservableObject {
     }
   }
 
-  var menuBarIconName: String {
+  enum MenuBarIcon: Equatable {
+    /// The Vani mark; dimmed until dictation is ready.
+    case mark(opacity: CGFloat)
+    case symbol(String)
+  }
+
+  /// Idle states show the Vani mark; active and error states use explicit symbols.
+  var menuBarIcon: MenuBarIcon {
     switch snapshot.phase {
-    case .listening: "waveform.circle.fill"
-    case .transcribing, .inserting, .preparing: "waveform.badge.magnifyingglass"
-    case .recoverableError: "exclamationmark.circle.fill"
-    case .setup: "waveform.circle"
-    case .ready: "waveform"
-    case .disabled: "waveform.slash"
+    case .ready: .mark(opacity: 1)
+    case .setup, .disabled: .mark(opacity: 0.45)
+    case .listening: .symbol("waveform.circle.fill")
+    case .transcribing, .inserting, .preparing: .symbol("waveform.badge.magnifyingglass")
+    case .recoverableError: .symbol("exclamationmark.circle.fill")
     }
   }
 

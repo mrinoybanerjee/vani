@@ -192,7 +192,7 @@ public struct TextPipeline: Sendable {
 
   private func applySmartFormatting(to text: String) -> String {
     let protected = protectTechnicalTokens(in: text)
-    var result = removeFillers(in: protected.text)
+    var result = removeGluedFillers(in: protected.text)
 
     let structuralCommands: [(phrase: String, replacement: String)] = [
       ("new paragraph", "\n\n"),
@@ -226,6 +226,14 @@ public struct TextPipeline: Sendable {
 
     result = capitalizeSentenceStarts(
       in: cleanSpacing(in: result, preserveBoundaryNewlines: true)
+    )
+    let tidier = SpeechTidier()
+    // A line that held only a filler is now empty; collapse the extra line breaks.
+    result = cleanSpacing(
+      in: result.split(separator: "\n", omittingEmptySubsequences: false)
+        .map { tidier.tidy(String($0)) }
+        .joined(separator: "\n"),
+      preserveBoundaryNewlines: true
     )
     for replacement in protected.replacements {
       result = result.replacingOccurrences(of: replacement.token, with: replacement.value)
@@ -265,7 +273,9 @@ public struct TextPipeline: Sendable {
     return (String(mutable), replacements)
   }
 
-  private func removeFillers(in text: String) -> String {
+  /// Removes fillers glued to punctuation ("well,um,maybe"), which `SpeechTidier` cannot
+  /// see as words. Standalone fillers are left to it so it can repair their commas.
+  private func removeGluedFillers(in text: String) -> String {
     let pattern =
       #"(?i)(?<!["# + Self.lexicalCharacterPattern + #"])(?:um+|uh+|erm+)"#
       + #"(?!["# + Self.lexicalCharacterPattern + #"])(?:[ \t]*[,.;:!?…]+)?"#
@@ -275,11 +285,16 @@ public struct TextPipeline: Sendable {
 
     let source = text as NSString
     let mutable = NSMutableString(string: text)
+    let quoteMarkOffsets = (0..<source.length).filter {
+      Self.doubleQuoteMarks.contains(source.character(at: $0))
+    }
     let matches = expression.matches(
       in: text,
       range: NSRange(location: 0, length: source.length)
     )
     for match in matches.reversed() {
+      // Quoted speech stays verbatim: He said "um, no".
+      if quoteMarkOffsets.count(where: { $0 < match.range.location }) % 2 == 1 { continue }
       let previousCharacter = character(
         in: source,
         atUTF16Offset: match.range.location - 1
@@ -288,6 +303,9 @@ public struct TextPipeline: Sendable {
         in: source,
         atUTF16Offset: NSMaxRange(match.range)
       )
+      if previousCharacter?.isWhitespace ?? true, nextCharacter?.isWhitespace ?? true {
+        continue
+      }
       let replacement =
         if let previousCharacter, let nextCharacter,
           nextCharacter.isLetter || nextCharacter.isNumber,
@@ -532,6 +550,7 @@ public struct TextPipeline: Sendable {
   private static let snippetBoundaryPunctuation: Set<Character> = [
     ",", ".", ";", ":", "!", "?", "…",
   ]
+  private static let doubleQuoteMarks: Set<unichar> = [0x22, 0x201C, 0x201D]
   private static let sentenceTerminators: Set<Character> = [".", "!", "?"]
   private static let openingSentenceDelimiters: Set<Character> = [
     "\"", "'", "“", "‘", "(", "[", "{",

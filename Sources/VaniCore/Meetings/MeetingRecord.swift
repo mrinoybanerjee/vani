@@ -8,6 +8,27 @@ public enum MeetingAudioSource: String, Codable, Sendable {
   public var label: String { self == .microphone ? "Me" : "Others" }
 }
 
+/// Bounds for one meeting, shared by capture, storage validation and summaries.
+///
+/// Four hours covers long workshops, interviews and planning sessions while keeping every
+/// dependent cost bounded: raw audio (about 1.7 GiB when both sources are active throughout),
+/// the transcript record, echo marking, the transcript view and local summary time. A hard
+/// bound also stops a forgotten meeting from recording indefinitely. Every limit that depends
+/// on duration scales from `maximumDuration`; records written under the earlier two-hour
+/// limits remain valid.
+public enum MeetingLimits {
+  public static let maximumDuration: TimeInterval = 4 * 60 * 60
+  /// Chunks normally last 15–24 seconds per source. Delivery gaps, sample-rate changes and
+  /// Mac audio that stops during silence end chunks early, so the bound allows an average of
+  /// one chunk every 10 seconds from each source (1,440 per source over four hours).
+  public static let maximumSegments = 2 * Int(maximumDuration / 10)
+  /// A four-hour record measured about 0.5 MiB; the bound leaves room for dense speech and
+  /// 1 MiB each of notes and summary.
+  public static let maximumRecordBytes = 16 * 1_024 * 1_024
+  /// Saved audio: 16 kHz mono Float32 from each of the two sources.
+  public static let audioBytesPerSecond = 2 * CapturedAudio.targetSampleRate * 4
+}
+
 /// `m:ss` for transcript offsets that the store has already validated as finite and bounded.
 public func meetingTimestamp(_ seconds: TimeInterval) -> String {
   let whole = Int(max(0, seconds))
@@ -148,7 +169,8 @@ public struct MeetingAudioChunk: Codable, Identifiable, Sendable {
       separator: "_", omittingEmptySubsequences: false)
     guard let first = parts.first, let id = UUID(uuidString: String(first)) else { return nil }
     if parts.count == 1 { return Identity(id: id, source: nil, offset: nil) }
-    guard parts.count == 3, let milliseconds = Int(parts[2]), (0...7_200_000).contains(milliseconds)
+    guard parts.count == 3, let milliseconds = Int(parts[2]),
+      (0...Int(MeetingLimits.maximumDuration * 1000)).contains(milliseconds)
     else { return nil }
     let source: MeetingAudioSource
     switch parts[1] {
@@ -161,7 +183,8 @@ public struct MeetingAudioChunk: Codable, Identifiable, Sendable {
 
   public func audio() throws -> CapturedAudio {
     guard sampleRate == CapturedAudio.targetSampleRate, pcm.count % 4 == 0,
-      pcm.count <= 4 * sampleRate * 25, offset.isFinite, offset >= 0, offset <= 7200
+      pcm.count <= 4 * sampleRate * 25, offset.isFinite, offset >= 0,
+      offset <= MeetingLimits.maximumDuration
     else {
       throw MeetingError.invalidData
     }

@@ -71,15 +71,27 @@ If capture fails to start, the just-created record is removed only when it has n
 transcript or summary. Deleting a meeting moves it to Recently Deleted (`deletedAt`); its notes,
 transcript, summary and audio are kept and it can be restored.
 
-Records are limited to 8 MiB, titles to 4 KiB, notes and summaries to 1 MiB each, and transcripts
-to 1,440 unique segments with validated offsets and sizes. Audio chunks are bounded binary
+Meetings last at most four hours (`MeetingLimits`). Records are limited to 16 MiB, titles to
+4 KiB, notes and summaries to 1 MiB each, and transcripts to 2,880 unique segments (one per
+10 seconds per source on average) with offsets up to four hours and validated sizes. Records
+written by earlier versions remain readable; version 0.7.1 and earlier cannot open a record
+longer than two hours. Audio chunks are bounded binary
 property lists containing 16 kHz mono Float PCM. New chunk filenames are
 `<chunk ID>_<mic|sys>_<offset ms>.vani-audio`, so pending audio is ordered, and an unreadable
 chunk reported, without decoding audio; older chunks named by bare ID are decoded once for their
 offset. A name must agree with the chunk it holds. Other files are ignored and never deleted. Completed
 chunks are durable before transcription. The unfinished tail (up to 24 seconds per source) can
-be lost on process crash. A two-hour recording contains roughly 880 MiB of uncompressed audio
-when both sources are continuously active; keep sufficient disk space available.
+be lost on process crash. Saved audio is 16 kHz mono Float32 per source, about 440 MiB per hour
+with both sources active, or roughly 1.7 GiB for a four-hour meeting until **Remove saved
+audio**. Before recording, Vani refuses to start when the disk cannot hold 10 minutes of audio
+above a 256 MiB reserve, and says how long it can record when that is less than four hours.
+While recording it checks every 30 seconds: it warns when about 10 minutes of space remain,
+stops cleanly (saving everything captured) when only the reserve is left, and warns 10 minutes
+before the four-hour limit. These notices are separate from errors and announced to VoiceOver.
+
+Why a limit at all: four hours covers long workshops and interviews while bounding raw audio,
+record size, echo marking, transcript rendering and summary time, and it ends a meeting that
+was left running by mistake.
 
 Notes autosave after a 600 ms pause. Close, navigation and audio removal pass through a save
 barrier. A save failure retains the draft for retry or export. When idle, explicitly
@@ -112,18 +124,24 @@ configurable remote URL.
 The model receives the transcript (without echo lines or failure segments) and the meeting's own
 notes, at most 4,000 characters, delimited and marked as untrusted data. Notes indicate which
 topics the user found important; they are never accepted as evidence. Every generated summary,
-decision and action still requires a quote that matches its cited transcript segment after
-case, punctuation and whitespace are normalized (whole words only); a quote needs at least three
-words or twelve characters. Unsupported items are dropped
+decision and action still requires a quote whose words occur, in order and as whole words, in
+the transcript after case, punctuation and whitespace are normalized and hesitations ("um",
+"uh" and similar) are ignored. A quote needs at least three words or twelve characters besides
+hesitations. It must come from the cited segment, a segment up to two places away, or run across
+the boundary between two adjacent segments (chunks often end mid-sentence); the item is then
+timed at the segment where the quote starts. The quote shown is the transcript's own text,
+not the model's copy. Unsupported items are dropped
 and counted in a short note; the summary fails only when every proposed item is unsupported.
 When a transcript needs more than one batch, a final consolidation pass merges duplicates into at
 most 8 summary items, 8 decisions and 10 actions. Each merged item must cite validated items of
 the same section by number and is shown with every cited quote and time. A merged item that adds
 a number or capitalized name absent from its cited items is rejected, a cited item that shares
 fewer than two distinctive words with the merged statement is dropped from its citations, and any
-validated item left uncited is kept as it was, so consolidation never drops evidence. Consolidation is skipped when a
-conservative token estimate of the prompt plus answer exceeds the 8,192-token context. If it is
-skipped or fails, the de-duplicated batch items are used. An unavailable model produces an error and preserves the
+validated item left uncited is kept as it was, so consolidation never drops evidence. When a
+conservative token estimate of the prompt plus answer exceeds the 8,192-token context, items are
+grouped in time order into requests that fit, each group is merged, and the groups' results are
+merged again (at most three further passes), with the same checks at every pass. A pass that
+fails keeps its input, and a pass that merges nothing ends consolidation. An unavailable model produces an error and preserves the
 previous summary. Summaries run in the background: other meetings can be opened or recorded,
 and the result is written to the summarized meeting's latest stored record. Notes edited during
 generation are kept; a changed transcript invalidates the result. Quoted evidence is a review aid,

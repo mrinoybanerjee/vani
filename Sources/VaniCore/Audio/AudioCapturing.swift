@@ -1,4 +1,6 @@
 public protocol AudioCapturing: Sendable {
+  /// RMS loudness of the most recent input, for display only.
+  nonisolated var inputLevel: Float { get }
   func start() async throws
   func stop() async throws -> CapturedAudio
   func recoverPendingAudio() async throws -> CapturedAudio?
@@ -13,6 +15,8 @@ public protocol AudioCapturing: Sendable {
 }
 
 extension AudioCapturing {
+  public nonisolated var inputLevel: Float { 0 }
+
   public func continueOnCurrentInput() async -> Bool { false }
 
   public func inputRouteChanged() async {}

@@ -56,7 +56,13 @@ struct VaniApplication: App {
       MenuContentView()
         .environmentObject(coordinator)
     } label: {
-      Label("Vani", systemImage: coordinator.menuBarIconName)
+      switch coordinator.menuBarIcon {
+      case .mark(let opacity):
+        Image(nsImage: VaniMark.menuBarImage(opacity: opacity))
+          .accessibilityLabel("Vani")
+      case .symbol(let name):
+        Label("Vani", systemImage: name)
+      }
     }
     .menuBarExtraStyle(.window)
 

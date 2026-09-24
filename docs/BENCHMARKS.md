@@ -242,6 +242,100 @@ LibriSpeech is read speech with clean turn-taking and no overlapping talk; the e
 delayed, attenuated copy, not a room response. The synthetic two-hour summary transcript is
 template text. Peak memory is for the whole test process, including test fixtures.
 
+## Four-hour meetings and real meetings — September 23, 2026
+
+Apple M4, 16 GB, macOS 26.6.2, Swift 6.1.2, release test builds on branch
+`codex/long-meetings-notes`. Other local workloads (a VM and other Ollama clients) were running,
+so wall times are noisy upper bounds.
+
+```bash
+# Four-hour soak (VANI_LONG_MEETING_HOURS selects another length; about 75 s)
+VANI_RUN_LONG_MEETING_SOAK=1 swift test -c release --filter LongMeetingSoakTests
+# AMI Meeting Corpus through the meeting path with Parakeet Unified (about 150 s)
+VANI_AMI_DIR=<folder with audio/<ID>.Mix-Headset.wav and annotations/> VANI_AMI_OUTPUT=<folder> \
+VANI_UNIFIED_MODEL_DIR="$HOME/Library/Application Support/Vani/Models/parakeet-unified-en-0.6b-int8" \
+  swift test -c release --filter realMeetingsTranscribeThroughTheMeetingPath
+# Summaries of those records with qwen3:4b (about 20 minutes)
+VANI_AMI_RECORDS=<AMI output folder> VANI_AMI_SUMMARY_OUTPUT=<folder> \
+  swift test -c release --filter realMeetingSummariesQuoteTheirSources
+```
+
+**Four-hour soak** (same synthetic signal and delivery faults as the two-hour soak above;
+transcribed chunk files are emptied as the soak runs so it needs little disk):
+
+| Metric | Result |
+| --- | --- |
+| Callbacks / chunks / segments | 2,112,576 / 1,707 / 1,707 (limit 2,880) |
+| Longest chunk | 23.90 s (limit 25 s) |
+| Audio covered | Mac 14,397.04 s of 14,397 s (3 s gap excluded); microphone 14,400.000 s of 14,400 s |
+| Audio written | 1,757.9 MiB (439 MiB per hour) |
+| Final record | 453,468 bytes (limit 16 MiB) |
+| `store.save` p50/p95, first vs last 100 saves | 2.70/3.32 ms vs 9.72/11.80 ms |
+| Per-chunk drain cycle p50/p95, first vs last 100 | 41.0/72.2 ms vs 77.6/161.9 ms |
+| Echo marking | 1,707 segments in 213.7 ms (last 100 additions p95 0.385 ms); 159 of 159 planted copies marked |
+| Transcript view refresh / export / Markdown copy | 1.0 ms (634 visible segments) / 1.2 ms / 1.2 ms |
+| Wall time / peak resident memory | 61.4 s (stop and final drain 21.5 s) / 66.0 MiB |
+
+If Mac audio stopped during silence instead of carrying zeros, four hours would produce 1,592
+chunks for the default conversation and 2,210 for a brisk one with 1,513 remote turns; both fit.
+
+**Real meetings: AMI transcription.** Seven AMI Meeting Corpus meetings (CC BY 4.0; ES2002a–d,
+ES2004a, IS1009a, TS3003a; 3.3 hours), headset mix upsampled from 16 to 48 kHz and delivered as
+Mac audio in 1,024-frame callbacks, with a near-silent microphone. Reference: AMI manual word
+transcripts of all speakers in start-time order, normalized as `Benchmarks/wer.py`.
+
+| Meeting | Minutes | WER | WER without fillers | Speed |
+| --- | ---: | ---: | ---: | ---: |
+| ES2002a | 21.2 | 23.24% | 21.64% | 132× |
+| ES2002b | 38.0 | 17.52% | 15.65% | 114× |
+| ES2002c | 40.4 | 17.18% | 15.71% | 115× |
+| ES2002d | 43.7 | 24.40% | 22.39% | 86× |
+| ES2004a | 17.5 | 22.20% | 19.92% | 76× |
+| IS1009a | 14.0 | 29.34% | 26.07% | 85× |
+| TS3003a | 25.1 | 21.27% | 20.15% | 77× |
+| **All (32,707 words)** | 199.9 | **20.96%** | **19.11%** | |
+
+Peak process memory was 239–564 MiB. This is spontaneous, overlapping, accented speech mixed to
+one channel, far harder than LibriSpeech (1.74%). The single-channel mix also flattens
+overlapping talk into one word stream, which WER penalizes as order errors. Fillers ("um",
+"uh", "mm") are removed from both sides in the second column.
+
+**Real meetings: summaries.** The seven records above, summarized with qwen3:4b, compared with
+the AMI human abstractive annotations (50 decisions and actions; two "NA" entries excluded).
+Items were judged by hand: a human item is covered when a Vani item states it correctly.
+
+| Variant | Human items covered | Vani items | Wrong | Wrong section | Dropped by quote check | Embedding recall | Time |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Baseline (12,000-character batches) | 17 of 50 | 61 | 5 | 18 | 39 | 0.653 | 1,098 s |
+| Sharper section definitions in the prompt | about 4 of 50 | 37 | — | — | 33 | 0.575 | 684 s |
+| 6,000-character batches | not scored (precision fell) | 120 | many | many | 51 | 0.660 | 1,817 s |
+
+The prompt variant made the model more selective, not more accurate, and the smaller batches
+produced raw transcript fragments and trivia as items; both were discarded. Embedding recall is
+the mean best cosine similarity (nomic-embed-text) of each human item to any Vani item; it
+moved little and is reported only as a secondary signal. ROUGE-L against the human abstracts
+was 0.07–0.13 for every variant.
+
+The largest measured loss was the quote check itself: 35% of proposed items were dropped. On the
+saved model responses, most failures were exact quotes cited to a neighbouring segment, or
+quotes of a sentence cut by a chunk boundary; a few dropped "um"/"uh". Validation now accepts a
+verbatim quote from the cited segment, one up to two places away, or across two adjacent
+segments, ignoring hesitations, and shows the transcript's own text. Replayed on the same
+responses, dropped items fell from 28 of 79 to 9 of 79 (12,000-character batches) and from 51
+of 180 to 28 of 180 (6,000-character batches). Of the 19 items recovered in the first set, about
+13 were substantive, including four decisions in the human annotations that the baseline lost
+(production cost 12.50 Euro, TV only, the basic button set, the jog dial); the rest were minor
+or duplicates. Reworded quotes are still rejected.
+
+**Limits.** A full seven-meeting rerun with the final validation did not complete: another
+process loaded qwen3:4b with a different context size at the same time, Ollama reloaded the
+model between requests, and requests hit Vani's 180-second timeout. The recovery figures above
+therefore come from replaying saved responses, not from a clean end-to-end run. Output also
+varies between runs at temperature 0 (the same meeting yielded 1 to 3 decisions across runs),
+so small differences between variants are not meaningful. The four-hour and joined 3.3-hour
+summary scale runs were not measured in this session. Hand scoring was done once by one
+reviewer. AMI meetings are role-played design meetings in English.
+
 ## Hardware checks — September 23, 2026
 
 MacBook Air (M4), macOS 26.6.2, v0.7.1 candidate. A temporary signed helper app ran Vani's
@@ -263,3 +357,28 @@ nothing for over 3 s (2.1 of 5.4 s kept); a default change silently stopped the 
 audio ended at 3.3 s). Limits: the aggregate input shares the built-in microphone's clock, so
 a true sample-rate mismatch between two physical microphones was not exercised; Bluetooth
 headsets, sleep during a meeting and multi-hour live calls were not tested on hardware.
+
+## Speech cleanup — September 23, 2026
+
+Smart Formatting's deletion-only cleanup (`SpeechTidier`) was chosen on DisfluencySpeech
+real audio: Parakeet Unified transcribed each recording, Smart Formatting and then the
+cleanup ran on the result, and word error is measured against the human fluent reference.
+The rules were frozen before the fresh set was scored, once. Lower is better.
+
+| Set | Items | Smart Formatting | With cleanup | Meant words removed | Negations lost | Words added |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| DisfluencySpeech held-out test | 250 | 11.0% | **7.4%** | 1.7 per 1k | 0 | 0 |
+| DisfluencySpeech train sample, untouched | 250 | 12.2% | **8.1%** | 1.0 per 1k | 0 | — |
+
+On LibriSpeech test-clean fluent read speech (300 utterances), the cleanup changed 0.3%
+of utterances. The rules ran in about 0.6 ms p50 per utterance in the Python reference.
+The Swift port matched that reference byte for byte on 1,825 inputs (Parakeet transcripts
+after Smart Formatting, LibriSpeech and synthetic dictation cases) and measured 0.17–0.18 ms
+p50 and 0.54–0.75 ms p99 per line over two release test builds on an Apple M4 (16 GB,
+macOS 26.6.2, Swift 6.1.2). It now differs on 9 of them only by keeping the comma after an
+opening word when it removes a filler ("So, um, what" becomes "So, what", not "So what").
+
+Rejected alternatives: a local LLM (qwen3 1.7B) reached 11.2%, altered 5.7% of items,
+added words in 2% and took about 1 s per utterance; a DistilBERT disfluency tagger reached
+7.5% but removed 17.7 meant words per 1k, lost negations and was trained on
+non-commercial data. These sets do not measure dictated lists or spoken commands.
