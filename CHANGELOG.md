@@ -2,6 +2,43 @@
 
 All notable changes follow semantic versioning.
 
+## 0.8.0 - 2026-09-23
+
+### Added
+
+- Smart Formatting tidies speech with fixed local rules that only delete words: fillers,
+  padding "like" and "you know", explicit self-corrections ("Monday, no wait, Tuesday"),
+  restarts and stumbled repetitions. It keeps interjections, emphasis, numbers and quoted
+  text and never adds punctuation. On real recordings through Parakeet Unified, word error
+  against human-cleaned transcripts fell from 11.0% to 7.4% (held out) and from 12.2% to
+  8.1% (a fresh set scored once), with no lost negations or added words and 0.3% of fluent
+  LibriSpeech utterances changed. Local language models were evaluated and rejected. See
+  [speech cleanup](docs/BENCHMARKS.md#speech-cleanup--september-23-2026).
+- Dictated lists with explicit cues ("first", "number one", "bullet point") become numbered
+  or bulleted lines.
+- Meetings last up to four hours. Vani warns when about 10 minutes of recording time or disk
+  space remain and stops cleanly, keeping everything, if the disk is nearly full.
+- A new Vani mark: a waveform that forms a V, in the app icon, menu bar and wordmark.
+- The recording indicator's bars follow your voice; Reduce Motion shows a still icon.
+
+### Changed
+
+- Long meeting summaries consolidate in layers, so four-hour transcripts stay within the
+  model's context.
+- A summary item's quote may cite a neighbouring segment or run across a chunk boundary;
+  it must still appear word for word in the transcript.
+
+### Fixed
+
+- Smart Formatting no longer removes "um" or "uh" inside quoted speech, and removing a
+  filler no longer leaves a stray comma ("It was, um, fine" becomes "It was fine").
+
+### Validation
+
+- Four-hour meeting soak with no lost audio; seven AMI Meeting Corpus meetings (200 min) at
+  21.0% WER through the meeting path. See
+  [four-hour meetings](docs/BENCHMARKS.md#four-hour-meetings-and-real-meetings--september-23-2026).
+
 ## 0.7.1 - 2026-09-23
 
 ### Fixed
