@@ -56,13 +56,7 @@ struct VaniApplication: App {
       MenuContentView()
         .environmentObject(coordinator)
     } label: {
-      switch coordinator.menuBarIcon {
-      case .mark(let opacity):
-        Image(nsImage: VaniMark.menuBarImage(opacity: opacity))
-          .accessibilityLabel("Vani")
-      case .symbol(let name):
-        Label("Vani", systemImage: name)
-      }
+      MenuBarLabel(mark: coordinator.menuBarMark)
     }
     .menuBarExtraStyle(.window)
 
@@ -72,6 +66,16 @@ struct VaniApplication: App {
           .keyboardShortcut(",", modifiers: .command)
       }
     }
+  }
+}
+
+/// Observes only the icon, so animation frames do not re-render the menu.
+private struct MenuBarLabel: View {
+  @ObservedObject var mark: MenuBarMark
+
+  var body: some View {
+    Image(nsImage: mark.image)
+      .accessibilityLabel(mark.accessibilityLabel)
   }
 }
 

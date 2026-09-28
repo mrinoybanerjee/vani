@@ -123,7 +123,7 @@ not an accuracy improvement across representative speakers and terms.
 | Metric | Target | Current published result |
 | --- | ---: | --- |
 | Cached-model fixture | Faster than real time | 1.391 s for 5.855 s audio |
-| Hotkey to capture p95 | < 75 ms | Pending instrumented dogfood run |
+| Hotkey to capture p95 | < 75 ms | Measured per take as `capture_start_latency`; percentiles pending a dogfood run |
 | Release to insertion p50 | < 200 ms | Pending instrumented dogfood run |
 | Release to insertion p95 | < 500 ms | Pending instrumented dogfood run |
 | Sequential reliability | 500 cycles | Passing in automated test |
@@ -133,6 +133,31 @@ not an accuracy improvement across representative speakers and terms.
 | 20-minute capture boundary | Bounded and transcribable | 0.251 s test; about 822 MiB command RSS |
 
 Unmeasured rows are release evidence gaps, not implied passes.
+
+## Start latency — September 27, 2026
+
+Until now the microphone started only after the 65 ms start chime and a further 20 ms, so
+at least 85 ms of every take was lost before `AVAudioEngine` even began starting. The
+chime now plays while the microphone starts. Each take records `capture_start_latency`:
+the time from the shortcut press to the first audio buffer that carries sound, from the
+buffer's host time. Filter Diagnostics by that code, or follow it live with:
+
+```bash
+log stream --predicate 'subsystem == "com.mrinoy.vani"' --info | grep capture_start_latency
+```
+
+Published reports put a fresh `AVAudioEngine` start at 170–185 ms on a built-in microphone
+and Bluetooth headsets at 1–2 s. Those are anecdotal, not Vani measurements; replace them
+with dogfood percentiles.
+
+The chime can now reach the recording. The opt-in `startChimeInTheRecordingDoesNotChangeTheWords`
+test mixes it into the 5.855-second fixture. On this M4 with Parakeet TDT v2, the chime at
+playback level at the start of the take left the transcript identical. At 4.5 times that
+level, or over the first word, the words were unchanged, but one word's capitalization
+flipped ("gospel" to "Gospel"). Quiet noise over the same 65 ms changed nothing. The chime
+alone produced no words. It does pass the silence check, so a take with only the chime ends
+as "No words recognized" rather than "No speech recorded". Parakeet Unified was not
+installed on the test machine and is not yet measured.
 
 ## Meeting append microbenchmark — September 12, 2026
 

@@ -15,6 +15,12 @@ final class OverlayController {
   private let panel: NSPanel
   private let announce: @MainActor (String) -> Void
   private var hideTask: Task<Void, Never>?
+  /// Set while the pill answers a key press whose recording has not started yet.
+  private var pendingStart: UInt64?
+  /// A state shown for a press but not yet announced to VoiceOver.
+  private var unannouncedState: OverlayState?
+  private var startGeneration: UInt64 = 0
+  private var visibilityGeneration: UInt64 = 0
 
   init(announce: @escaping @MainActor (String) -> Void = OverlayController.postAnnouncement) {
     self.announce = announce
@@ -48,12 +54,38 @@ final class OverlayController {
       guard handsFree != oldValue, state.isRecording, state != .recordingLimitWarning else {
         return
       }
-      show(handsFree ? .handsFree : .listening)
+      // During a pending start the session has not confirmed the recording yet.
+      show(handsFree ? .handsFree : .listening, announces: unannouncedState == nil)
     }
   }
 
-  func update(snapshot: SessionSnapshot, previousPhase: SessionPhase) {
+  /// Shows Listening the moment the shortcut is pressed, before the microphone has started;
+  /// the mark stays dimmed until audio arrives. VoiceOver hears it only once the session
+  /// confirms the recording. Returns a token for `abandonStart`.
+  func showStarting() -> UInt64 {
     hideTask?.cancel()
+    startGeneration &+= 1
+    pendingStart = startGeneration
+    show(handsFree ? .handsFree : .listening, announces: false)
+    return startGeneration
+  }
+
+  /// The press never became a recording, and the session published nothing (it was cancelled
+  /// or refused), so hide the pill it showed. With a token, only while that press still owns
+  /// the pill; without one, whichever start is pending.
+  func abandonStart(_ token: UInt64? = nil) {
+    guard let pendingStart, token == nil || token == pendingStart else { return }
+    self.pendingStart = nil
+    unannouncedState = nil
+    hide()
+  }
+
+  func update(snapshot: SessionSnapshot, previousPhase: SessionPhase) {
+    // A ready snapshot published while a press is starting (a history update, say) is not
+    // the outcome of that press and must not hide it.
+    if pendingStart != nil, snapshot.phase == .ready { return }
+    hideTask?.cancel()
+    pendingStart = nil
     switch snapshot.phase {
     case .listening:
       show(
@@ -87,13 +119,14 @@ final class OverlayController {
     case .setup, .preparing, .ready, .disabled:
       // A recording that ends without transcription (cancelled, too short, interrupted) would
       // otherwise vanish silently for VoiceOver users.
-      if state.isRecording { announce("Recording stopped") }
+      if state.isRecording, unannouncedState == nil { announce("Recording stopped") }
       hide()
     }
   }
 
   func showLastTranscriptCopied() {
     hideTask?.cancel()
+    pendingStart = nil
     show(.lastTranscriptCopied)
     hideTask = Task { [weak self] in
       try? await Task.sleep(for: .milliseconds(900))
@@ -102,21 +135,54 @@ final class OverlayController {
     }
   }
 
-  private func show(_ newState: OverlayState) {
-    if newState != state {
-      if newState.isRecording, !state.isRecording { listeningStartedAt = Date() }
+  private func show(_ newState: OverlayState, announces: Bool = true) {
+    if newState.isRecording, !state.isRecording { listeningStartedAt = Date() }
+    if announces, newState != state || newState == unannouncedState {
       // Announce only the state title; transcript text is never spoken from the overlay.
       if let announcement = newState.announcement { announce(announcement) }
     }
+    unannouncedState = announces ? nil : newState
     state = newState
     resizePanel(for: newState)
     positionPanel()
-    panel.orderFrontRegardless()
+    present()
   }
 
   private func hide() {
     state = .hidden
-    panel.orderOut(nil)
+    unannouncedState = nil
+    dismiss()
+  }
+
+  /// Fades in quickly. A pill that is fading out comes back instead: `alphaValue` does not
+  /// report a running fade's visible opacity, so the fade-in always runs, and the new
+  /// generation stops the fade-out from ordering the panel out.
+  private func present() {
+    visibilityGeneration &+= 1
+    if !panel.isVisible { panel.alphaValue = 0 }
+    panel.orderFrontRegardless()
+    NSAnimationContext.runAnimationGroup { context in
+      context.duration = 0.1
+      context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+      panel.animator().alphaValue = 1
+    }
+  }
+
+  private func dismiss() {
+    guard panel.isVisible else { return }
+    visibilityGeneration &+= 1
+    let generation = visibilityGeneration
+    let panel = panel
+    NSAnimationContext.runAnimationGroup { context in
+      context.duration = 0.16
+      context.timingFunction = CAMediaTimingFunction(name: .easeIn)
+      panel.animator().alphaValue = 0
+    } completionHandler: { [weak self] in
+      MainActor.assumeIsolated {
+        guard let self, self.visibilityGeneration == generation else { return }
+        panel.orderOut(nil)
+      }
+    }
   }
 
   /// Fits one line when possible, then wraps to at most two lines at the maximum width.
@@ -229,9 +295,6 @@ struct OverlayView: View {
       if fillsWidth { Spacer(minLength: 4) } else { Color.clear.frame(width: 4, height: 0) }
       if state.isRecording {
         RecordingIndicator(startedAt: listeningStartedAt)
-      } else if state == .processing {
-        ProgressView()
-          .controlSize(.small)
       }
     }
     .padding(.horizontal, 16)
@@ -246,17 +309,33 @@ struct OverlayView: View {
     .accessibilityLabel(state.label)
   }
 
+  /// Listening and transcribing show the live mark. One view spans both, so its motion carries
+  /// from the voice into the ripple; a new recording starts it fresh.
+  private var markActivity: VaniMarkMotion.Activity? {
+    switch state {
+    case .listening, .handsFree: .listening
+    case .processing: .transcribing
+    default: nil
+    }
+  }
+
   @ViewBuilder
   private var icon: some View {
+    if let markActivity {
+      LiveVaniMark(activity: markActivity, level: level)
+        .id(listeningStartedAt)
+    } else {
+      symbol
+    }
+  }
+
+  @ViewBuilder
+  private var symbol: some View {
     switch state {
-    case .hidden:
+    case .hidden, .listening, .handsFree, .processing:
       EmptyView()
-    case .listening, .handsFree:
-      ListeningLevelIcon(level: level)
     case .recordingLimitWarning:
       Image(systemName: "hourglass.circle.fill").foregroundStyle(VaniTheme.accent)
-    case .processing:
-      Image(systemName: "text.bubble.fill").foregroundStyle(.secondary)
     case .success:
       Image(systemName: "checkmark.circle.fill").foregroundStyle(VaniTheme.accent)
     case .captureTruncated:
@@ -269,8 +348,8 @@ struct OverlayView: View {
   }
 }
 
-/// A recording indicator, not a level meter: a pulsing dot and the true elapsed time.
-/// Elapsed recording time. The listening icon shows activity, so no second animation is needed.
+/// Time since the shortcut was pressed; the recording limit counts from the same moment, give
+/// or take the focus check. The live mark shows activity, so no second animation is needed.
 private struct RecordingIndicator: View {
   let startedAt: Date
 
@@ -289,57 +368,12 @@ private struct RecordingIndicator: View {
   }
 }
 
-/// The listening icon: four bars inside the accent circle that follow the real microphone
-/// level, so it moves when Vani hears speech and rests when the room is quiet. Reduce Motion
-/// shows the static waveform icon instead.
-struct ListeningLevelIcon: View {
-  let level: @Sendable () -> Float
-  @Environment(\.accessibilityReduceMotion) private var reduceMotion
-  @State private var meter = LevelMeter()
-
-  var body: some View {
-    if reduceMotion {
-      Image(systemName: "waveform.circle.fill").foregroundStyle(VaniTheme.accent)
-    } else {
-      TimelineView(.animation(minimumInterval: 1.0 / 30)) { context in
-        let heights = meter.barHeights(
-          level: level(), time: context.date.timeIntervalSinceReferenceDate)
-        ZStack {
-          Circle().fill(VaniTheme.accent)
-          HStack(spacing: 2) {
-            ForEach(heights.indices, id: \.self) { index in
-              Capsule().fill(VaniTheme.paper).frame(width: 2.5, height: heights[index])
-            }
-          }
-        }
-        .frame(width: 22, height: 22)
-      }
-    }
-  }
-}
-
-/// Converts RMS readings into smoothed bar heights: fast attack, slow release, and a small
-/// per-bar variation scaled by loudness, so silence renders as still, short bars.
-final class LevelMeter {
-  static let barWeights: [Double] = [0.55, 1.0, 0.8, 0.45]
-  static let minimumHeight: CGFloat = 3
-  static let maximumHeight: CGFloat = 12
-  private(set) var smoothed: Double = 0
-
+/// Maps microphone RMS onto the 0...1 loudness that drives the live mark.
+enum LevelMeter {
   /// Speech sits roughly between -55 dBFS (quiet) and -15 dBFS (loud) at a laptop microphone.
   static func normalized(_ rms: Float) -> Double {
     guard rms.isFinite, rms > 0 else { return 0 }
     let decibels = 20 * log10(Double(rms))
     return min(1, max(0, (decibels + 55) / 40))
-  }
-
-  func barHeights(level rms: Float, time: TimeInterval) -> [CGFloat] {
-    let target = Self.normalized(rms)
-    smoothed += (target - smoothed) * (target > smoothed ? 0.6 : 0.15)
-    return Self.barWeights.enumerated().map { index, weight in
-      let variation = 0.85 + 0.15 * sin(time * (6 + Double(index) * 1.7) + Double(index))
-      let value = min(1, smoothed * weight * variation)
-      return Self.minimumHeight + CGFloat(value) * (Self.maximumHeight - Self.minimumHeight)
-    }
   }
 }

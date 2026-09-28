@@ -41,6 +41,14 @@ and termination have explicit transitions.
 
 ## Audio path
 
+A shortcut press is answered on the main actor before anything slow runs: the start chime
+plays and the recording pill and menu bar mark appear at once. The microphone starts in
+parallel instead of after the chime. Before capture starts, the session still resolves the
+focused element and refuses a secure text field. Each take records `capture_start_latency`,
+the time from the press to the host time of the first buffer that carries sound (devices can
+deliver digital silence while they warm up); speech in that gap is not in the recording. The
+value appears in Diagnostics and in the unified log.
+
 `AVAudioEngineCapture` installs one microphone tap. The tap copies samples into a
 duration-bounded, paged buffer protected by `OSAllocatedUnfairLock`. Three minutes of
 pages are reserved before capture; one additional minute is reserved off the real-time

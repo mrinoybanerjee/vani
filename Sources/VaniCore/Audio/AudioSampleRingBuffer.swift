@@ -30,6 +30,9 @@ final class AudioSampleRingBuffer: Sendable {
     var generation: UInt64 = 0
     /// RMS of the most recent callback, for the recording level indicator.
     var recentLevel: Float = 0
+    /// Host time of the segment's first buffer that carries sound; zero until then. Devices
+    /// can deliver digital silence while they warm up, and speech then is not captured.
+    var firstHostTime: UInt64 = 0
   }
 
   private struct FrozenState: Sendable {
@@ -73,6 +76,7 @@ final class AudioSampleRingBuffer: Sendable {
       state.chunkCapacity = chunkCapacity
       state.sampleRate = sampleRate
       state.overflowed = false
+      state.firstHostTime = 0
       return state.generation
     }
   }
@@ -107,12 +111,13 @@ final class AudioSampleRingBuffer: Sendable {
     }
   }
 
-  func append(_ buffer: AVAudioPCMBuffer) {
+  func append(_ buffer: AVAudioPCMBuffer, hostTime: UInt64 = 0) {
     guard let channels = buffer.floatChannelData else { return }
     append(
       channels: channels,
       channelCount: Int(buffer.format.channelCount),
-      frameCount: Int(buffer.frameLength)
+      frameCount: Int(buffer.frameLength),
+      hostTime: hostTime
     )
   }
 
@@ -124,19 +129,26 @@ final class AudioSampleRingBuffer: Sendable {
   func append(
     channels: UnsafePointer<UnsafeMutablePointer<Float>>,
     channelCount: Int,
-    frameCount incomingCount: Int
+    frameCount incomingCount: Int,
+    hostTime: UInt64 = 0
   ) {
     let channelCount = min(max(channelCount, 1), Self.maximumMixedChannels)
     guard incomingCount > 0 else { return }
-    // One vDSP pass over the first channel: no allocation, safe on the audio thread.
-    var measured: Float = 0
-    vDSP_rmsqv(channels[0], 1, &measured, vDSP_Length(incomingCount))
-    let level = measured
+    // The loudest of the mixed channels, since the voice can be on any input. One vDSP pass
+    // per channel, with no allocation, so this is safe on the audio thread.
+    var loudest: Float = 0
+    for index in 0..<channelCount {
+      var measured: Float = 0
+      vDSP_rmsqv(channels[index], 1, &measured, vDSP_Length(incomingCount))
+      loudest = max(loudest, measured)
+    }
+    let level = loudest
     let channelsAddress = UInt(bitPattern: channels)
     let channelAddress = UInt(bitPattern: channels[0])
 
     state.withLock { state in
       state.recentLevel = level
+      if state.firstHostTime == 0, level > 0 { state.firstHostTime = hostTime }
       let writableCount = min(incomingCount, state.reservedCapacity - state.count)
       guard writableCount > 0 else {
         state.overflowed = true
@@ -215,6 +227,12 @@ final class AudioSampleRingBuffer: Sendable {
   /// Samples captured in the current segment.
   var capturedCount: Int { state.withLock { $0.count } }
 
+  /// Host time of the current segment's first buffer with sound, or nil before one arrives.
+  var firstHostTime: UInt64? {
+    let hostTime = state.withLock { $0.firstHostTime }
+    return hostTime == 0 ? nil : hostTime
+  }
+
   func drain() -> Snapshot {
     let frozen = state.withLock { state in
       let frozen = FrozenState(
@@ -232,6 +250,7 @@ final class AudioSampleRingBuffer: Sendable {
       state.sampleRate = 0
       state.overflowed = false
       state.recentLevel = 0
+      state.firstHostTime = 0
       return frozen
     }
     return Self.flatten(frozen)
@@ -248,6 +267,7 @@ final class AudioSampleRingBuffer: Sendable {
       state.chunkCapacity = 0
       state.sampleRate = 0
       state.overflowed = false
+      state.firstHostTime = 0
     }
   }
 

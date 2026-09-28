@@ -17,6 +17,12 @@ public enum VaniLog {
     logger.info("event=\(code, privacy: .public)")
   }
 
+  /// A content-free duration, so timings can be followed with `log stream`.
+  public static func timing(category: DiagnosticCategory, code: String, milliseconds: Int) {
+    let logger = logger(for: category)
+    logger.info("event=\(code, privacy: .public) ms=\(milliseconds, privacy: .public)")
+  }
+
   public static func failure(_ failure: VaniFailure, phase: SessionPhase) {
     let logger = logger(for: category(for: failure))
     logger.error(

@@ -27,6 +27,59 @@ func bundledEnglishFixtureTranscribesLocally() async throws {
   #expect(normalized.contains("mister quilter"))
 }
 
+/// The start chime now plays while the microphone starts instead of before it, so part of it
+/// can reach the recording. Mixed in at its playback level and 4.5 times louder, at the start
+/// of the take and over the first word, it must not add, drop or change a word; alone, it
+/// must not produce any. (Measured
+/// with Parakeet TDT v2 on 2026-09-27: at playback level at the start the transcript was
+/// identical; louder or over the first word, one word's capitalization could change.)
+@Test(
+  .enabled(
+    if: ProcessInfo.processInfo.environment["VANI_RUN_MODEL_TESTS"] == "1",
+    "Requires the downloaded local speech model"
+  )
+)
+func startChimeInTheRecordingDoesNotChangeTheWords() async throws {
+  let fixture = try #require(
+    Bundle.module.url(
+      forResource: "librispeech-1272-128104-0000",
+      withExtension: "wav",
+      subdirectory: "Fixtures"
+    )
+  )
+  let recognizer = FluidAudioSpeechRecognizer()
+  try await recognizer.prepare { _ in }
+  let speech = try AudioFileLoader.load(fixture).samples
+  func words(_ text: String) -> [String] {
+    text.lowercased().split { !$0.isLetter && !$0.isNumber }.map(String.init)
+  }
+  let baseline = try await recognizer.transcribe(CapturedAudio(samples: speech)).text
+
+  let wav = DictationCueWaveform.wavData(for: .started)
+  let pcm = wav.dropFirst(44).withUnsafeBytes { Array($0.bindMemory(to: Int16.self)) }
+  let chime = try SampleRateConverter.convert(pcm.map { Float($0) / 32_768 }, from: 22_050)
+  let onset = try #require(speech.firstIndex { abs($0) > 0.02 })
+
+  // A take with no speech but the chime must not produce words. (The chime passes the
+  // silence check, so such a take ends as "No words recognized", not "No speech recorded".)
+  for gain in [0.22, 1.0] as [Float] {
+    var silent = [Float](repeating: 0, count: 16_000)
+    for (index, sample) in chime.enumerated() { silent[index] = sample * gain }
+    let text = try await recognizer.transcribe(CapturedAudio(samples: silent)).text
+    #expect(words(text).isEmpty)
+  }
+
+  for (gain, offset) in [(0.22, 0), (1.0, 0), (0.22, onset), (1.0, onset)] as [(Float, Int)] {
+    var mixed = speech
+    for (index, sample) in chime.enumerated() where offset + index < mixed.count {
+      mixed[offset + index] += sample * gain
+    }
+    let text = try await recognizer.transcribe(CapturedAudio(samples: mixed)).text
+    print("VANI_CHIME gain=\(gain) offset=\(offset) identical=\(text == baseline)")
+    #expect(words(text) == words(baseline))
+  }
+}
+
 @Test(
   .enabled(
     if: ProcessInfo.processInfo.environment["VANI_RUN_PERSONALIZATION_MODEL_TESTS"] == "1",

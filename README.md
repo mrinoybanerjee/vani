@@ -24,7 +24,8 @@ Apple notarization.
 - Hold Fn / Globe to dictate by default; Left Control, Right Option, and Right Command are available
 - Double-tap the shortcut for hands-free recording; press it again to insert
 - Escape (or the menu's Cancel) discards a recording without inserting anything
-- Short local sound cues confirm when recording actually starts and stops
+- The shortcut is answered at once with a short sound and the recording pill; the Vani mark
+  in the pill wakes when the microphone is live and moves with your voice
 - One-time English NVIDIA Parakeet Unified model download (583 MiB)
 - Exact model-revision manifest with per-file SHA-256 verification
 - Local microphone capture and Core ML transcription
