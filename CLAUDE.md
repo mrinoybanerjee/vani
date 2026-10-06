@@ -13,6 +13,6 @@ When the request matches an installed gstack skill, use it.
 - Full plan pipeline: `autoplan`
 - Bugs: `investigate`
 - QA: `qa` or `qa-only`
-- Review: `review`
+- Review: `/cr` (Codex review, per the global profile)
 - Release: `ship`
 - GBrain: `setup-gbrain` and `sync-gbrain`
