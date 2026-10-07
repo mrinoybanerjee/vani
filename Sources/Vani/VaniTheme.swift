@@ -125,6 +125,10 @@ struct VaniMark: Shape {
   static let designSize = CGSize(width: 5 * 56 + 4 * 36, height: 400)
   static var aspectRatio: CGFloat { designSize.width / designSize.height }
 
+  /// Extra length per bar, in design units, drawn below the rest mark. The live mark uses it to
+  /// follow the voice; the shared top line never moves. Empty draws the mark itself.
+  var growth: [CGFloat] = []
+
   func path(in rect: CGRect) -> Path {
     let scale = min(rect.width / Self.designSize.width, rect.height / Self.designSize.height)
     let origin = CGPoint(
@@ -132,30 +136,172 @@ struct VaniMark: Shape {
       y: rect.midY - Self.designSize.height * scale / 2)
     var path = Path()
     for (index, length) in Self.barLengths.enumerated() {
+      let extra = index < growth.count ? max(0, growth[index]) : 0
       let bar = CGRect(
         x: origin.x + CGFloat(index) * (Self.barWidth + Self.barSpacing) * scale,
-        y: origin.y, width: Self.barWidth * scale, height: length * scale)
+        y: origin.y, width: Self.barWidth * scale, height: (length + extra) * scale)
       path.addRoundedRect(
         in: bar, cornerSize: CGSize(width: bar.width / 2, height: bar.width / 2))
     }
     return path
   }
 
+  /// How the menu bar draws the mark.
+  enum MenuBarStyle: Equatable {
+    /// The mark alone: ready, or dimmed while not ready.
+    case mark
+    /// The mark cut out of a rounded tile, echoing the app icon: recording or transcribing.
+    /// Its bars can grow inside the tile.
+    case tile
+    /// The mark with a dot: something needs attention.
+    case badged
+  }
+
   /// A monochrome template for the menu bar, tinted by macOS for light and dark menus.
-  @MainActor static func menuBarImage(opacity: CGFloat = 1) -> NSImage {
+  @MainActor static func menuBarImage(
+    style: MenuBarStyle = .mark, opacity: CGFloat = 1, growth: [CGFloat] = []
+  ) -> NSImage {
     let size = NSSize(width: 18, height: 18)
     let image = NSImage(size: size, flipped: true) { bounds in
-      let markHeight: CGFloat = 13
-      let rect = CGRect(
-        x: (bounds.width - markHeight * aspectRatio) / 2, y: (bounds.height - markHeight) / 2,
-        width: markHeight * aspectRatio, height: markHeight)
       NSColor.black.withAlphaComponent(opacity).setFill()
-      NSBezierPath(cgPath: VaniMark().path(in: rect).cgPath).fill()
+      switch style {
+      case .mark, .badged:
+        let markHeight: CGFloat = 13
+        let rect = CGRect(
+          x: (bounds.width - markHeight * aspectRatio) / 2, y: (bounds.height - markHeight) / 2,
+          width: markHeight * aspectRatio, height: markHeight)
+        let mark = NSBezierPath(cgPath: VaniMark().path(in: rect).cgPath)
+        guard style == .badged else {
+          mark.fill()
+          return true
+        }
+        // Clear a ring around the dot so it reads apart from the bars.
+        let dot = CGRect(x: bounds.maxX - 6, y: bounds.maxY - 6, width: 6, height: 6)
+        NSGraphicsContext.saveGraphicsState()
+        let clip = NSBezierPath(rect: bounds)
+        clip.appendOval(in: dot.insetBy(dx: -1.5, dy: -1.5))
+        clip.windingRule = .evenOdd
+        clip.addClip()
+        mark.fill()
+        NSGraphicsContext.restoreGraphicsState()
+        NSBezierPath(ovalIn: dot).fill()
+      case .tile:
+        let tileRect = bounds.insetBy(dx: 0.5, dy: 1)
+        let markHeight: CGFloat = 9
+        // The mark sits high in the tile, leaving room for its bars to grow with the voice.
+        let rect = CGRect(
+          x: (bounds.width - markHeight * aspectRatio) / 2, y: 4,
+          width: markHeight * aspectRatio, height: markHeight)
+        NSGraphicsContext.saveGraphicsState()
+        NSBezierPath(roundedRect: tileRect, xRadius: 4.5, yRadius: 4.5).addClip()
+        let tile = NSBezierPath(rect: tileRect)
+        tile.append(NSBezierPath(cgPath: VaniMark(growth: growth).path(in: rect).cgPath))
+        tile.windingRule = .evenOdd
+        tile.fill()
+        NSGraphicsContext.restoreGraphicsState()
+      }
       return true
     }
     image.isTemplate = true
     image.accessibilityDescription = "Vani"
     return image
+  }
+}
+
+/// Frame-by-frame motion for the live mark, shared by the recording pill and the menu bar.
+/// Listening: the mark stays dimmed until the microphone delivers its first audio, then its bars
+/// lengthen with the voice, the centre leading, and rest as the exact mark in silence.
+/// Transcribing: a slow ripple crosses the bars. Smoothing is time-based, so any frame rate
+/// produces the same motion; tests drive it with a fake clock.
+final class VaniMarkMotion {
+  enum Activity: Equatable {
+    case listening
+    case transcribing
+  }
+
+  struct Frame: Equatable {
+    var growth: [CGFloat]
+    var opacity: Double
+  }
+
+  /// Growth at full voice, in mark design units; the centre bar is 400 long.
+  static let maximumGrowth: CGFloat = 150
+  /// Opacity while the microphone is starting.
+  static let wakingOpacity = 0.5
+  static let barWeights: [Double] = [0.7, 0.9, 1.0, 0.9, 0.7]
+  static let rippleRange: ClosedRange<Double> = 0.05...0.4
+  static let ripplePeriod: TimeInterval = 1.2
+
+  private var growth: [Double] = Array(repeating: 0, count: 5)
+  private var loudness: Double = 0
+  private var opacity = wakingOpacity
+  private var heardAudio = false
+  private var lastTime: TimeInterval?
+
+  func advance(activity: Activity, level rms: Float, time: TimeInterval) -> Frame {
+    let elapsed = min(max(time - (lastTime ?? time - 1.0 / 60), 0), 0.25)
+    lastTime = time
+    func approach(_ value: inout Double, _ target: Double, timeConstant: Double) {
+      value += (target - value) * (1 - exp(-elapsed / timeConstant))
+    }
+
+    if activity == .transcribing || rms > 0 { heardAudio = true }
+    approach(&opacity, heardAudio ? 1 : Self.wakingOpacity, timeConstant: 0.06)
+
+    let targets: [Double]
+    switch activity {
+    case .listening:
+      let target = LevelMeter.normalized(rms)
+      // Fast attack, slow release: syllables register at once and decay gently.
+      approach(&loudness, target, timeConstant: target > loudness ? 0.03 : 0.16)
+      targets = Self.barWeights.enumerated().map { index, weight in
+        let bar = Double(index)
+        let variation = 0.8 + 0.2 * sin(time * (5.5 + bar * 1.6) + bar * 1.3)
+        return loudness * weight * variation
+      }
+    case .transcribing:
+      loudness = 0
+      let phase = time * 2 * .pi / Self.ripplePeriod
+      let low = Self.rippleRange.lowerBound
+      let span = Self.rippleRange.upperBound - low
+      targets = (0..<5).map { index in
+        low + span * (0.5 + 0.5 * sin(phase - Double(index) * 0.9))
+      }
+    }
+    for index in growth.indices {
+      approach(&growth[index], targets[index], timeConstant: 0.05)
+    }
+    return Frame(
+      growth: growth.map { CGFloat($0) * Self.maximumGrowth }, opacity: min(1, opacity))
+  }
+}
+
+/// The mark as the live indicator in the recording pill. Reduce Motion shows the still mark.
+struct LiveVaniMark: View {
+  let activity: VaniMarkMotion.Activity
+  /// Microphone loudness (RMS) while listening.
+  var level: @Sendable () -> Float = { 0 }
+  var height: CGFloat = 18
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
+  @State private var motion = VaniMarkMotion()
+
+  var body: some View {
+    if reduceMotion {
+      mark(VaniMark())
+    } else {
+      TimelineView(.animation(minimumInterval: 1.0 / 30)) { context in
+        let frame = motion.advance(
+          activity: activity, level: activity == .listening ? level() : 0,
+          time: context.date.timeIntervalSinceReferenceDate)
+        mark(VaniMark(growth: frame.growth)).opacity(frame.opacity)
+      }
+    }
+  }
+
+  /// Growth draws below the frame, so the rest mark stays centred beside the label.
+  private func mark(_ shape: VaniMark) -> some View {
+    shape.fill(VaniTheme.accent)
+      .frame(width: height * VaniMark.aspectRatio, height: height)
   }
 }
 

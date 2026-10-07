@@ -39,6 +39,8 @@ public actor DictationSession {
   private var didUnexpectedlyTruncateCurrentAudio = false
   private var historyRevision: UInt64 = 0
   private var interruptionHandlerInstalled = false
+  /// When the user asked for the current take, in `DispatchTime` uptime nanoseconds.
+  private var captureRequestedAt: UInt64?
 
   public init(
     audioCapture: any AudioCapturing,
@@ -161,12 +163,17 @@ public actor DictationSession {
     }
   }
 
-  public func beginDictation() async {
+  /// Starts a take. `requestedAt` is when the shortcut was pressed, in `DispatchTime` uptime
+  /// nanoseconds; with it the session records how long the microphone took to deliver audio.
+  /// Returns true once the recording has started, even if a queued release already ended it,
+  /// and false if the start was refused, cancelled or failed.
+  @discardableResult
+  public func beginDictation(requestedAt: UInt64? = nil) async -> Bool {
     // Paste Last shares the ready phase across suspensions; starting now would clear
     // the transcript it is about to insert.
     guard machine.phase == .ready, !isStartingCapture, !isPastingLastTranscript else {
       await recordIgnored("capture_start", phase: machine.phase)
-      return
+      return false
     }
     isStartingCapture = true
     shouldStopAfterCaptureStarts = false
@@ -182,16 +189,17 @@ public actor DictationSession {
     currentTarget = await focusProvider.currentTarget()
     guard machine.phase == .ready else {
       await recordIgnored("capture_start_cancelled", phase: machine.phase)
-      return
+      return false
     }
     guard currentTarget?.isSecureTextField != true else {
       await fail(.secureTextField)
-      return
+      return false
     }
     await recovery.clear()
     failure = nil
     insertionFeedback = nil
     didUnexpectedlyTruncateCurrentAudio = false
+    captureRequestedAt = requestedAt
     if !interruptionHandlerInstalled {
       interruptionHandlerInstalled = true
       await audioCapture.setInterruptionHandler { [weak self] in
@@ -206,10 +214,10 @@ public actor DictationSession {
         await audioCapture.cancel()
         currentTarget = nil
         await recordIgnored("capture_start_cancelled", phase: machine.phase)
-        return
+        return false
       }
       try await transition(.captureStarted)
-      guard machine.phase == .listening else { return }
+      guard machine.phase == .listening else { return true }
       if settings.personalizationEnabled, !learnedCorrections.isEmpty {
         let recognizer = speechRecognizer
         Task(priority: .userInitiated) { await recognizer.prewarmPersonalization() }
@@ -220,9 +228,12 @@ public actor DictationSession {
       } else {
         startRecordingLimitTimer(startedAt: captureStartedAt)
       }
+      return true
     } catch {
-      guard machine.phase != .disabled else { return }
+      // Nothing after the captureStarted transition throws, so the recording never began.
+      guard machine.phase != .disabled else { return false }
       await fail(map(error, fallback: .audioCaptureFailed))
+      return false
     }
   }
 
@@ -277,6 +288,7 @@ public actor DictationSession {
       let audio = try await audioCapture.stop()
       guard machine.phase == .transcribing else { return }
       await publishTransition(.captureStopped)
+      await recordCaptureStartLatency()
       if automaticallyStopped {
         await diagnostics.record(
           DiagnosticEvent(
@@ -937,6 +949,24 @@ public actor DictationSession {
       guard machine.phase != .disabled else { return }
       await fail(map(error, fallback: .audioCaptureFailed))
     }
+  }
+
+  /// Records the gap between the key press and the first audio the microphone delivered with
+  /// sound in it: speech in that gap is not in the recording. Metadata only.
+  private func recordCaptureStartLatency() async {
+    guard let requestedAt = captureRequestedAt else { return }
+    captureRequestedAt = nil
+    guard let firstAudio = await audioCapture.firstAudioUptimeNanoseconds() else { return }
+    let milliseconds = firstAudio > requestedAt ? Int((firstAudio - requestedAt) / 1_000_000) : 0
+    VaniLog.timing(category: .capture, code: "capture_start_latency", milliseconds: milliseconds)
+    await diagnostics.record(
+      DiagnosticEvent(
+        category: .capture,
+        code: "capture_start_latency",
+        phase: machine.phase,
+        durationMilliseconds: milliseconds
+      )
+    )
   }
 
   private func recordCaptureTruncationIfNeeded(_ audio: CapturedAudio) async {

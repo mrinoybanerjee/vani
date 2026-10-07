@@ -39,6 +39,7 @@ final class AppCoordinator: ObservableObject {
   private let session: DictationSession
   private let hotkeyMonitor = GlobalHotkeyMonitor()
   private let overlay = OverlayController()
+  let menuBarMark = MenuBarMark()
   private let cuePlayer = DictationCuePlayer()
   private let teachWindowController = TeachWindowController()
   private var notificationTokens: [NSObjectProtocol] = []
@@ -79,28 +80,12 @@ final class AppCoordinator: ObservableObject {
     )
     let levelSource = session
     overlay.level = { levelSource.currentInputLevel() }
+    menuBarMark.level = { levelSource.currentInputLevel() }
     if startAutomatically {
       AppDelegate.coordinator = self
       Task { [weak self] in
         await self?.start()
       }
-    }
-  }
-
-  enum MenuBarIcon: Equatable {
-    /// The Vani mark; dimmed until dictation is ready.
-    case mark(opacity: CGFloat)
-    case symbol(String)
-  }
-
-  /// Idle states show the Vani mark; active and error states use explicit symbols.
-  var menuBarIcon: MenuBarIcon {
-    switch snapshot.phase {
-    case .ready: .mark(opacity: 1)
-    case .setup, .disabled: .mark(opacity: 0.45)
-    case .listening: .symbol("waveform.circle.fill")
-    case .transcribing, .inserting, .preparing: .symbol("waveform.badge.magnifyingglass")
-    case .recoverableError: .symbol("exclamationmark.circle.fill")
     }
   }
 
@@ -744,32 +729,36 @@ final class AppCoordinator: ObservableObject {
 
   private func beginDictation() {
     guard canDictate, captureStartTask == nil else { return }
+    let requestedAt = DispatchTime.now().uptimeNanoseconds
     captureStartGeneration &+= 1
     let generation = captureStartGeneration
+    // Answer the key at once, and start the microphone in parallel rather than after the
+    // chime: waiting for the chime cost the first word. A cold microphone usually takes
+    // longer to start than the 65 ms chime lasts, so little of it reaches the recording.
+    startCueWasPreplayed = settings.soundFeedbackEnabled
+    if startCueWasPreplayed { cuePlayer.play(.started) }
+    let overlayStart = overlay.showStarting()
     captureStartTask = Task { [weak self] in
       guard let self else { return }
-      if settings.soundFeedbackEnabled {
-        startCueWasPreplayed = true
-        cuePlayer.play(.started)
-        try? await Task.sleep(
-          for: DictationCueWaveform.duration(for: .started) + .milliseconds(20)
-        )
-        guard !Task.isCancelled, generation == captureStartGeneration, canDictate else {
-          startCueWasPreplayed = false
-          captureStartTask = nil
-          return
-        }
-      }
-      await session.beginDictation()
-      if snapshot.phase != .listening {
-        startCueWasPreplayed = false
+      var started = false
+      // A release or Escape may already have ended this press.
+      if !Task.isCancelled, generation == captureStartGeneration {
+        started = await session.beginDictation(requestedAt: requestedAt)
       }
       if generation == captureStartGeneration {
         captureStartTask = nil
       }
-      updateRecordingActive()
+      if !started {
+        // A start that never became a recording may publish nothing, so undo what the press
+        // showed. A later press owns the chime while its own start is pending.
+        overlay.abandonStart(overlayStart)
+        if captureStartTask == nil { startCueWasPreplayed = false }
+      }
+      // A started take's listening snapshot can arrive after this (the session drops a publish
+      // that a newer one supersedes); applying it updates the indicators.
+      if !started || snapshot.phase != .ready { updateRecordingIndicators() }
     }
-    updateRecordingActive()
+    updateRecordingIndicators()
   }
 
   private var recordingInProgress: Bool {
@@ -855,6 +844,8 @@ final class AppCoordinator: ObservableObject {
     startTask?.cancel()
     // A new press may start immediately; the session rejects it until this start settles.
     captureStartTask = nil
+    if startTask != nil { overlay.abandonStart() }
+    updateRecordingIndicators()
     VaniLog.event(category: .capture, code: "capture_cancel_\(reason)")
     Task { [weak self] in
       guard let self else { return }
@@ -863,7 +854,7 @@ final class AppCoordinator: ObservableObject {
       await session.cancelDictation()
       await startTask?.value
       await session.cancelDictation()
-      updateRecordingActive()
+      updateRecordingIndicators()
     }
   }
 
@@ -882,13 +873,17 @@ final class AppCoordinator: ObservableObject {
         captureStartTask = nil
       }
       await session.endDictation()
-      updateRecordingActive()
+      updateRecordingIndicators()
     }
   }
 
-  private func updateRecordingActive() {
+  /// Keeps Escape forwarding and the menu bar mark in step with the recording. While a press
+  /// is starting the session is still ready, but the mark already shows listening.
+  private func updateRecordingIndicators() {
     let active = recordingInProgress
     hotkeyMonitor.recordingActive.withLock { $0 = active }
+    let starting = captureStartTask != nil && snapshot.phase == .ready
+    menuBarMark.setMode(starting ? .listening : MenuBarMark.Mode(phase: snapshot.phase))
   }
 
   private func performSessionOperation(
@@ -910,7 +905,7 @@ final class AppCoordinator: ObservableObject {
     let previous = snapshot.phase
     let previousHistoryRevision = snapshot.historyRevision
     snapshot = newSnapshot
-    updateRecordingActive()
+    updateRecordingIndicators()
     if previous == .listening, newSnapshot.phase != .listening, captureStartTask == nil {
       // Limit, interruption or failure can end a locked recording without a key press.
       if holdGesture.state != .idle, !holdGesture.isHolding { resetHoldGesture() }

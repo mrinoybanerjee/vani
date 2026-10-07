@@ -213,3 +213,25 @@ func theRingBufferReportsTheLatestCallbackLevelAndResetsWhenDrained() throws {
   _ = ringBuffer.drain()
   #expect(ringBuffer.recentLevel == 0)
 }
+
+@Test
+func theRingBufferKeepsWhenEachSegmentFirstCarriedSound() throws {
+  let ringBuffer = AudioSampleRingBuffer()
+  ringBuffer.reset(capacity: 16, sampleRate: 48_000)
+  #expect(ringBuffer.firstHostTime == nil)
+
+  // Digital silence while a device warms up is not the start of audio.
+  ringBuffer.append(try audioBuffer(samples: [0, 0]), hostTime: 500)
+  #expect(ringBuffer.firstHostTime == nil)
+  ringBuffer.append(try audioBuffer(samples: [0.1, 0.2]), hostTime: 1_000)
+  ringBuffer.append(try audioBuffer(samples: [0.3]), hostTime: 2_000)
+  #expect(ringBuffer.firstHostTime == 1_000)
+
+  _ = ringBuffer.drain()
+  #expect(ringBuffer.firstHostTime == nil)
+  ringBuffer.reset(capacity: 16, sampleRate: 48_000)
+  ringBuffer.append(try audioBuffer(samples: [0.4]), hostTime: 3_000)
+  #expect(ringBuffer.firstHostTime == 3_000)
+  ringBuffer.clear()
+  #expect(ringBuffer.firstHostTime == nil)
+}

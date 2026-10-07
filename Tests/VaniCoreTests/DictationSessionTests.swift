@@ -17,6 +17,11 @@ private actor MockAudioCapture: AudioCapturing {
   private(set) var cancelCount = 0
   private(set) var continueCount = 0
   var continuesAfterRouteChange = false
+  var firstAudioUptime: UInt64?
+
+  func setFirstAudioUptime(_ value: UInt64?) { firstAudioUptime = value }
+
+  func firstAudioUptimeNanoseconds() async -> UInt64? { firstAudioUptime }
 
   func setContinuesAfterRouteChange(_ value: Bool) { continuesAfterRouteChange = value }
 
@@ -639,6 +644,33 @@ func routeChangeDoesNotDiscardAudioWaitingForFinalizationRetry() async throws {
 }
 
 @Test @MainActor
+func dictationRecordsHowLongTheMicrophoneTookToDeliverAudio() async throws {
+  let audio = MockAudioCapture()
+  let diagnostics = DiagnosticStore()
+  let session = DictationSession(
+    audioCapture: audio,
+    speechRecognizer: MockSpeechRecognizer(results: [
+      .success(speechResult("one")), .success(speechResult("two")),
+    ]),
+    textInserter: MockTextInserter(results: [.success(.verified), .success(.verified)]),
+    focusProvider: MockFocusProvider(),
+    diagnostics: diagnostics
+  )
+  #expect(await session.prepareModels(allowDownload: false))
+
+  await audio.setFirstAudioUptime(5_142_000_000)
+  #expect(await session.beginDictation(requestedAt: 5_000_000_000))
+  await session.endDictation()
+  // Without a press time (menu, tests) nothing is measured.
+  await session.beginDictation()
+  await session.endDictation()
+
+  let latencies = await diagnostics.snapshot().filter { $0.code == "capture_start_latency" }
+  #expect(latencies.map(\.durationMilliseconds) == [142])
+  #expect(latencies.first?.category == .capture)
+}
+
+@Test @MainActor
 func secureTextFieldIsRejectedBeforeAudioCaptureStarts() async {
   let audio = MockAudioCapture()
   let speech = MockSpeechRecognizer(results: [.success(speechResult("secret"))])
@@ -658,7 +690,7 @@ func secureTextFieldIsRejectedBeforeAudioCaptureStarts() async {
   )
 
   #expect(await session.prepareModels(allowDownload: false))
-  await session.beginDictation()
+  #expect(await !session.beginDictation())
 
   let snapshot = await session.snapshot()
   #expect(snapshot.phase == .recoverableError)
@@ -897,7 +929,7 @@ func terminationDuringCaptureStartupCannotPublishALateFailure() async {
   #expect(await audio.waitUntilStart())
 
   await session.terminate()
-  await start.value
+  #expect(await !start.value)
 
   let snapshot = await session.snapshot()
   #expect(snapshot.phase == .disabled)
@@ -1304,9 +1336,10 @@ func concurrentStartRequestsOnlyStartOneCapture() async throws {
   )
 
   #expect(await session.prepareModels(allowDownload: false))
-  async let first: Void = session.beginDictation()
-  async let second: Void = session.beginDictation()
-  _ = await (first, second)
+  async let first = session.beginDictation()
+  async let second = session.beginDictation()
+  let started = await [first, second]
+  #expect(started.filter { $0 }.count == 1)
 
   #expect(await session.snapshot().phase == .listening)
   #expect(await audio.startCount == 1)
@@ -1325,10 +1358,11 @@ func releaseDuringCaptureStartupStopsAfterTheMicrophoneStarts() async throws {
   )
 
   #expect(await session.prepareModels(allowDownload: false))
-  async let start: Void = session.beginDictation()
+  async let start = session.beginDictation()
   #expect(await audio.waitUntilStart())
   await session.endDictation()
-  await start
+  // The recording started before the queued release ended it.
+  #expect(await start)
 
   #expect(await session.snapshot().phase == .ready)
   #expect(await audio.startCount == 1)
@@ -1609,7 +1643,7 @@ func cancellingDuringCaptureStartupStopsTheMicrophoneBeforeListening() async thr
   let start = Task { await session.beginDictation() }
   #expect(await audio.waitUntilStart())
   await session.cancelDictation()
-  await start.value
+  #expect(await !start.value)
 
   #expect(await session.snapshot().phase == .ready)
   #expect(await audio.cancelCount == 1)

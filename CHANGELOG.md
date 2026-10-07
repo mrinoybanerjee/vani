@@ -2,6 +2,24 @@
 
 All notable changes follow semantic versioning.
 
+## 0.8.1 - 2026-09-27
+
+### Changed
+
+- Dictation starts sooner. The microphone no longer waits for the start chime, which cost
+  at least the first 85 ms of every recording.
+- The recording pill appears the moment you press the shortcut. Its icon is now the Vani
+  mark: dimmed until the microphone is live, then moving with your voice, and rippling
+  while Vani transcribes.
+- The menu bar keeps the Vani mark instead of switching to other symbols. While recording
+  or transcribing, the mark is cut out of a small tile that echoes the app icon and moves the
+  same way; a dot marks a state that needs attention.
+
+### Added
+
+- Diagnostics record `capture_start_latency`, the time from the shortcut press to the
+  first audio with sound in it, so start-up delay can be measured on real hardware.
+
 ## 0.8.0 - 2026-09-23
 
 ### Added

@@ -25,6 +25,8 @@ public actor AVAudioEngineCapture: AudioCapturing {
   private var recordingDevice: AudioDeviceID?
   private var capacityTask: Task<Void, Never>?
   private var pendingSegments: [AudioSampleRingBuffer.Snapshot]?
+  /// Host time of the take's first buffer with sound, kept when its segment closes.
+  private var takeFirstHostTime: UInt64?
 
   // Reserve a small first page so key-down does not allocate and zero-fill minutes of
   // audio; background reservations then stay at least 45 seconds ahead of capture.
@@ -55,6 +57,7 @@ public actor AVAudioEngineCapture: AudioCapturing {
     completedSegments = []
     pendingSegments = nil
     recordingDevice = nil
+    takeFirstHostTime = nil
     try startSegment(maximumDuration: maximumDuration, device: Self.defaultInputDeviceID())
     recordingDevice = engine.inputNode.auAudioUnit.deviceID
     isCapturing = true
@@ -203,6 +206,11 @@ public actor AVAudioEngineCapture: AudioCapturing {
     try finalizePendingAudio()
   }
 
+  public func firstAudioUptimeNanoseconds() async -> UInt64? {
+    guard let hostTime = takeFirstHostTime ?? ringBuffer.firstHostTime else { return nil }
+    return UInt64(AVAudioTime.seconds(forHostTime: hostTime) * 1_000_000_000)
+  }
+
   /// The system default input device, or nil if none is available.
   static func defaultInputDeviceID() -> AudioDeviceID? {
     var device = AudioDeviceID(kAudioObjectUnknown)
@@ -281,8 +289,9 @@ public actor AVAudioEngineCapture: AudioCapturing {
     )
 
     input.installTap(onBus: 0, bufferSize: 1_024, format: format) {
-      [ringBuffer] buffer, _ in
-      ringBuffer.append(buffer)
+      [ringBuffer] buffer, time in
+      ringBuffer.append(
+        buffer, hostTime: time.isHostTimeValid ? time.hostTime : mach_absolute_time())
     }
 
     do {
@@ -307,6 +316,7 @@ public actor AVAudioEngineCapture: AudioCapturing {
     engine.inputNode.removeTap(onBus: 0)
     engine.stop()
     engineRunning = false
+    if takeFirstHostTime == nil { takeFirstHostTime = ringBuffer.firstHostTime }
     let segment = ringBuffer.drain()
     if !segment.samples.isEmpty || segment.overflowed {
       completedSegments.append(segment)
