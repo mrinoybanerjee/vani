@@ -17,6 +17,19 @@ Local builds use ad-hoc signing unless you set up a local development identity.
 
 [Try Vani](#run-locally) · [Features](#what-works) · [Engineering](#engineering) · [Privacy](PRIVACY.md)
 
+## Engineering focus
+
+This project brings local speech inference into a native Mac workflow: bounded audio
+capture, deterministic cleanup, verified text insertion, and recovery when delivery fails.
+It integrates the pinned FluidAudio package and third-party Parakeet models; see
+[provenance](docs/PROVENANCE.md) for those boundaries.
+
+The committed September 23 benchmark measured **1.91% word error rate** on 400
+LibriSpeech test-clean utterances and **3.96%** on 400 test-other utterances with
+Parakeet Unified on an Apple M4. These audiobook results do not establish conversational
+accuracy or release-to-insertion latency. The separate 500-cycle reliability test uses
+mock capture, recognition and insertion. See [methods and limits](docs/BENCHMARKS.md).
+
 ## Run Locally
 
 Requirements: Apple Silicon, macOS 14+, Swift 6, 3 GB of free disk space, and about
