@@ -156,3 +156,27 @@ func oversizedHistoryIsQuarantinedBeforeItIsRead() async throws {
   #expect(!files.contains("history.json"))
   #expect(files.filter { $0.hasPrefix("history.corrupt-") }.count == 1)
 }
+
+@Test
+func symlinkedHistoryDirectoryCannotReadWriteOrClearAnotherLocation() async throws {
+  let root = FileManager.default.temporaryDirectory
+    .appendingPathComponent(UUID().uuidString, isDirectory: true)
+  defer { try? FileManager.default.removeItem(at: root) }
+  let target = root.appendingPathComponent("unrelated", isDirectory: true)
+  try FileManager.default.createDirectory(at: target, withIntermediateDirectories: true)
+  let history = target.appendingPathComponent("history.json")
+  let data = Data("[]".utf8)
+  try data.write(to: history)
+  let link = root.appendingPathComponent("linked", isDirectory: true)
+  try FileManager.default.createSymbolicLink(at: link, withDestinationURL: target)
+  let store = TranscriptHistoryStore(directory: link)
+
+  await #expect(throws: (any Error).self) { try await store.load() }
+  await #expect(throws: (any Error).self) {
+    try await store.append(TranscriptHistoryEntry(text: "Keep local"), limit: 10)
+  }
+  await #expect(throws: (any Error).self) { try await store.clear() }
+  await #expect(throws: (any Error).self) { try await store.hasStoredData() }
+  #expect(try Data(contentsOf: history) == data)
+  #expect(try FileManager.default.contentsOfDirectory(atPath: target.path) == ["history.json"])
+}

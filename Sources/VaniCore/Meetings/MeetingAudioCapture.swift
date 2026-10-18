@@ -242,8 +242,8 @@ public final class MeetingAudioCapture: MeetingAudioRecording {
 }
 
 @available(macOS 15.0, *)
-final class MeetingStreamOutput: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked
-  Sendable
+final class MeetingStreamOutput: NSObject, SCStreamOutput, SCStreamDelegate,
+  @unchecked Sendable
 {
   private var pending: [MeetingAudioSource: MeetingChunkBuffer] = [:]
   /// Each stream's place on the meeting timeline. A newer stream takes over at its first

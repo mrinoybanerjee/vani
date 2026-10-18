@@ -1,7 +1,7 @@
 import Foundation
 
 private enum TranscriptHistoryStoreError: Error {
-  case fileTooLarge
+  case fileTooLarge, unsafeLocation
 }
 
 public struct TranscriptHistoryEntry: Identifiable, Codable, Sendable, Equatable {
@@ -48,6 +48,8 @@ public actor TranscriptHistoryStore {
   }
 
   public func load() throws -> [TranscriptHistoryEntry] {
+    let directory = fileURL.deletingLastPathComponent()
+    if fileManager.fileExists(atPath: directory.path) { try validateDirectory(directory) }
     guard fileManager.fileExists(atPath: fileURL.path) else { return [] }
     do {
       let values = try fileURL.resourceValues(forKeys: [
@@ -95,6 +97,7 @@ public actor TranscriptHistoryStore {
   private func write(_ entries: [TranscriptHistoryEntry]) throws {
     let directory = fileURL.deletingLastPathComponent()
     try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+    try validateDirectory(directory)
     try fileManager.setAttributes([.posixPermissions: 0o700], ofItemAtPath: directory.path)
     let data = try encoder.encode(entries)
     guard data.count <= Self.maximumHistoryFileBytes else {
@@ -117,6 +120,7 @@ public actor TranscriptHistoryStore {
   private func storedDataURLs() throws -> [URL] {
     let directory = fileURL.deletingLastPathComponent()
     guard fileManager.fileExists(atPath: directory.path) else { return [] }
+    try validateDirectory(directory)
     return try fileManager.contentsOfDirectory(
       at: directory,
       includingPropertiesForKeys: [.isRegularFileKey, .isSymbolicLinkKey]
@@ -133,6 +137,13 @@ public actor TranscriptHistoryStore {
         return false
       }
       return values.isRegularFile == true || values.isSymbolicLink == true
+    }
+  }
+
+  private func validateDirectory(_ directory: URL) throws {
+    let values = try directory.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
+    guard values.isDirectory == true, values.isSymbolicLink != true else {
+      throw TranscriptHistoryStoreError.unsafeLocation
     }
   }
 }
