@@ -1,52 +1,21 @@
 <p align="center">
-  <img src="Resources/AppIcon.png" width="128" alt="Vani app icon">
+  <img src="Resources/AppIcon.png" width="96" alt="Vani app icon">
 </p>
 
 # Vani
 
-A private, local, and free Wispr Flow alternative for Apple Silicon Macs.
+Local dictation for Apple Silicon Macs. Hold Fn / Globe, speak English, and release
+to insert the transcript into the app you were using. No account, telemetry, or cloud
+transcription. Dictation uses deterministic cleanup; optional meeting summaries use
+a separate local model.
 
-Hold a shortcut, speak English, and release. Vani transcribes on your Mac and
-inserts the result into the app you were using. There is no account, telemetry,
-or cloud transcription. Dictation uses deterministic cleanup; optional meeting
-summaries use a separate local model.
+**Source beta · macOS 14+ · Apple Silicon · English only**
 
-## Status
+Build Vani on your own Mac. A prebuilt, Gatekeeper-trusted app download is not currently
+available; public app distribution requires Developer ID signing and Apple notarization.
+Local builds use ad-hoc signing unless you set up a local development identity.
 
-Vani is a functional source beta for macOS 14 or newer on Apple Silicon. The core
-workflow, recovery paths, native UI, deterministic audio fixture, and 500-cycle
-reliability harness are implemented. Free source releases can be built locally;
-prebuilt Gatekeeper-trusted downloads still require paid Developer ID signing and
-Apple notarization.
-
-## What Works
-
-- Hold Fn / Globe to dictate by default; Left Control, Right Option, and Right Command are available
-- Double-tap the shortcut for hands-free recording; press it again to insert
-- Escape (or the menu's Cancel) discards a recording without inserting anything
-- Short local sound cues confirm when recording actually starts and stops
-- One-time English NVIDIA Parakeet Unified model download (583 MiB)
-- Exact model-revision manifest with per-file SHA-256 verification
-- Local microphone capture and Core ML transcription
-- Dictations up to 20 minutes, with a one-minute warning and automatic transcription
-  at the limit
-- Process-bound paste delivery with app-scoped Accessibility verification
-- Native Accessibility refusal for password and secure text fields
-- Clipboard-preserving recovery when focus, insertion, or the clipboard changes
-- Memory-only Last Transcript controls with Control-Command-V paste and
-  Control-Command-C copy shortcuts (Option-Command, Control-Option or off in Settings)
-- Consecutive dictations are separated by a space automatically
-- Voice-triggered snippets with multiline expansions
-- Opt-in local Smart Formatting for spoken punctuation, line breaks, sentence casing,
-  spoken lists, and deletion-only cleanup of fillers, false starts, and stumbles
-- Optional bounded history, disabled by default
-- Local Notes with editing, search, plain-text export, and recoverable deletion
-- Explicit meeting capture, live transcript, personal notes and local summaries (macOS 15+)
-- Personal phrase dictionary and launch-at-login setting
-- Opt-in local learning from corrections, with transparent delete and reset controls
-- Optional experimental acoustic vocabulary boosting for repeatedly corrected terms
-- Metadata-only diagnostics with no transcript or audio content
-- Public-repository Swift CodeQL analysis and weekly dependency updates
+[Try Vani](#run-locally) · [Features](#what-works) · [Engineering](#engineering) · [Privacy](PRIVACY.md)
 
 ## Run Locally
 
@@ -61,6 +30,9 @@ xcode-select --install
 
 Vani supports input devices configured at up to 48 kHz. If a professional audio
 interface uses a higher rate, select 48 kHz in Audio MIDI Setup before recording.
+
+If you plan to rebuild or update regularly, follow [Stable local signing](docs/BUILDING.md#stable-local-signing)
+first. It is free and helps keep macOS permissions stable across builds.
 
 Then clone, check the Mac, and install:
 
@@ -80,6 +52,8 @@ The first source build can take several minutes. After Vani opens in the menu ba
 4. Hold Fn / Globe, speak, then release to insert text. Double-tap it to keep recording
    hands-free, and press Escape to discard a recording. Choose Left Control, Right Option,
    or Right Command in Settings if you prefer, and turn sound feedback off there if needed.
+
+### Formatting and corrections
 
 Snippets and Smart Formatting are available in Settings. Smart Formatting is off by
 default; enabling it recognizes `comma`, `period` or `full stop`, `question mark`,
@@ -103,6 +77,8 @@ without discarding an unfinished edit. Vani stores only the changed phrases on t
 Mac, never correction audio.
 After a term is confirmed twice, the optional experimental 98 MiB vocabulary model can use acoustic
 evidence for harder names and terminology. The model is not required for dictation.
+
+### Notes and workspace
 
 Meetings, Notes and Settings share one window with a sidebar. Open any section from
 the menu bar, or use Command-comma for Settings. Switching sections preserves drafts
@@ -144,6 +120,57 @@ A failed transcript can be retried through **Meeting actions → Recover transcr
 Meetings last up to four hours; Vani warns when about 10 minutes of recording time or disk
 space remain and stops cleanly, keeping everything, if the disk is nearly full. Transcript labels "Me" (microphone) and "Others" (Mac audio)
 identify sources, not individual speakers. Microphone echo of Mac audio is hidden by default. Review AI output before relying on it. See [meeting design and limits](docs/MEETINGS_DESIGN.md).
+
+## Privacy and limits
+
+Dictation works offline after setup. Its audio is not persisted; optional history and
+learned corrections are off by default. Saved notes and meeting recordings are different:
+they persist locally and are not encrypted by Vani. Meeting audio has no automatic purge.
+
+Meeting capture includes the microphone and other Mac audio, including other apps and
+notifications. Closing the window does not stop recording. Let participants know before
+recording, and review transcripts and generated summaries before relying on them.
+
+Accessibility access permits text insertion into other apps. Native secure fields are
+refused, but the target app and other software running as your macOS user remain trust
+boundaries. See the [privacy contract](PRIVACY.md) and [security model](docs/SECURITY_MODEL.md).
+
+## What Works
+
+- Hold Fn / Globe to dictate by default; Left Control, Right Option, and Right Command are available
+- Double-tap the shortcut for hands-free recording; press it again to insert
+- Escape (or the menu's Cancel) discards a recording without inserting anything
+- Short local sound cues confirm when recording actually starts and stops
+- One-time English NVIDIA Parakeet Unified model download (583 MiB)
+- Exact model-revision manifest with per-file SHA-256 verification
+- Local microphone capture and Core ML transcription
+- Dictations up to 20 minutes, with a one-minute warning and automatic transcription
+  at the limit
+- Process-bound paste delivery with app-scoped Accessibility verification
+- Native Accessibility refusal for password and secure text fields
+- Clipboard-preserving recovery when focus, insertion, or the clipboard changes
+- Memory-only Last Transcript controls with Control-Command-V paste and
+  Control-Command-C copy shortcuts (Option-Command, Control-Option or off in Settings)
+- Consecutive dictations are separated by a space automatically
+- Voice-triggered snippets with multiline expansions
+- Opt-in local Smart Formatting for spoken punctuation, line breaks, sentence casing,
+  spoken lists, and deletion-only cleanup of fillers, false starts, and stumbles
+- Optional bounded history, disabled by default
+- Local Notes with editing, search, plain-text export, and recoverable deletion
+- Explicit meeting capture, live transcript, personal notes and local summaries (macOS 15+)
+- Personal phrase dictionary and launch-at-login setting
+- Opt-in local learning from corrections, with transparent delete and reset controls
+- Optional experimental acoustic vocabulary boosting for repeatedly corrected terms
+- Metadata-only diagnostics with no transcript or audio content
+- Public-repository Swift CodeQL analysis and weekly dependency updates
+
+## Status
+
+Vani is a functional source beta for macOS 14 or newer on Apple Silicon. The core
+workflow, recovery paths, native UI, deterministic audio fixture, and 500-cycle
+reliability harness are implemented. Free source releases can be built locally;
+prebuilt Gatekeeper-trusted downloads still require paid Developer ID signing and
+Apple notarization.
 
 ## Updating Vani
 
@@ -209,6 +236,13 @@ Project references: [engineering instructions](AGENTS.md), [agent guide](CLAUDE.
 [original v1 plan](docs/PLAN.md), [roadmap](TODOS.md), [changelog](CHANGELOG.md),
 [release workflow](docs/RELEASING.md), [security policy](SECURITY.md), and
 [code of conduct](CODE_OF_CONDUCT.md).
+
+## Provenance
+
+Vani is an independent implementation. Wispr Flow, LocalFlow, Granola and other voice
+products informed the workflows and public technical tradeoffs; their source code was
+not copied. See [project provenance](docs/PROVENANCE.md) for the implementation and
+third-party boundaries.
 
 ## License
 
