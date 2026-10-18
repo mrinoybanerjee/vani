@@ -41,6 +41,18 @@ VANI_RUN_LONG_AUDIO_TESTS=1 swift test -c release \
   --filter twentyMinutePagedCaptureDrainsAndResamples
 ```
 
+## Local rerun — October 18, 2026
+
+The model-free `./scripts/benchmark.sh` was attempted on macOS 26.6.2 (25G83),
+arm64, with Apple Swift 6.2.3 (`swiftlang-6.2.3.3.21`). The release build failed
+because the installed command-line toolchain could not import `Testing` in
+`VaniCoreTests/AudioPolicyTests.swift`. The harness did not run and produced no
+new result. Existing historical measurements below remain unchanged.
+
+Use a Swift toolchain that includes Swift Testing to reproduce this harness.
+It exercises mock capture, recognition and insertion; a passing run establishes
+state-machine reliability, not device capture, speech accuracy or interactive latency.
+
 ## Speech accuracy
 
 Measured on 2026-09-23 on an Apple M4 (macOS 26.6.2) with the harness in
